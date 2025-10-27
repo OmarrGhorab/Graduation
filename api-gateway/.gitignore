@@ -1,0 +1,70 @@
+# ========================================
+# Node & TypeScript
+# ========================================
+node_modules/
+dist/
+build/
+coverage/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ========================================
+# TypeScript build artifacts
+# ========================================
+*.tsbuildinfo
+
+# ========================================
+# Environment variables
+# ========================================
+.env
+.env.*.local
+.env.local
+.env.test
+.env.development
+.env.production
+
+# ========================================
+# IDE / Editor junk
+# ========================================
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# ========================================
+# OS / System files
+# ========================================
+ehthumbs.db
+Icon?
+desktop.ini
+
+# ========================================
+# Temporary files
+# ========================================
+tmp/
+temp/
+*.tmp
+*.bak
+*.orig
+
+# ========================================
+# Logs & cache
+# ========================================
+logs/
+.cache/
+.nyc_output/
+.husky/_/
+eslintcache
+
+# ========================================
+# Docker & runtime
+# ========================================
+docker-data/
+.docker/
+*.pid
+*.seed
