@@ -5,8 +5,203 @@ datasource db {
 }
 
 model User {
-  id        String   @id @default(cuid())
-  email     String   @unique
-  password  String
-  createdAt DateTime @default(now())
+  id                  String           @id @default(uuid())
+  name                String
+  username            String           @unique
+  email               String           @unique
+  password            String?
+  dateOfBirth         DateTime?
+  gender              Gender?
+  role                UserRole         @default(STUDENT)
+  profileImg          String?
+  country             String?
+  onboardingCompleted Boolean          @default(false)
+  verified            Boolean          @default(false)
+  lastLoginAt         DateTime?
+  createdAt           DateTime         @default(now())
+  updatedAt           DateTime         @updatedAt
+
+  providers           AuthProvider[]
+  verifications       Verification[]
+  passwordResets      PasswordReset[]
+  interests           UserInterest[]
+  enrollments         CourseEnrollment[]
+  devices             UserDevice[]
+  sessions            Session[]
+
+  @@index([username])
+  @@index([role])
+  @@index([email])
+}
+
+model UserDevice {
+  id                String     @id @default(uuid())
+  user              User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId            String
+  deviceFingerprint String
+  deviceName        String?
+  ipAddress         String?
+  userAgent         String?
+  platform          Platform?
+  isTrusted         Boolean    @default(false)
+  pushToken         String?    // for notifications
+  location          String?    // city or country (geo from IP)
+  lastLoginAt       DateTime?  
+  createdAt         DateTime   @default(now())
+  updatedAt         DateTime   @updatedAt
+
+  sessions          Session[]
+
+  @@unique([userId, deviceFingerprint])
+  @@index([userId])
+}
+
+enum Platform {
+  WEB
+  ANDROID
+  IOS
+  DESKTOP
+}
+
+
+
+model AuthProvider {
+  id            String      @id @default(uuid())
+  provider      Provider
+  providerId    String
+  accessToken   String?
+  refreshToken  String?
+  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId        String
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  @@unique([provider, providerId])
+  @@index([userId])
+}
+
+model Verification {
+  id          String      @id @default(uuid())
+  type        VerificationType
+  code        String
+  expiresAt   DateTime
+  verifiedAt  DateTime?
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId      String
+  createdAt   DateTime    @default(now())
+
+  @@unique([userId, type, code])
+  @@index([userId, type])
+}
+
+model PasswordReset {
+  id          String      @id @default(uuid())
+  token       String      @unique
+  expiresAt   DateTime
+  used        Boolean     @default(false)
+  usedAt      DateTime?
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId      String
+  createdAt   DateTime    @default(now())
+
+  @@index([userId])
+  @@index([token])
+}
+
+model Interest {
+  id        String          @id @default(uuid())
+  name      String          @unique
+  users     UserInterest[]
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
+}
+
+model UserInterest {
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId      String
+  interest    Interest    @relation(fields: [interestId], references: [id], onDelete: Cascade)
+  interestId  String
+  createdAt   DateTime    @default(now())
+
+  @@id([userId, interestId])
+  @@index([userId])
+  @@index([interestId])
+}
+
+model CourseEnrollment {
+  id         String      @id @default(uuid())
+  user       User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId     String
+  courseId   String
+  enrolledAt DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
+
+  @@unique([userId, courseId])
+  @@index([userId])
+  @@index([courseId])
+}
+
+model Session {
+  id                String      @id @default(uuid())
+  user              User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId            String
+  device            UserDevice? @relation(fields: [deviceId], references: [id], onDelete: SetNull)
+  deviceId          String?
+  
+  // Token identifiers
+  sessionToken      String      @unique      // Main session identifier (can be JWT or opaque token)
+  refreshToken      String?     @unique      // Optional refresh token for JWT rotation
+  
+  // Session metadata
+  ipAddress         String?                   // Current IP from latest request
+  userAgent         String?                   // Current user agent from latest request
+  location          String?                   // Geographic location (city/country)
+  
+  // Session state
+  isActive          Boolean     @default(true)
+  isRevoked         Boolean     @default(false)
+  
+  // Expiration times
+  expiresAt         DateTime                  // When this session expires
+  refreshExpiresAt  DateTime?                 // When refresh token expires (if using refresh tokens)
+  
+  // Activity tracking
+  lastActivityAt    DateTime    @default(now())  // Last time session was used
+  createdAt         DateTime    @default(now())
+  revokedAt         DateTime?                  // When session was revoked
+  
+  @@index([userId])
+  @@index([deviceId])
+  @@index([sessionToken])
+  @@index([refreshToken])
+  @@index([isActive, expiresAt])  // For finding active, non-expired sessions
+  @@index([userId, isActive])     // For finding user's active sessions
+}
+
+enum UserRole {
+  STUDENT
+  TEACHER
+  PARENT
+  INSTRUCTOR
+  ASSISTANT
+  HR
+  RECRUITER
+}
+
+enum Gender {
+  MALE
+  FEMALE
+  OTHER
+  PREFER_NOT_TO_SAY
+}
+
+enum Provider {
+  EMAIL
+  GOOGLE
+  APPLE
+}
+
+enum VerificationType {
+  EMAIL
+  TWO_FACTOR
 }
