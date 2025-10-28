@@ -20,8 +20,8 @@ const createApp = (): express.Application => {
  * Setup routes
  */
 const setupRoutes = (app: express.Application, arcjetKey: string): void => {
-  // Root endpoint with Arcjet protection and proxy to auth service
-  app.get("/", createRootHandler(arcjetKey));
+  // Proxy all routes to auth service with Arcjet protection if configured
+  app.use("/", createRootHandler(arcjetKey));
   
   // Error handling middleware (must be last)
   app.use(globalErrorHandler);

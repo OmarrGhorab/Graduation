@@ -80,5 +80,7 @@ export const handleArcjetDecision = (decision: ArcjetDecision, res: Response): v
  * Check if Arcjet protection should be applied
  */
 export const shouldApplyArcjetProtection = (key: string): boolean => {
-  return Boolean(key);
+  if (!key) return false;
+  const environment = process.env.NODE_ENV || "development";
+  return environment === "production";
 };

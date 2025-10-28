@@ -28,8 +28,8 @@ export const PROXY_CONFIG: ProxyConfig = {
 
 // Arcjet configuration constants
 export const ARCJET_CONFIG: ArcjetConfig = {
-  shieldMode: "LIVE",
-  botDetectionMode: "LIVE",
+  shieldMode: process.env.NODE_ENV === "production" ? "LIVE" : "DRY_RUN",
+  botDetectionMode: process.env.NODE_ENV === "production" ? "LIVE" : "DRY_RUN",
   allowedBotCategories: [
     "CATEGORY:SEARCH_ENGINE", // Google, Bing, etc
     "CATEGORY:MONITOR", // Uptime monitoring services

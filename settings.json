@@ -1,0 +1,39 @@
+{
+    // Auto-save setup
+    "files.autoSave": "afterDelay",
+    "files.autoSaveDelay": 1000,
+  
+    //  Format on save
+    "editor.formatOnSave": true,
+  
+    //  Organize imports (sort + remove unused imports)
+    "editor.codeActionsOnSave": {
+      "source.organizeImports": true,
+      "source.fixAll": true
+    },
+  
+    //  Auto-indent detection
+    "editor.detectIndentation": true,
+  
+    // Highlight current line & bracket pairs
+    "editor.renderLineHighlight": "all",
+    "editor.matchBrackets": "always",
+  
+    //  Lint automatically with ESLint/TS
+    "eslint.alwaysShowStatus": true,
+    "eslint.validate": ["javascript", "typescript", "typescriptreact"],
+    "eslint.format.enable": true,
+  
+    // Speed & usability tweaks
+    "editor.tabSize": 2,
+    "editor.cursorBlinking": "phase",
+    "editor.minimap.enabled": false,
+    "editor.smoothScrolling": true,
+    "editor.wordWrap": "on",
+  
+    //  Cursor AI behavior
+    "cursor.experimental.autocomplete": "inline",
+    "cursor.inlineCompletion.triggerMode": "automatic",
+    "cursor.autocomplete.showDocs": true
+  }
+  

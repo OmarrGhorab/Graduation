@@ -68,3 +68,5 @@ docker-data/
 .docker/
 *.pid
 *.seed
+
+/src/generated/prisma
