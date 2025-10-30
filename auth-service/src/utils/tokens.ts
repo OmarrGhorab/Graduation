@@ -1,0 +1,67 @@
+import jwt, { type Secret, type SignOptions } from "jsonwebtoken";
+import crypto from "crypto";
+import redis from "../libs/redis";
+
+type JwtPayload = {
+  sub: string; // userId
+  jti: string; // token id
+  role?: string;
+  type: "access" | "refresh";
+};
+
+const ACCESS_TOKEN_TTL_SEC = parseInt(process.env.ACCESS_TOKEN_TTL_SEC || "900", 10); // 15 minutes
+const REFRESH_TOKEN_TTL_SEC = parseInt(process.env.REFRESH_TOKEN_TTL_SEC || "2592000", 10); // 30 days
+
+const ACCESS_TOKEN_SECRET: Secret = process.env.ACCESS_TOKEN_SECRET || "dev-access-secret";
+const REFRESH_TOKEN_SECRET: Secret = process.env.REFRESH_TOKEN_SECRET || "dev-refresh-secret";
+
+export function generateJti(): string {
+  return crypto.randomUUID();
+}
+
+export function signAccessToken(user: { id: string; role?: string }): string {
+  const payload: JwtPayload = {
+    sub: user.id,
+    jti: generateJti(),
+    role: user.role,
+    type: "access",
+  };
+  const opts: SignOptions = { expiresIn: ACCESS_TOKEN_TTL_SEC, algorithm: "HS256" };
+  return jwt.sign(payload, ACCESS_TOKEN_SECRET, opts);
+}
+
+export async function signAndStoreRefreshToken(userId: string): Promise<{ token: string; jti: string }> {
+  const jti = generateJti();
+  const payload: JwtPayload = { sub: userId, jti, type: "refresh" };
+  const opts: SignOptions = { expiresIn: REFRESH_TOKEN_TTL_SEC, algorithm: "HS256" };
+  const token = jwt.sign(payload, REFRESH_TOKEN_SECRET, opts);
+
+  // Store mapping jti -> userId with TTL
+  const key = `rt:${jti}`;
+  await redis.set(key, userId, "EX", REFRESH_TOKEN_TTL_SEC);
+  return { token, jti };
+}
+
+export async function verifyAccessToken(token: string): Promise<JwtPayload> {
+  const decoded = jwt.verify(token, ACCESS_TOKEN_SECRET) as JwtPayload;
+  return decoded;
+}
+
+export async function verifyRefreshToken(token: string): Promise<JwtPayload> {
+  const decoded = jwt.verify(token, REFRESH_TOKEN_SECRET) as JwtPayload;
+  if (decoded.type !== "refresh") throw new Error("Invalid token type");
+  const exists = await redis.get(`rt:${decoded.jti}`);
+  if (!exists) throw new Error("Refresh token revoked or expired");
+  return decoded;
+}
+
+export async function revokeRefreshTokenByJti(jti: string): Promise<void> {
+  await redis.del(`rt:${jti}`);
+}
+
+export async function rotateRefreshToken(oldJti: string, userId: string): Promise<{ token: string; jti: string }>{
+  await revokeRefreshTokenByJti(oldJti);
+  return signAndStoreRefreshToken(userId);
+}
+
+

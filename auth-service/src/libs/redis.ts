@@ -1,6 +1,6 @@
 import Redis from "ioredis"
 
-const client = new Redis("rediss://default:AVqcAAIncDI4ZTEzZTI3NGY2Yzk0MWNjYThjZDc5ZWM1MzRkYmIzZXAyMjMxOTY@national-mammal-23196.upstash.io:6379");
-await client.set('foo', 'bar');
+const REDIS_URL = process.env.REDIS_URL || "";
+const client = new Redis(REDIS_URL);
 
 export default client;
