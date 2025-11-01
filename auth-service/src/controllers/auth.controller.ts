@@ -5,12 +5,23 @@ import { BadRequestError, UnauthorizedError } from "../utils/errors";
 import { createAndStoreOtp, verifyOtp } from "../utils/otp";
 import { signAccessToken, signAndStoreRefreshToken, verifyRefreshToken, revokeRefreshTokenByJti } from "../utils/tokens";
 import { setAuthCookies, clearAuthCookies } from "../utils/cookies";
+import { aj } from "../libs/arcjet";
 
 
 export const registerUser = async (req: Request, res: Response, next: NextFunction) => {
     try {
         const { name, username, email, password: rawPassword } = req.body as { name?: string; username?: string; email?: string; password?: unknown };
         if (!name || !username || !email || rawPassword === undefined || rawPassword === null) throw new BadRequestError("Missing required fields");
+        const decision = await aj.protect(req, { email });
+        console.log("Arcjet decision:", decision);
+
+        if (decision.isDenied()) {
+            if (decision.reason.isEmail()) {
+            return res.status(400).json({ error: "Invalid email" });
+            } else {
+            return res.status(403).json({ error: "Forbidden" });
+            }
+        }
         const password = typeof rawPassword === "string" ? rawPassword : String(rawPassword);
         if (password.length < 8) throw new BadRequestError("Password must be at least 8 characters");
 
@@ -33,7 +44,7 @@ export const registerUser = async (req: Request, res: Response, next: NextFuncti
 
         res.status(201).json({
             user: { id: user.id, name: user.name, username: user.username, email: user.email, verified: user.verified },
-            message: "Registration successful. Verify your email with the OTP.",
+            message: "Registration successful. Please Verify your account with the OTP Via Email.",
             // expose OTP in non-production for testing
             otp: process.env.NODE_ENV === "production" ? undefined : otp,
         });
