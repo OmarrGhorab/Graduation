@@ -41,7 +41,7 @@ export const initializeArcjet = (key: string) => {
  * Handle Arcjet decision and send appropriate response
  */
 export const handleArcjetDecision = (decision: ArcjetDecision, res: Response): void => {
-  console.log("Arcjet decision", decision);
+  console.log("Arcjet decision api service", decision);
 
   if (decision.isDenied()) {
     if (decision.reason.isRateLimit()) {

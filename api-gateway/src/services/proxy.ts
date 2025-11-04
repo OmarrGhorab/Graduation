@@ -10,8 +10,10 @@ export const createAuthServiceProxy = () => {
   return proxy(PROXY_CONFIG.authServiceUrl, {
     timeout: PROXY_CONFIG.timeout,
     proxyReqPathResolver: (req: Request): string => {
-      console.log(`Proxying request to auth service: ${req.method} ${req.path}`);
-      return req.path;
+      // Include query string in the proxied path - use originalUrl to preserve query params
+      const path = req.originalUrl || req.url || req.path;
+      console.log(`Proxying request to auth service: ${req.method} ${path}`);
+      return path;
     },
     proxyErrorHandler: (err: Error, res: Response, next: NextFunction): void => {
       console.error("Proxy error:", err.message);

@@ -1,5 +1,5 @@
 import { Router, RequestHandler } from "express";
-import { forgotPassword, loginUser, logoutUser, registerUser, resetPassword, verifyEmailOtp } from "../controllers/auth.controller";
+import { forgotPassword, loginUser, logoutUser, registerUser, resetPassword, verifyEmailOtp, googleAuth, googleCallback } from "../controllers/auth.controller";
 
 const router = Router();
 
@@ -8,6 +8,9 @@ router.post("/register", registerUser);
 router.post("/login", loginUser);
 router.post("/logout", logoutUser);
 
+// Google OAuth
+router.get("/google", googleAuth);
+router.get("/google/callback", googleCallback);
 
 // Password recovery
 router.post("/forgot-password", forgotPassword);
