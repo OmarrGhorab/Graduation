@@ -1,4 +1,4 @@
-import { Router, RequestHandler } from "express";
+import { Router } from "express";
 import { forgotPassword, loginUser, logoutUser, registerUser, resetPassword, verifyEmailOtp, googleAuth, googleCallback } from "../controllers/auth.controller";
 
 const router = Router();

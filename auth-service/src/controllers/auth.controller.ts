@@ -1,7 +1,7 @@
 import { Request, Response, NextFunction } from "express";
 import bcrypt from "bcrypt";
 import prisma from "../libs/prisma";
-import { BadRequestError, UnauthorizedError } from "../utils/errors";
+import { BadRequestError, UnauthorizedError, TooManyRequestsError } from "../utils/errors";
 import { createAndStoreOtp, verifyOtp } from "../utils/otp";
 import { signAccessToken, signAndStoreRefreshToken, verifyRefreshToken, revokeRefreshTokenByJti } from "../utils/tokens";
 import { setAuthCookies, clearAuthCookies } from "../utils/cookies";
@@ -9,6 +9,18 @@ import { aj } from "../libs/arcjet";
 import { generateUsernameSuggestions, generateUniqueUsername } from "../utils/username";
 import { OAuth2Client } from "google-auth-library";
 import dotenv from "dotenv";
+import {
+  checkForgotPasswordAllowed,
+  setForgotPasswordCooldown,
+  checkResetPasswordAllowed,
+  setResetPasswordCooldown,
+  clearAllPasswordResetCooldowns,
+} from "../utils/passwordReset";
+import {
+  checkEmailVerificationAllowed,
+  setEmailVerificationCooldown,
+  clearEmailVerificationCooldown,
+} from "../utils/emailVerification";
 
 
 dotenv.config();
@@ -81,13 +93,44 @@ export const loginUser = async (req: Request, res: Response, next: NextFunction)
         const ok = await bcrypt.compare(password, user.password);
         if (!ok) throw new UnauthorizedError("Invalid credentials");
 
+        // Check if user account is verified
+        if (!user.verified) {
+            return res.status(403).json({
+                error: "Account not verified",
+                message: "Please verify your account before logging in. Check your email for the verification OTP.",
+                verified: false,
+                requiresVerification: true,
+            });
+        }
+
+        // Check if onboarding is completed
+        if (!user.onboardingCompleted) {
+            return res.status(403).json({
+                error: "Onboarding not completed",
+                message: "Please complete your onboarding profile before accessing the application.",
+                onboardingCompleted: false,
+                requiresOnboarding: true,
+            });
+        }
+
         await prisma.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } });
 
         const accessToken = signAccessToken({ id: user.id, role: user.role });
         const { token: refreshToken } = await signAndStoreRefreshToken(user.id);
         setAuthCookies(res, accessToken, refreshToken);
 
-        res.json({ user: { id: user.id, name: user.name, username: user.username, email: user.email, verified: user.verified } });
+        res.json({
+            user: {
+                id: user.id,
+                name: user.name,
+                username: user.username,
+                email: user.email,
+                verified: user.verified,
+                onboardingCompleted: user.onboardingCompleted,
+                role: user.role,
+                profileImg: user.profileImg,
+            },
+        });
     } catch (err) {
         next(err);
     }
@@ -116,11 +159,46 @@ export const forgotPassword = async (req: Request, res: Response, next: NextFunc
         const { email } = req.body as { email?: string };
         if (!email) throw new BadRequestError("Email is required");
 
+        // Check if request is allowed (checks cooldown and attempts)
+        const { allowed, remainingCooldown, attempts } = await checkForgotPasswordAllowed(email);
+        
+        if (!allowed) {
+            if (remainingCooldown > 0) {
+                const minutes = Math.ceil(remainingCooldown / 60);
+                throw new TooManyRequestsError(
+                    `Too many password reset requests. Please wait ${minutes} minute${minutes > 1 ? "s" : ""} before trying again.`,
+                    { cooldownRemaining: remainingCooldown, retryAfter: remainingCooldown, attempts }
+                );
+            } else {
+                // Attempts exceeded, set cooldown and return error
+                const cooldownDuration = await setForgotPasswordCooldown(email);
+                const minutes = Math.ceil(cooldownDuration / 60);
+                throw new TooManyRequestsError(
+                    `Too many password reset requests. Please wait ${minutes} minute${minutes > 1 ? "s" : ""} before trying again.`,
+                    { cooldownRemaining: cooldownDuration, retryAfter: cooldownDuration, attempts }
+                );
+            }
+        }
+
         const user = await prisma.user.findUnique({ where: { email } });
         if (!user) {
+            // Set cooldown even if user doesn't exist to prevent email enumeration
+            await setForgotPasswordCooldown(email);
             // do not reveal existence
             return res.json({ message: "If the email exists, an OTP has been sent." });
         }
+
+        // Set cooldown before sending OTP (tracks attempts)
+        const cooldownDuration = await setForgotPasswordCooldown(email);
+        // If cooldown was set (attempts exceeded), return error
+        if (cooldownDuration > 0) {
+            const minutes = Math.ceil(cooldownDuration / 60);
+            throw new TooManyRequestsError(
+                `Too many password reset requests. Please wait ${minutes} minute${minutes > 1 ? "s" : ""} before trying again.`,
+                { cooldownRemaining: cooldownDuration, retryAfter: cooldownDuration, attempts: attempts + 1 }
+            );
+        }
+
         const otp = await createAndStoreOtp(`reset:${email}`);
         // TODO: send OTP via email provider
         res.json({ message: "If the email exists, an OTP has been sent.", otp: process.env.NODE_ENV === "production" ? undefined : otp });
@@ -134,11 +212,43 @@ export const resetPassword = async (req: Request, res: Response, next: NextFunct
         const { email, otp, newPassword } = req.body as { email?: string; otp?: string; newPassword?: string };
         if (!email || !otp || !newPassword) throw new BadRequestError("Missing required fields");
 
-        const ok = await verifyOtp(`reset:${email}`, otp);
-        if (!ok) throw new UnauthorizedError("Invalid or expired OTP");
+        // Check if reset attempt is allowed (checks cooldown and attempts)
+        const { allowed, remainingCooldown, attempts } = await checkResetPasswordAllowed(email);
+        
+        if (!allowed) {
+            const minutes = Math.ceil(remainingCooldown / 60);
+            throw new TooManyRequestsError(
+                `Too many reset attempts. Please wait ${minutes} minute${minutes > 1 ? "s" : ""} before trying again.`,
+                { cooldownRemaining: remainingCooldown, retryAfter: remainingCooldown, attempts }
+            );
+        }
 
+        const ok = await verifyOtp(`reset:${email}`, otp);
+        if (!ok) {
+            // Set cooldown on failed attempt (tracks attempts, applies 30min cooldown after 3 failed attempts)
+            const cooldownDuration = await setResetPasswordCooldown(email, true);
+            
+            // If long cooldown was applied (30 min), return appropriate error
+            if (cooldownDuration >= 1800) {
+                const minutes = Math.ceil(cooldownDuration / 60);
+                throw new TooManyRequestsError(
+                    `Too many failed reset attempts. Please wait ${minutes} minute${minutes > 1 ? "s" : ""} before trying again.`,
+                    { cooldownRemaining: cooldownDuration, retryAfter: cooldownDuration, attempts: attempts + 1 }
+                );
+            }
+            
+            throw new UnauthorizedError("Invalid or expired OTP");
+        }
+
+        // Set short cooldown on success to prevent rapid successive resets
+        await setResetPasswordCooldown(email, false);
+        
         const hashed = await bcrypt.hash(newPassword, 10);
         await prisma.user.update({ where: { email }, data: { password: hashed } });
+        
+        // Clear all password reset cooldowns and attempts on successful reset
+        await clearAllPasswordResetCooldowns(email);
+        
         res.json({ message: "Password reset successful" });
     } catch (err) {
         next(err);
@@ -150,8 +260,46 @@ export const verifyEmailOtp = async (req: Request, res: Response, next: NextFunc
         const { email, otp } = req.body as { email?: string; otp?: string };
         if (!email || !otp) throw new BadRequestError("Email and OTP are required");
 
+        // Check if verification attempt is allowed (checks cooldown and attempts)
+        const { allowed, remainingCooldown, attempts } = await checkEmailVerificationAllowed(email);
+        
+        if (!allowed) {
+            if (remainingCooldown > 0) {
+                const minutes = Math.ceil(remainingCooldown / 60);
+                throw new TooManyRequestsError(
+                    `Too many verification attempts. Please wait ${minutes} minute${minutes > 1 ? "s" : ""} before trying again.`,
+                    { cooldownRemaining: remainingCooldown, retryAfter: remainingCooldown, attempts }
+                );
+            } else {
+                // Attempts exceeded, set cooldown and return error
+                const cooldownDuration = await setEmailVerificationCooldown(email);
+                const minutes = Math.ceil(cooldownDuration / 60);
+                throw new TooManyRequestsError(
+                    `Too many verification attempts. Please wait ${minutes} minute${minutes > 1 ? "s" : ""} before trying again.`,
+                    { cooldownRemaining: cooldownDuration, retryAfter: cooldownDuration, attempts }
+                );
+            }
+        }
+
         const ok = await verifyOtp(`email:${email}`, otp);
-        if (!ok) throw new UnauthorizedError("Invalid or expired OTP");
+        if (!ok) {
+            // Set cooldown on failed attempt (tracks attempts, applies progressive cooldown)
+            const cooldownDuration = await setEmailVerificationCooldown(email);
+            
+            // If cooldown was applied, return appropriate error
+            if (cooldownDuration > 0) {
+                const minutes = Math.ceil(cooldownDuration / 60);
+                throw new TooManyRequestsError(
+                    `Too many failed verification attempts. Please wait ${minutes} minute${minutes > 1 ? "s" : ""} before trying again.`,
+                    { cooldownRemaining: cooldownDuration, retryAfter: cooldownDuration, attempts: attempts + 1 }
+                );
+            }
+            
+            throw new UnauthorizedError("Invalid or expired OTP");
+        }
+
+        // Clear cooldown and attempts on successful verification
+        await clearEmailVerificationCooldown(email);
 
         const user = await prisma.user.update({ where: { email }, data: { verified: true } });
         res.json({ message: "Email verified", user: { id: user.id, email: user.email, verified: user.verified } });
@@ -328,6 +476,22 @@ export const googleCallback = async (req: Request, res: Response, next: NextFunc
                 where: { id: user.id },
                 data: { lastLoginAt: new Date(), verified: true },
             });
+        }
+
+        // Check if user account is verified (should always be true for Google users, but check for safety)
+        if (!user.verified) {
+            const frontendUrl = process.env.FRONTEND_URL || "http://localhost:3000";
+            return res.redirect(`${frontendUrl}/auth/google/callback?error=verification_required&message=Please verify your account`);
+        }
+
+        // Check if onboarding is completed
+        if (!user.onboardingCompleted) {
+            const frontendUrl = process.env.FRONTEND_URL || "http://localhost:3000";
+            // Issue tokens but redirect to onboarding
+            const accessToken = signAccessToken({ id: user.id, role: user.role });
+            const { token: refreshToken } = await signAndStoreRefreshToken(user.id);
+            setAuthCookies(res, accessToken, refreshToken);
+            return res.redirect(`${frontendUrl}/auth/google/callback?success=true&token=${accessToken}&requiresOnboarding=true`);
         }
 
         // Issue tokens
