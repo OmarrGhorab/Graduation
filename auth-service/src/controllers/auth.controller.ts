@@ -3,8 +3,8 @@ import bcrypt from "bcrypt";
 import prisma from "../libs/prisma";
 import { BadRequestError, UnauthorizedError, TooManyRequestsError } from "../utils/errors";
 import { createAndStoreOtp, verifyOtp } from "../utils/otp";
-import { signAccessToken, signAndStoreRefreshToken, verifyRefreshToken, revokeRefreshTokenByJti } from "../utils/tokens";
-import { setAuthCookies, clearAuthCookies } from "../utils/cookies";
+import { signAccessToken, signAndStoreRefreshToken, verifyRefreshToken, revokeRefreshTokenByJti, rotateRefreshToken } from "../utils/tokens";
+import { setAuthCookies, clearAuthCookies, getRefreshTokenFromRequest } from "../utils/cookies";
 import { aj } from "../libs/arcjet";
 import { generateUsernameSuggestions, generateUniqueUsername } from "../utils/username";
 import { OAuth2Client } from "google-auth-library";
@@ -20,6 +20,8 @@ import {
   checkEmailVerificationAllowed,
   setEmailVerificationCooldown,
   clearEmailVerificationCooldown,
+  checkResendOtpAllowed,
+  setResendOtpCooldown,
 } from "../utils/emailVerification";
 
 
@@ -83,17 +85,29 @@ export const registerUser = async (req: Request, res: Response, next: NextFuncti
 
 export const loginUser = async (req: Request, res: Response, next: NextFunction) => {
     try {
-        const { emailOrUsername, password: rawPassword } = req.body as { emailOrUsername?: string; password?: unknown };
-        if (!emailOrUsername || rawPassword === undefined || rawPassword === null) throw new BadRequestError("Missing credentials");
+        const { emailOrUsername, password: rawPassword } = req.body as {
+            emailOrUsername?: string;
+            password?: unknown;
+        };
+
+        if (!emailOrUsername || rawPassword === undefined || rawPassword === null) {
+            throw new BadRequestError("Missing credentials");
+        }
+
         const password = typeof rawPassword === "string" ? rawPassword : String(rawPassword);
 
-        const user = await prisma.user.findFirst({ where: { OR: [{ email: emailOrUsername }, { username: emailOrUsername }] } });
+        const user = await prisma.user.findFirst({
+            where: {
+                OR: [{ email: emailOrUsername }, { username: emailOrUsername }],
+            },
+        });
+
         if (!user || !user.password) throw new UnauthorizedError("Invalid credentials");
 
         const ok = await bcrypt.compare(password, user.password);
         if (!ok) throw new UnauthorizedError("Invalid credentials");
 
-        // Check if user account is verified
+        //  Unverified users: block login
         if (!user.verified) {
             return res.status(403).json({
                 error: "Account not verified",
@@ -103,21 +117,103 @@ export const loginUser = async (req: Request, res: Response, next: NextFunction)
             });
         }
 
-        // Check if onboarding is completed
-        if (!user.onboardingCompleted) {
-            return res.status(403).json({
-                error: "Onboarding not completed",
-                message: "Please complete your onboarding profile before accessing the application.",
-                onboardingCompleted: false,
-                requiresOnboarding: true,
-            });
-        }
-
-        await prisma.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } });
-
+        // Verified but not onboarded: issue token but flag the state
         const accessToken = signAccessToken({ id: user.id, role: user.role });
         const { token: refreshToken } = await signAndStoreRefreshToken(user.id);
         setAuthCookies(res, accessToken, refreshToken);
+
+        await prisma.user.update({
+            where: { id: user.id },
+            data: { lastLoginAt: new Date() },
+        });
+
+        return res.json({
+            user: {
+                id: user.id,
+                name: user.name,
+                username: user.username,
+                email: user.email,
+                verified: user.verified,
+                onboardingCompleted: user.onboardingCompleted,
+                role: user.role,
+                profileImg: user.profileImg,
+            },
+            requiresOnboarding: !user.onboardingCompleted,
+        });
+    } catch (err) {
+        next(err);
+    }
+};
+
+
+
+export const logoutUser = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        // Extract refresh token from request
+        const refreshToken = getRefreshTokenFromRequest(req);
+        
+        if (refreshToken) {
+            try {
+                const payload = await verifyRefreshToken(refreshToken);
+                await revokeRefreshTokenByJti(payload.jti);
+            } catch {
+                // ignore errors when revoking token during logout
+            }
+        }
+        clearAuthCookies(res);
+        res.json({ message: "Logged out" });
+    } catch (err) {
+        next(err);
+    }
+}
+
+export const refreshToken = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        // Extract refresh token from request
+        const refreshToken = getRefreshTokenFromRequest(req);
+        
+        if (!refreshToken) {
+            throw new UnauthorizedError("Refresh token is required");
+        }
+
+        // Verify the refresh token
+        const payload = await verifyRefreshToken(refreshToken);
+        const userId = payload.sub;
+
+        // Get user from database to ensure user still exists and get current role
+        const user = await prisma.user.findUnique({
+            where: { id: userId },
+            select: {
+                id: true,
+                name: true,
+                username: true,
+                email: true,
+                role: true,
+                verified: true,
+                onboardingCompleted: true,
+                profileImg: true,
+            },
+        });
+
+        if (!user) {
+            // User doesn't exist anymore, revoke the token
+            await revokeRefreshTokenByJti(payload.jti);
+            throw new UnauthorizedError("User not found");
+        }
+
+        // Check if user account is verified
+        if (!user.verified) {
+            throw new UnauthorizedError("Account not verified");
+        }
+
+        // Generate new access token with current user role
+        const accessToken = signAccessToken({ id: user.id, role: user.role });
+
+        // Rotate refresh token for security (revoke old, create new)
+        const { token: newRefreshToken } = await rotateRefreshToken(payload.jti, user.id);
+
+        // Set new tokens in cookies
+        setAuthCookies(res, accessToken, newRefreshToken);
 
         res.json({
             user: {
@@ -132,24 +228,12 @@ export const loginUser = async (req: Request, res: Response, next: NextFunction)
             },
         });
     } catch (err) {
-        next(err);
-    }
-}
-
-export const logoutUser = async (req: Request, res: Response, next: NextFunction) => {
-    try {
-        const refreshToken = (req.headers["x-refresh-token"] as string | undefined);
-        if (refreshToken) {
-            try {
-                const payload = await verifyRefreshToken(refreshToken);
-                await revokeRefreshTokenByJti(payload.jti);
-            } catch {
-                // ignore
+        // Handle JWT verification errors
+        if (err instanceof Error) {
+            if (err.name === "JsonWebTokenError" || err.name === "TokenExpiredError" || err.message.includes("Refresh token")) {
+                return next(new UnauthorizedError("Invalid or expired refresh token"));
             }
         }
-        clearAuthCookies(res);
-        res.json({ message: "Logged out" });
-    } catch (err) {
         next(err);
     }
 }
@@ -250,6 +334,68 @@ export const resetPassword = async (req: Request, res: Response, next: NextFunct
         await clearAllPasswordResetCooldowns(email);
         
         res.json({ message: "Password reset successful" });
+    } catch (err) {
+        next(err);
+    }
+}
+
+export const resendVerificationOtp = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        const { email } = req.body as { email?: string };
+        if (!email) throw new BadRequestError("Email is required");
+
+        // Check if resend request is allowed (checks cooldown and attempts)
+        const { allowed, remainingCooldown, attempts } = await checkResendOtpAllowed(email);
+        
+        if (!allowed) {
+            // Cooldown is already set by checkResendOtpAllowed if attempts exceeded
+            const minutes = Math.ceil(remainingCooldown / 60);
+            const seconds = remainingCooldown % 60;
+            const timeMessage = minutes > 0 
+                ? `${minutes} minute${minutes > 1 ? "s" : ""}${seconds > 0 ? ` and ${seconds} second${seconds > 1 ? "s" : ""}` : ""}`
+                : `${seconds} second${seconds > 1 ? "s" : ""}`;
+            
+            throw new TooManyRequestsError(
+                `Too many resend requests. Please wait ${timeMessage} before trying again.`,
+                { cooldownRemaining: remainingCooldown, retryAfter: remainingCooldown, attempts }
+            );
+        }
+
+        // Check if user exists
+        const user = await prisma.user.findUnique({ where: { email } });
+        
+        // Check if user is already verified (only if user exists)
+        if (user && user.verified) {
+            // Set cooldown to prevent enumeration attacks (same response time)
+            await setResendOtpCooldown(email);
+            return res.status(400).json({ 
+                error: "Email already verified",
+                message: "This email address has already been verified.",
+            });
+        }
+
+        // Set cooldown before sending OTP (tracks attempts and prevents rapid resends)
+        // This also increments the attempt counter
+        await setResendOtpCooldown(email);
+
+        // Generate and store new OTP only if user exists and is not verified
+        if (user && !user.verified) {
+            const otp = await createAndStoreOtp(`email:${email}`);
+            // TODO: send OTP via email provider
+            
+            res.json({ 
+                message: "Verification OTP has been sent to your email.",
+                // Expose OTP in non-production for testing
+                otp: process.env.NODE_ENV === "production" ? undefined : otp,
+            });
+        } else {
+            // User doesn't exist
+            // Don't reveal if email exists to prevent enumeration
+            // Cooldown is already set to prevent abuse
+            res.json({ 
+                message: "If the email exists and is not verified, a verification OTP has been sent.",
+            });
+        }
     } catch (err) {
         next(err);
     }

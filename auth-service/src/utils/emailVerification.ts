@@ -133,3 +133,104 @@ export async function clearEmailVerificationCooldown(email: string): Promise<voi
   await resetEmailVerificationAttempts(email);
 }
 
+/**
+ * Redis key for resend OTP cooldown (separate from verification cooldown)
+ */
+function getResendOtpCooldownKey(email: string): string {
+  return `resend_otp_cooldown:${email}`;
+}
+
+/**
+ * Redis key for resend OTP attempts
+ */
+function getResendOtpAttemptsKey(email: string): string {
+  return `resend_otp_attempts:${email}`;
+}
+
+// Cooldown constants for resending OTP
+const RESEND_OTP_COOLDOWN_SEC = parseInt(process.env.RESEND_OTP_COOLDOWN_SEC || "60", 10); // 1 minute
+const RESEND_OTP_MAX_ATTEMPTS = parseInt(process.env.RESEND_OTP_MAX_ATTEMPTS || "5", 10); // 5 attempts per hour
+const RESEND_OTP_ATTEMPTS_WINDOW_SEC = parseInt(process.env.RESEND_OTP_ATTEMPTS_WINDOW_SEC || "3600", 10); // 1 hour
+
+/**
+ * Check if resend OTP is in cooldown
+ * @param email - User email
+ * @returns Promise<number> - Remaining cooldown seconds, 0 if no cooldown
+ */
+export async function checkResendOtpCooldown(email: string): Promise<number> {
+  const key = getResendOtpCooldownKey(email);
+  const remaining = await redis.ttl(key);
+  return remaining > 0 ? remaining : 0;
+}
+
+/**
+ * Get resend OTP attempt count
+ * @param email - User email
+ * @returns Promise<number> - Current attempt count
+ */
+async function getResendOtpAttempts(email: string): Promise<number> {
+  const key = getResendOtpAttemptsKey(email);
+  const attempts = await redis.get(key);
+  return attempts ? parseInt(attempts, 10) : 0;
+}
+
+/**
+ * Increment resend OTP attempt count
+ * @param email - User email
+ * @returns Promise<number> - New attempt count
+ */
+async function incrementResendOtpAttempts(email: string): Promise<number> {
+  const key = getResendOtpAttemptsKey(email);
+  const attempts = await redis.incr(key);
+  
+  // Set expiration on first attempt (1 hour window)
+  if (attempts === 1) {
+    await redis.expire(key, RESEND_OTP_ATTEMPTS_WINDOW_SEC);
+  }
+  
+  return attempts;
+}
+
+/**
+ * Check if resend OTP request should be allowed
+ * @param email - User email
+ * @returns Promise<{ allowed: boolean; remainingCooldown: number; attempts: number }>
+ */
+export async function checkResendOtpAllowed(email: string): Promise<{
+  allowed: boolean;
+  remainingCooldown: number;
+  attempts: number;
+}> {
+  const remainingCooldown = await checkResendOtpCooldown(email);
+  const attempts = await getResendOtpAttempts(email);
+  
+  // If in cooldown, not allowed
+  if (remainingCooldown > 0) {
+    return { allowed: false, remainingCooldown, attempts };
+  }
+  
+  // If attempts exceed limit, set cooldown and deny
+  if (attempts >= RESEND_OTP_MAX_ATTEMPTS) {
+    const cooldownKey = getResendOtpCooldownKey(email);
+    await redis.set(cooldownKey, "1", "EX", RESEND_OTP_COOLDOWN_SEC);
+    return { allowed: false, remainingCooldown: RESEND_OTP_COOLDOWN_SEC, attempts };
+  }
+  
+  return { allowed: true, remainingCooldown: 0, attempts };
+}
+
+/**
+ * Set resend OTP cooldown and increment attempts
+ * @param email - User email
+ * @returns Promise<number> - Cooldown duration in seconds that was set
+ */
+export async function setResendOtpCooldown(email: string): Promise<number> {
+  const attempts = await incrementResendOtpAttempts(email);
+  const cooldownKey = getResendOtpCooldownKey(email);
+  
+  // Set cooldown after each request to prevent rapid resends
+  await redis.set(cooldownKey, "1", "EX", RESEND_OTP_COOLDOWN_SEC);
+  
+  return RESEND_OTP_COOLDOWN_SEC;
+}
+

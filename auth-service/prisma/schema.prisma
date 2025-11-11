@@ -33,6 +33,10 @@ model User {
   enrollments         CourseEnrollment[]
   devices             UserDevice[]
   sessions            Session[]
+  sentParentRequests  ParentLinkRequest[] @relation("SentParentRequests")
+  receivedParentRequests ParentLinkRequest[] @relation("ReceivedParentRequests")
+  parentLinks         ParentChildLink[] @relation("ChildLinks")
+  childLinks          ParentChildLink[] @relation("ParentLinks")
 
   @@index([username])
   @@index([role])
@@ -219,4 +223,43 @@ enum Provider {
 enum VerificationType {
   EMAIL
   TWO_FACTOR
+}
+
+model ParentLinkRequest {
+  id          String      @id @default(uuid())
+  childId     String      // User requesting to link (child)
+  parentId    String      // Parent being requested
+  status      RequestStatus @default(PENDING)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  respondedAt DateTime?
+
+  child       User        @relation("SentParentRequests", fields: [childId], references: [id], onDelete: Cascade)
+  parent      User        @relation("ReceivedParentRequests", fields: [parentId], references: [id], onDelete: Cascade)
+
+  @@unique([childId, parentId])
+  @@index([childId])
+  @@index([parentId])
+  @@index([status])
+}
+
+model ParentChildLink {
+  id          String      @id @default(uuid())
+  parentId    String
+  childId     String
+  createdAt   DateTime    @default(now())
+
+  parent      User        @relation("ParentLinks", fields: [parentId], references: [id], onDelete: Cascade)
+  child       User        @relation("ChildLinks", fields: [childId], references: [id], onDelete: Cascade)
+
+  @@unique([parentId, childId])
+  @@index([parentId])
+  @@index([childId])
+}
+
+enum RequestStatus {
+  PENDING
+  ACCEPTED
+  DECLINED
+  CANCELLED
 }

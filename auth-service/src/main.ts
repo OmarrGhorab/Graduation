@@ -3,6 +3,8 @@ import cors from "cors";
 import dotenv from "dotenv";
 import authRouter from "./routes/auth.route";
 import onboardingRouter from "./routes/onboarding.route";
+import parentLinkRouter from "./routes/parent-link.route";
+import notificationsRouter from "./routes/notifications.route";
 import { errorHandler } from "./middleware/errorHandler";
 
 dotenv.config();
@@ -25,6 +27,8 @@ app.get("/", async (req: Request, res: Response) => {
 
 app.use("/api/v1/auth", authRouter);
 app.use("/api/v1/onboarding", onboardingRouter);
+app.use("/api/v1/parent-link", parentLinkRouter);
+app.use("/api/v1/notifications", notificationsRouter);
 // Error handler last
 app.use(errorHandler);
 

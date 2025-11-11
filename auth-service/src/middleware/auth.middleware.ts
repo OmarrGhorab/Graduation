@@ -1,24 +1,7 @@
 import { Request, Response, NextFunction } from "express";
 import { verifyAccessToken } from "../utils/tokens";
 import { UnauthorizedError } from "../utils/errors";
-
-/**
- * Helper function to parse cookies from Cookie header
- * Used as fallback if cookie-parser middleware is not installed
- */
-function parseCookies(cookieHeader?: string): Record<string, string> {
-  const cookies: Record<string, string> = {};
-  if (!cookieHeader) return cookies;
-
-  cookieHeader.split(";").forEach((cookie) => {
-    const [name, ...rest] = cookie.trim().split("=");
-    if (name && rest.length > 0) {
-      cookies[name] = rest.join("=");
-    }
-  });
-
-  return cookies;
-}
+import { getAccessTokenFromRequest } from "../utils/cookies";
 
 /**
  * Authentication middleware to verify access token and attach user info to request
@@ -31,23 +14,8 @@ function parseCookies(cookieHeader?: string): Record<string, string> {
  */
 export const authenticate = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    // Extract token from cookies (preferred method)
-    // Try req.cookies first (if cookie-parser is installed)
-    let token = (req.cookies as Record<string, string> | undefined)?.access_token;
-
-    // Fallback: parse cookies manually from Cookie header if cookie-parser is not installed
-    if (!token && req.headers.cookie) {
-      const cookies = parseCookies(req.headers.cookie);
-      token = cookies.access_token;
-    }
-
-    // Fallback to Authorization header if not in cookies
-    if (!token) {
-      const authHeader = req.headers.authorization;
-      if (authHeader && authHeader.startsWith("Bearer ")) {
-        token = authHeader.substring(7);
-      }
-    }
+    // Extract token from request (cookies or Authorization header)
+    const token = getAccessTokenFromRequest(req);
 
     if (!token) {
       throw new UnauthorizedError("Access token is required");

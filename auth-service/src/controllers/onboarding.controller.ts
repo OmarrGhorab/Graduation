@@ -3,29 +3,11 @@ import prisma from "../libs/prisma";
 import { BadRequestError } from "../utils/errors";
 import { Gender, Prisma, UserRole } from "@prisma/client";
 import { uploadProfileImage } from "../utils/cloudinaryUpload";
-
-interface OnboardingRequestBody {
-  dateOfBirth?: string; // ISO date string
-  gender?: Gender;
-  country?: string;
-  role?: UserRole;
-  profileImg?: string; // Base64 string or data URL
-  preferences?: {
-    language?: string;
-    themePreference?: string;
-    notifications?: boolean;
-  };
-  interests?: string[]; // Array of interest names
-}
-
-interface UserUpdateData {
-  dateOfBirth?: Date;
-  gender?: Gender;
-  country?: string;
-  role?: UserRole;
-  profileImg?: string;
-  onboardingCompleted: boolean;
-}
+import { sendMultipleParentLinkRequests } from "../utils/parent-link";
+import type {
+  OnboardingRequestBody,
+  UserUpdateData,
+} from "../types/onboarding.types";
 
 /**
  * Validates and converts date string to Date object
@@ -216,6 +198,33 @@ export const createOnboarding = async (req: Request, res: Response, next: NextFu
       });
     });
 
+    // Handle parent linking (outside transaction to avoid blocking onboarding completion)
+    // Parent linking is optional and failures shouldn't prevent onboarding completion
+    let parentLinkRequests: Array<{
+      id: string;
+      parentId: string;
+      status: string;
+      error?: string;
+    }> = [];
+
+    if (body.parentIds && body.parentIds.length > 0) {
+      try {
+        // Send parent link requests (skip notifications during onboarding to avoid spam)
+        // Parents will see requests when they check their pending requests
+        parentLinkRequests = await sendMultipleParentLinkRequests(
+          userId,
+          body.parentIds,
+          true // Skip notifications during onboarding
+        );
+      } catch (error) {
+        // Log error but don't fail onboarding
+        console.error("Error sending parent link requests during onboarding:", error);
+      }
+    }
+
+    // Get parent link requests that were successfully created
+    const successfulRequests = parentLinkRequests.filter((req) => !req.error);
+
     res.status(200).json({
       message: "Onboarding completed successfully",
       user: {
@@ -234,6 +243,7 @@ export const createOnboarding = async (req: Request, res: Response, next: NextFu
           id: ui.interest.id,
           name: ui.interest.name,
         })),
+        parentLinkRequests: successfulRequests.length > 0 ? successfulRequests : undefined,
       },
     });
   } catch (err) {
