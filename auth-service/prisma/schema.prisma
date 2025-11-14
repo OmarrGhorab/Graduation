@@ -2,46 +2,48 @@
 generator client {
   provider = "prisma-client-js"
 }
+
 datasource db {
-  provider  = "postgresql"
-  url  	    = env("DATABASE_URL")
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
 }
 
 model User {
-  id                  String           @id @default(uuid())
-  name                String
-  username            String           @unique
-  email               String           @unique
-  password            String?
-  dateOfBirth         DateTime?
-  gender              Gender?
-  role                UserRole         @default(STUDENT)
-  profileImg          String?
-  country             String?
-  onboardingCompleted Boolean          @default(false)
-  preferences         UserPreference?
-  verified            Boolean          @default(false)
-  twoFactorEnabled    Boolean          @default(false)
-  twoFactorSecret     String?          // Encrypted TOTP secret
-  twoFactorBackupCodes String[]        @default([]) // Encrypted backup codes
-  lastLoginAt         DateTime?
-  createdAt           DateTime         @default(now())
-  updatedAt           DateTime         @updatedAt
+  id                       String          @id @default(uuid())
+  name                     String
+  username                 String          @unique
+  email                    String          @unique
+  password                 String?
+  dateOfBirth              DateTime?
+  gender                   Gender?
+  role                     UserRole        @default(STUDENT)
+  profileImg               String?
+  country                  String?
+  onboardingCompleted      Boolean         @default(false)
+  preferences              UserPreference?
+  verified                 Boolean         @default(false)
+  twoFactorEnabled         Boolean         @default(false)
+  twoFactorSecret          String? // Encrypted TOTP secret
+  twoFactorBackupCodes     String[]        @default([]) // Encrypted backup codes
+  deviceBlocked            Boolean         @default(false) // Blocked due to new device
+  pendingDeviceFingerprint String? // Device fingerprint waiting for verification
+  lastLoginAt              DateTime?
+  createdAt                DateTime        @default(now())
+  updatedAt                DateTime        @updatedAt
 
-
-  providers           AuthProvider[]
-  verifications       Verification[]
-  passwordResets      PasswordReset[]
-  interests           UserInterest[]
-  enrollments         CourseEnrollment[]
-  devices             UserDevice[]
-  sessions            Session[]
-  sentParentRequests  ParentLinkRequest[] @relation("SentParentRequests")
+  providers              AuthProvider[]
+  verifications          Verification[]
+  passwordResets         PasswordReset[]
+  interests              UserInterest[]
+  enrollments            CourseEnrollment[]
+  devices                UserDevice[]
+  sessions               Session[]
+  sentParentRequests     ParentLinkRequest[] @relation("SentParentRequests")
   receivedParentRequests ParentLinkRequest[] @relation("ReceivedParentRequests")
-  sentUnlinkRequests  UnlinkRequest[] @relation("SentUnlinkRequests")
-  receivedUnlinkRequests UnlinkRequest[] @relation("ReceivedUnlinkRequests")
-  parentLinks         ParentChildLink[] @relation("ChildLinks")
-  childLinks          ParentChildLink[] @relation("ParentLinks")
+  sentUnlinkRequests     UnlinkRequest[]     @relation("SentUnlinkRequests")
+  receivedUnlinkRequests UnlinkRequest[]     @relation("ReceivedUnlinkRequests")
+  parentLinks            ParentChildLink[]   @relation("ChildLinks")
+  childLinks             ParentChildLink[]   @relation("ParentLinks")
 
   @@index([username])
   @@index([role])
@@ -49,32 +51,33 @@ model User {
 }
 
 model UserPreference {
-  id              String  @id @default(uuid())
-  userId          String  @unique
-  language        String? @default("en")
-  themePreference String? @default("light")
+  id              String   @id @default(uuid())
+  userId          String   @unique
+  language        String?  @default("en")
+  themePreference String?  @default("light")
   notifications   Boolean? @default(true)
 
-  user            User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 model UserDevice {
-  id                String     @id @default(uuid())
-  user              User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id                String    @id @default(uuid())
+  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   userId            String
   deviceFingerprint String
   deviceName        String?
   ipAddress         String?
   userAgent         String?
   platform          Platform?
-  isTrusted         Boolean    @default(false)
-  pushToken         String?    // for notifications
-  location          String?    // city or country (geo from IP)
-  lastLoginAt       DateTime?  
-  createdAt         DateTime   @default(now())
-  updatedAt         DateTime   @updatedAt
+  isTrusted         Boolean   @default(false)
+  pushToken         String? // for notifications
+  location          String? // city or country (geo from IP)
+  loginCount        Int       @default(0) // Track number of logins from this device
+  lastLoginAt       DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
 
-  sessions          Session[]
+  sessions Session[]
 
   @@unique([userId, deviceFingerprint])
   @@index([userId])
@@ -87,65 +90,63 @@ enum Platform {
   DESKTOP
 }
 
-
-
 model AuthProvider {
-  id            String      @id @default(uuid())
-  provider      Provider
-  providerId    String
-  accessToken   String?
-  refreshToken  String?
-  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
-  userId        String
-  createdAt     DateTime    @default(now())
-  updatedAt     DateTime    @updatedAt
+  id           String   @id @default(uuid())
+  provider     Provider
+  providerId   String
+  accessToken  String?
+  refreshToken String?
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId       String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
   @@unique([provider, providerId])
   @@index([userId])
 }
 
 model Verification {
-  id          String      @id @default(uuid())
-  type        VerificationType
-  code        String
-  expiresAt   DateTime
-  verifiedAt  DateTime?
-  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
-  userId      String
-  createdAt   DateTime    @default(now())
+  id         String           @id @default(uuid())
+  type       VerificationType
+  code       String
+  expiresAt  DateTime
+  verifiedAt DateTime?
+  user       User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId     String
+  createdAt  DateTime         @default(now())
 
   @@unique([userId, type, code])
   @@index([userId, type])
 }
 
 model PasswordReset {
-  id          String      @id @default(uuid())
-  token       String      @unique
-  expiresAt   DateTime
-  used        Boolean     @default(false)
-  usedAt      DateTime?
-  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
-  userId      String
-  createdAt   DateTime    @default(now())
+  id        String    @id @default(uuid())
+  token     String    @unique
+  expiresAt DateTime
+  used      Boolean   @default(false)
+  usedAt    DateTime?
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId    String
+  createdAt DateTime  @default(now())
 
   @@index([userId])
   @@index([token])
 }
 
 model Interest {
-  id        String          @id @default(uuid())
-  name      String          @unique
+  id        String         @id @default(uuid())
+  name      String         @unique
   users     UserInterest[]
-  createdAt DateTime        @default(now())
-  updatedAt DateTime        @updatedAt
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
 }
 
 model UserInterest {
-  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
-  userId      String
-  interest    Interest    @relation(fields: [interestId], references: [id], onDelete: Cascade)
-  interestId  String
-  createdAt   DateTime    @default(now())
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId     String
+  interest   Interest @relation(fields: [interestId], references: [id], onDelete: Cascade)
+  interestId String
+  createdAt  DateTime @default(now())
 
   @@id([userId, interestId])
   @@index([userId])
@@ -153,12 +154,12 @@ model UserInterest {
 }
 
 model CourseEnrollment {
-  id         String      @id @default(uuid())
-  user       User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id         String   @id @default(uuid())
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   userId     String
   courseId   String
-  enrolledAt DateTime    @default(now())
-  updatedAt  DateTime    @updatedAt
+  enrolledAt DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 
   @@unique([userId, courseId])
   @@index([userId])
@@ -166,40 +167,40 @@ model CourseEnrollment {
 }
 
 model Session {
-  id                String      @id @default(uuid())
-  user              User        @relation(fields: [userId], references: [id], onDelete: Cascade)
-  userId            String
-  device            UserDevice? @relation(fields: [deviceId], references: [id], onDelete: SetNull)
-  deviceId          String?
-  
+  id       String      @id @default(uuid())
+  user     User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId   String
+  device   UserDevice? @relation(fields: [deviceId], references: [id], onDelete: SetNull)
+  deviceId String?
+
   // Token identifiers
-  sessionToken      String      @unique      // Main session identifier (can be JWT or opaque token)
-  refreshToken      String?     @unique      // Optional refresh token for JWT rotation
-  
+  sessionToken String  @unique // Main session identifier (can be JWT or opaque token)
+  refreshToken String? @unique // Optional refresh token for JWT rotation
+
   // Session metadata
-  ipAddress         String?                   // Current IP from latest request
-  userAgent         String?                   // Current user agent from latest request
-  location          String?                   // Geographic location (city/country)
-  
+  ipAddress String? // Current IP from latest request
+  userAgent String? // Current user agent from latest request
+  location  String? // Geographic location (city/country)
+
   // Session state
-  isActive          Boolean     @default(true)
-  isRevoked         Boolean     @default(false)
-  
+  isActive  Boolean @default(true)
+  isRevoked Boolean @default(false)
+
   // Expiration times
-  expiresAt         DateTime                  // When this session expires
-  refreshExpiresAt  DateTime?                 // When refresh token expires (if using refresh tokens)
-  
+  expiresAt        DateTime // When this session expires
+  refreshExpiresAt DateTime? // When refresh token expires (if using refresh tokens)
+
   // Activity tracking
-  lastActivityAt    DateTime    @default(now())  // Last time session was used
-  createdAt         DateTime    @default(now())
-  revokedAt         DateTime?                  // When session was revoked
-  
+  lastActivityAt DateTime  @default(now()) // Last time session was used
+  createdAt      DateTime  @default(now())
+  revokedAt      DateTime? // When session was revoked
+
   @@index([userId])
   @@index([deviceId])
   @@index([sessionToken])
   @@index([refreshToken])
-  @@index([isActive, expiresAt])  // For finding active, non-expired sessions
-  @@index([userId, isActive])     // For finding user's active sessions
+  @@index([isActive, expiresAt]) // For finding active, non-expired sessions
+  @@index([userId, isActive]) // For finding user's active sessions
 }
 
 enum UserRole {
@@ -228,19 +229,20 @@ enum Provider {
 enum VerificationType {
   EMAIL
   TWO_FACTOR
+  DEVICE_VERIFICATION
 }
 
 model ParentLinkRequest {
-  id          String      @id @default(uuid())
-  childId     String      // User requesting to link (child)
-  parentId    String      // Parent being requested
+  id          String        @id @default(uuid())
+  childId     String // User requesting to link (child)
+  parentId    String // Parent being requested
   status      RequestStatus @default(PENDING)
-  createdAt   DateTime    @default(now())
-  updatedAt   DateTime    @updatedAt
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
   respondedAt DateTime?
 
-  child       User        @relation("SentParentRequests", fields: [childId], references: [id], onDelete: Cascade)
-  parent      User        @relation("ReceivedParentRequests", fields: [parentId], references: [id], onDelete: Cascade)
+  child  User @relation("SentParentRequests", fields: [childId], references: [id], onDelete: Cascade)
+  parent User @relation("ReceivedParentRequests", fields: [parentId], references: [id], onDelete: Cascade)
 
   @@unique([childId, parentId])
   @@index([childId])
@@ -249,13 +251,13 @@ model ParentLinkRequest {
 }
 
 model ParentChildLink {
-  id          String      @id @default(uuid())
-  parentId    String
-  childId     String
-  createdAt   DateTime    @default(now())
+  id        String   @id @default(uuid())
+  parentId  String
+  childId   String
+  createdAt DateTime @default(now())
 
-  parent      User        @relation("ParentLinks", fields: [parentId], references: [id], onDelete: Cascade)
-  child       User        @relation("ChildLinks", fields: [childId], references: [id], onDelete: Cascade)
+  parent User @relation("ParentLinks", fields: [parentId], references: [id], onDelete: Cascade)
+  child  User @relation("ChildLinks", fields: [childId], references: [id], onDelete: Cascade)
 
   @@unique([parentId, childId])
   @@index([parentId])
@@ -270,16 +272,16 @@ enum RequestStatus {
 }
 
 model UnlinkRequest {
-  id          String      @id @default(uuid())
-  childId     String      // User requesting to unlink (child)
-  parentId    String      // Parent being requested to unlink from
+  id          String        @id @default(uuid())
+  childId     String // User requesting to unlink (child)
+  parentId    String // Parent being requested to unlink from
   status      RequestStatus @default(PENDING)
-  createdAt   DateTime    @default(now())
-  updatedAt   DateTime    @updatedAt
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
   respondedAt DateTime?
 
-  child       User        @relation("SentUnlinkRequests", fields: [childId], references: [id], onDelete: Cascade)
-  parent      User        @relation("ReceivedUnlinkRequests", fields: [parentId], references: [id], onDelete: Cascade)
+  child  User @relation("SentUnlinkRequests", fields: [childId], references: [id], onDelete: Cascade)
+  parent User @relation("ReceivedUnlinkRequests", fields: [parentId], references: [id], onDelete: Cascade)
 
   @@unique([childId, parentId])
   @@index([childId])

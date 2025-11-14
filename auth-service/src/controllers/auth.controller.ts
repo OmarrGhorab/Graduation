@@ -23,6 +23,7 @@ import {
   checkResendOtpAllowed,
   setResendOtpCooldown,
 } from "../utils/emailVerification";
+import { extractDeviceInfo, extractDeviceName } from "../utils/device";
 
 
 dotenv.config();
@@ -100,6 +101,20 @@ export const loginUser = async (req: Request, res: Response, next: NextFunction)
             where: {
                 OR: [{ email: emailOrUsername }, { username: emailOrUsername }],
             },
+            select: {
+                id: true,
+                name: true,
+                username: true,
+                email: true,
+                password: true,
+                verified: true,
+                role: true,
+                profileImg: true,
+                onboardingCompleted: true,
+                twoFactorEnabled: true,
+                deviceBlocked: true,
+                pendingDeviceFingerprint: true,
+            },
         });
 
         if (!user || !user.password) throw new UnauthorizedError("Invalid credentials");
@@ -117,13 +132,136 @@ export const loginUser = async (req: Request, res: Response, next: NextFunction)
             });
         }
 
-        // Check if 2FA is enabled
-        const userWith2FA = await prisma.user.findUnique({
-            where: { id: user.id },
-            select: { twoFactorEnabled: true },
+        // Extract device information
+        const deviceInfo = extractDeviceInfo(req, req.body.deviceName);
+        const deviceName = extractDeviceName(deviceInfo.userAgent || undefined) || deviceInfo.deviceName || "Unknown Device";
+
+        // Check if device exists for this user
+        let existingDevice = await prisma.userDevice.findUnique({
+            where: {
+                userId_deviceFingerprint: {
+                    userId: user.id,
+                    deviceFingerprint: deviceInfo.fingerprint,
+                },
+            },
         });
 
-        if (userWith2FA?.twoFactorEnabled) {
+        // Handle device tracking and blocking
+        if (!existingDevice) {
+            // New device - check device limit
+            // Get user's devices, ordered by login count (most used first)
+            const userDevices = await prisma.userDevice.findMany({
+                where: { userId: user.id },
+                orderBy: { loginCount: "desc" },
+            });
+
+            // If user has 2 or more devices, block account and require verification
+            if (userDevices.length >= 2) {
+                // Block account and store pending device fingerprint
+                await prisma.user.update({
+                    where: { id: user.id },
+                    data: {
+                        deviceBlocked: true,
+                        pendingDeviceFingerprint: deviceInfo.fingerprint,
+                    },
+                });
+
+                // Create new device (not trusted)
+                existingDevice = await prisma.userDevice.create({
+                    data: {
+                        userId: user.id,
+                        deviceFingerprint: deviceInfo.fingerprint,
+                        deviceName: deviceName,
+                        userAgent: deviceInfo.userAgent,
+                        ipAddress: deviceInfo.ipAddress,
+                        platform: deviceInfo.platform,
+                        loginCount: 0, // Don't increment yet - device not verified
+                        lastLoginAt: null,
+                        isTrusted: false,
+                    },
+                });
+
+                // Create device verification OTP
+                const otp = await createAndStoreOtp(`device:${user.id}:${deviceInfo.fingerprint}`);
+
+                // TODO: Send OTP via email or SMS
+
+                return res.status(403).json({
+                    error: "New device detected",
+                    message: "A new device has been detected. Your account has been blocked until device verification is completed. Please check your email for verification code.",
+                    deviceBlocked: true,
+                    requiresDeviceVerification: true,
+                    deviceFingerprint: deviceInfo.fingerprint,
+                    // Expose OTP in non-production for testing
+                    otp: process.env.NODE_ENV === "production" ? undefined : otp,
+                });
+            }
+
+            // User has less than 2 devices, create new device (trusted)
+            existingDevice = await prisma.userDevice.create({
+                data: {
+                    userId: user.id,
+                    deviceFingerprint: deviceInfo.fingerprint,
+                    deviceName: deviceName,
+                    userAgent: deviceInfo.userAgent,
+                    ipAddress: deviceInfo.ipAddress,
+                    platform: deviceInfo.platform,
+                    loginCount: 1,
+                    lastLoginAt: new Date(),
+                    isTrusted: true, // First 2 devices are trusted by default
+                },
+            });
+        } else {
+            // Device exists, update login count and last login
+            existingDevice = await prisma.userDevice.update({
+                where: { id: existingDevice.id },
+                data: {
+                    loginCount: { increment: 1 },
+                    lastLoginAt: new Date(),
+                    // Update IP and user agent in case they changed
+                    ipAddress: deviceInfo.ipAddress,
+                    userAgent: deviceInfo.userAgent,
+                    platform: deviceInfo.platform,
+                },
+            });
+
+            // If account is blocked for this device and device is not trusted, require verification
+            if (user.deviceBlocked && user.pendingDeviceFingerprint === deviceInfo.fingerprint && !existingDevice.isTrusted) {
+                const otp = await createAndStoreOtp(`device:${user.id}:${deviceInfo.fingerprint}`);
+                return res.status(403).json({
+                    error: "Device verification required",
+                    message: "This device needs to be verified. Please check your email for verification code.",
+                    deviceBlocked: true,
+                    requiresDeviceVerification: true,
+                    deviceFingerprint: deviceInfo.fingerprint,
+                    otp: process.env.NODE_ENV === "production" ? undefined : otp,
+                });
+            }
+
+            // If account is blocked but this device is trusted, unblock account
+            if (user.deviceBlocked && existingDevice.isTrusted) {
+                await prisma.user.update({
+                    where: { id: user.id },
+                    data: {
+                        deviceBlocked: false,
+                        pendingDeviceFingerprint: null,
+                    },
+                });
+            }
+        }
+
+        // If account is blocked and this is not the pending device, block login
+        if (user.deviceBlocked && user.pendingDeviceFingerprint !== deviceInfo.fingerprint) {
+            return res.status(403).json({
+                error: "Account blocked",
+                message: "Your account has been blocked due to a new device login. Please verify the pending device first.",
+                deviceBlocked: true,
+                requiresDeviceVerification: true,
+            });
+        }
+
+        // Check if 2FA is enabled (do this after device check)
+        if (user.twoFactorEnabled) {
             // 2FA is enabled - require token verification
             return res.status(200).json({
                 message: "2FA verification required",
@@ -667,3 +805,176 @@ export const googleCallback = async (req: Request, res: Response, next: NextFunc
         next(err);
     }
 }
+
+/**
+ * Verify device with OTP
+ * This endpoint is called when a new device is detected and needs verification
+ */
+export const verifyDevice = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        const { emailOrUsername, deviceFingerprint, otp } = req.body as {
+            emailOrUsername?: string;
+            deviceFingerprint?: string;
+            otp?: string;
+        };
+
+        if (!emailOrUsername || !deviceFingerprint || !otp) {
+            throw new BadRequestError("Email/username, device fingerprint, and OTP are required");
+        }
+
+        // Find user
+        const user = await prisma.user.findFirst({
+            where: {
+                OR: [{ email: emailOrUsername }, { username: emailOrUsername }],
+            },
+        });
+
+        if (!user) {
+            throw new UnauthorizedError("Invalid credentials");
+        }
+
+        // Verify OTP
+        const otpKey = `device:${user.id}:${deviceFingerprint}`;
+        const isValid = await verifyOtp(otpKey, otp);
+
+        if (!isValid) {
+            throw new UnauthorizedError("Invalid or expired OTP");
+        }
+
+        // Find device
+        const device = await prisma.userDevice.findUnique({
+            where: {
+                userId_deviceFingerprint: {
+                    userId: user.id,
+                    deviceFingerprint: deviceFingerprint,
+                },
+            },
+        });
+
+        if (!device) {
+            throw new BadRequestError("Device not found");
+        }
+
+        // Verify that this is the pending device
+        if (user.deviceBlocked && user.pendingDeviceFingerprint !== deviceFingerprint) {
+            throw new BadRequestError("This device is not the pending device for verification");
+        }
+
+        // Mark device as trusted and update login count
+        await prisma.userDevice.update({
+            where: { id: device.id },
+            data: {
+                isTrusted: true,
+                loginCount: { increment: 1 },
+                lastLoginAt: new Date(),
+            },
+        });
+
+        // Unblock account
+        await prisma.user.update({
+            where: { id: user.id },
+            data: {
+                deviceBlocked: false,
+                pendingDeviceFingerprint: null,
+            },
+        });
+
+        // Check if 2FA is enabled
+        if (user.twoFactorEnabled) {
+            return res.status(200).json({
+                message: "Device verified successfully. 2FA verification required.",
+                deviceVerified: true,
+                requires2FA: true,
+                emailOrUsername: emailOrUsername,
+            });
+        }
+
+        // Issue tokens
+        const accessToken = signAccessToken({ id: user.id, role: user.role });
+        const { token: refreshToken } = await signAndStoreRefreshToken(user.id);
+        setAuthCookies(res, accessToken, refreshToken);
+
+        await prisma.user.update({
+            where: { id: user.id },
+            data: { lastLoginAt: new Date() },
+        });
+
+        return res.json({
+            message: "Device verified successfully",
+            deviceVerified: true,
+            user: {
+                id: user.id,
+                name: user.name,
+                username: user.username,
+                email: user.email,
+                verified: user.verified,
+                onboardingCompleted: user.onboardingCompleted,
+                role: user.role,
+                profileImg: user.profileImg,
+            },
+            requiresOnboarding: !user.onboardingCompleted,
+        });
+    } catch (err) {
+        next(err);
+    }
+};
+
+/**
+ * Resend device verification OTP
+ */
+export const resendDeviceVerificationOtp = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        const { emailOrUsername, deviceFingerprint } = req.body as {
+            emailOrUsername?: string;
+            deviceFingerprint?: string;
+        };
+
+        if (!emailOrUsername || !deviceFingerprint) {
+            throw new BadRequestError("Email/username and device fingerprint are required");
+        }
+
+        // Find user
+        const user = await prisma.user.findFirst({
+            where: {
+                OR: [{ email: emailOrUsername }, { username: emailOrUsername }],
+            },
+        });
+
+        if (!user) {
+            // Don't reveal if user exists
+            return res.json({
+                message: "If the email/username exists and device verification is required, an OTP has been sent.",
+            });
+        }
+
+        // Check if device exists and is pending verification
+        const device = await prisma.userDevice.findUnique({
+            where: {
+                userId_deviceFingerprint: {
+                    userId: user.id,
+                    deviceFingerprint: deviceFingerprint,
+                },
+            },
+        });
+
+        if (!device || user.pendingDeviceFingerprint !== deviceFingerprint) {
+            return res.status(400).json({
+                error: "Device verification not required",
+                message: "This device does not require verification.",
+            });
+        }
+
+        // Generate new OTP
+        const otp = await createAndStoreOtp(`device:${user.id}:${deviceFingerprint}`);
+
+        // TODO: Send OTP via email or SMS
+
+        return res.json({
+            message: "Device verification OTP has been sent.",
+            // Expose OTP in non-production for testing
+            otp: process.env.NODE_ENV === "production" ? undefined : otp,
+        });
+    } catch (err) {
+        next(err);
+    }
+};

@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { forgotPassword, loginUser, logoutUser, registerUser, resetPassword, verifyEmailOtp, resendVerificationOtp, googleAuth, googleCallback, refreshToken } from "../controllers/auth.controller";
+import { forgotPassword, loginUser, logoutUser, registerUser, resetPassword, verifyEmailOtp, resendVerificationOtp, googleAuth, googleCallback, refreshToken, verifyDevice, resendDeviceVerificationOtp } from "../controllers/auth.controller";
 import { authenticate } from "../middleware";
 import {
   enable2FA,
@@ -29,6 +29,10 @@ router.post("/reset-password", resetPassword);
 // Email verification
 router.post("/verify-email-otp", verifyEmailOtp);
 router.post("/resend-verification-otp", resendVerificationOtp);
+
+// Device verification
+router.post("/verify-device", verifyDevice);
+router.post("/resend-device-verification-otp", resendDeviceVerificationOtp);
 
 // 2FA routes
 router.post("/2fa/verify-login", verify2FALogin); // Public route for 2FA verification during login
