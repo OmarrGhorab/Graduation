@@ -117,6 +117,21 @@ export const loginUser = async (req: Request, res: Response, next: NextFunction)
             });
         }
 
+        // Check if 2FA is enabled
+        const userWith2FA = await prisma.user.findUnique({
+            where: { id: user.id },
+            select: { twoFactorEnabled: true },
+        });
+
+        if (userWith2FA?.twoFactorEnabled) {
+            // 2FA is enabled - require token verification
+            return res.status(200).json({
+                message: "2FA verification required",
+                requires2FA: true,
+                emailOrUsername: emailOrUsername,
+            });
+        }
+
         // Verified but not onboarded: issue token but flag the state
         const accessToken = signAccessToken({ id: user.id, role: user.role });
         const { token: refreshToken } = await signAndStoreRefreshToken(user.id);

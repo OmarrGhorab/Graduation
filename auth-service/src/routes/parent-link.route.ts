@@ -6,6 +6,9 @@ import {
   getPendingRequests,
   respondToRequest,
   getLinkedAccounts,
+  sendUnlinkRequest,
+  getPendingUnlinkRequests,
+  respondToUnlinkRequest,
 } from '../controllers/parent-link.controller';
 
 const router = express.Router();
@@ -16,6 +19,11 @@ router.post('/request', authenticate, sendParentLinkRequest);
 router.get('/requests', authenticate, getPendingRequests);
 router.post('/respond', authenticate, respondToRequest);
 router.get('/linked', authenticate, getLinkedAccounts);
+
+// Unlink request routes
+router.post('/unlink/request', authenticate, sendUnlinkRequest);
+router.get('/unlink/requests', authenticate, getPendingUnlinkRequests);
+router.post('/unlink/respond', authenticate, respondToUnlinkRequest);
 
 export default router;
 

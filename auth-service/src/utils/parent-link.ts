@@ -51,6 +51,15 @@ export async function sendParentLinkRequestHelper(
     throw new BadRequestError("Already linked to this parent");
   }
 
+  // Check if child already has 2 linked parents (limit: 2 parents per child)
+  const childLinksCount = await prisma.parentChildLink.count({
+    where: { childId },
+  });
+
+  if (childLinksCount >= 2) {
+    throw new BadRequestError("Child can only link up to 2 parents");
+  }
+
   // Check if request already exists
   const existingRequest = await prisma.parentLinkRequest.findUnique({
     where: {
@@ -154,5 +163,117 @@ export async function sendMultipleParentLinkRequests(
   }
 
   return results;
+}
+
+/**
+ * Helper function to send an unlink request
+ * Child requests to unlink from a parent
+ */
+export async function sendUnlinkRequestHelper(
+  childId: string,
+  parentId: string,
+  skipNotification = false
+): Promise<{
+  id: string;
+  parentId: string;
+  childId: string;
+  status: RequestStatus;
+  createdAt: Date;
+}> {
+  if (childId === parentId) {
+    throw new BadRequestError("Cannot send unlink request to yourself");
+  }
+
+  // Verify parent exists and has PARENT role
+  const parent = await prisma.user.findUnique({
+    where: { id: parentId },
+    select: { id: true, role: true, username: true, name: true, profileImg: true },
+  });
+
+  if (!parent) {
+    throw new NotFoundError("Parent not found");
+  }
+
+  if (parent.role !== UserRole.PARENT) {
+    throw new BadRequestError("User is not a parent");
+  }
+
+  // Check if linked
+  const existingLink = await prisma.parentChildLink.findUnique({
+    where: {
+      parentId_childId: {
+        parentId,
+        childId,
+      },
+    },
+  });
+
+  if (!existingLink) {
+    throw new BadRequestError("Not linked to this parent");
+  }
+
+  // Check if unlink request already exists
+  const existingRequest = await prisma.unlinkRequest.findUnique({
+    where: {
+      childId_parentId: {
+        childId,
+        parentId,
+      },
+    },
+  });
+
+  if (existingRequest) {
+    if (existingRequest.status === RequestStatus.PENDING) {
+      throw new BadRequestError("Unlink request already sent and pending");
+    }
+    // If declined or cancelled, allow resending by updating the request
+  }
+
+  // Get child info for notification
+  const child = await prisma.user.findUnique({
+    where: { id: childId },
+    select: { id: true, username: true, name: true, profileImg: true },
+  });
+
+  if (!child) {
+    throw new NotFoundError("Child not found");
+  }
+
+  // Create or update request
+  const request = await prisma.unlinkRequest.upsert({
+    where: {
+      childId_parentId: {
+        childId,
+        parentId,
+      },
+    },
+    create: {
+      childId,
+      parentId,
+      status: RequestStatus.PENDING,
+    },
+    update: {
+      status: RequestStatus.PENDING,
+      createdAt: new Date(),
+      respondedAt: null,
+    },
+  });
+
+  // Publish real-time notification to parent (unless skipped)
+  if (!skipNotification) {
+    await publishNotification(parentId, {
+      type: "unlink_request",
+      requestId: request.id,
+      child: {
+        id: child.id,
+        username: child.username,
+        name: child.name,
+        profileImg: child.profileImg,
+      },
+      createdAt: request.createdAt.toISOString(),
+    });
+  }
+
+  return request;
 }
 

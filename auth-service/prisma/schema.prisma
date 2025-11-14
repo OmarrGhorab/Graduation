@@ -21,6 +21,9 @@ model User {
   onboardingCompleted Boolean          @default(false)
   preferences         UserPreference?
   verified            Boolean          @default(false)
+  twoFactorEnabled    Boolean          @default(false)
+  twoFactorSecret     String?          // Encrypted TOTP secret
+  twoFactorBackupCodes String[]        @default([]) // Encrypted backup codes
   lastLoginAt         DateTime?
   createdAt           DateTime         @default(now())
   updatedAt           DateTime         @updatedAt
@@ -35,6 +38,8 @@ model User {
   sessions            Session[]
   sentParentRequests  ParentLinkRequest[] @relation("SentParentRequests")
   receivedParentRequests ParentLinkRequest[] @relation("ReceivedParentRequests")
+  sentUnlinkRequests  UnlinkRequest[] @relation("SentUnlinkRequests")
+  receivedUnlinkRequests UnlinkRequest[] @relation("ReceivedUnlinkRequests")
   parentLinks         ParentChildLink[] @relation("ChildLinks")
   childLinks          ParentChildLink[] @relation("ParentLinks")
 
@@ -262,4 +267,22 @@ enum RequestStatus {
   ACCEPTED
   DECLINED
   CANCELLED
+}
+
+model UnlinkRequest {
+  id          String      @id @default(uuid())
+  childId     String      // User requesting to unlink (child)
+  parentId    String      // Parent being requested to unlink from
+  status      RequestStatus @default(PENDING)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  respondedAt DateTime?
+
+  child       User        @relation("SentUnlinkRequests", fields: [childId], references: [id], onDelete: Cascade)
+  parent      User        @relation("ReceivedUnlinkRequests", fields: [parentId], references: [id], onDelete: Cascade)
+
+  @@unique([childId, parentId])
+  @@index([childId])
+  @@index([parentId])
+  @@index([status])
 }

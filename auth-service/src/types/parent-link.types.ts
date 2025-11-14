@@ -37,6 +37,21 @@ export interface RespondToRequestRequestBody {
 }
 
 /**
+ * Request body for sending unlink request
+ */
+export interface SendUnlinkRequestBody {
+  parentId: string;
+}
+
+/**
+ * Request body for responding to an unlink request
+ */
+export interface RespondToUnlinkRequestBody {
+  requestId: string;
+  action: "accept" | "decline";
+}
+
+/**
  * Parent search result item
  */
 export interface ParentSearchResult {
