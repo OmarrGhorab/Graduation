@@ -35,7 +35,7 @@ router.post("/verify-device", verifyDevice);
 router.post("/resend-device-verification-otp", resendDeviceVerificationOtp);
 
 // 2FA routes
-router.post("/2fa/verify-login", verify2FALogin); // Public route for 2FA verification during login
+router.post("/2fa/verify-login", authenticate, verify2FALogin); // Requires authentication from login step
 router.get("/2fa/status", authenticate, get2FAStatus);
 router.post("/2fa/enable", authenticate, enable2FA);
 router.post("/2fa/verify-setup", authenticate, verify2FASetup);

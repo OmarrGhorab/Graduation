@@ -78,7 +78,7 @@ type CookieOptions = {
   refreshMaxAgeSec?: number;
 };
 
-export function setAuthCookies(res: Response, accessToken: string, refreshToken: string, opts: CookieOptions = {}): void {
+export function setAuthCookies(res: Response, accessToken: string, refreshToken?: string, opts: CookieOptions = {}): void {
   // Access token short-lived; recommend header on APIs; also set cookie if needed
   res.cookie("access_token", accessToken, {
     httpOnly: true,
@@ -88,13 +88,16 @@ export function setAuthCookies(res: Response, accessToken: string, refreshToken:
     path: "/",
   });
 
-  res.cookie("refresh_token", refreshToken, {
-    httpOnly: true,
-    secure: isProd,
-    sameSite: "none",
-    maxAge: 1000 * (opts.refreshMaxAgeSec || parseInt(process.env.REFRESH_TOKEN_TTL_SEC || "2592000", 10)),
-    path: "/",
-  });
+  // Only set refresh token if provided
+  if (refreshToken) {
+    res.cookie("refresh_token", refreshToken, {
+      httpOnly: true,
+      secure: isProd,
+      sameSite: "none",
+      maxAge: 1000 * (opts.refreshMaxAgeSec || parseInt(process.env.REFRESH_TOKEN_TTL_SEC || "2592000", 10)),
+      path: "/",
+    });
+  }
 }
 
 export function clearAuthCookies(res: Response): void {

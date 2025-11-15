@@ -13,6 +13,8 @@ import {
 } from "../utils/twoFactor";
 import { signAccessToken, signAndStoreRefreshToken } from "../utils/tokens";
 import { setAuthCookies } from "../utils/cookies";
+import dotenv from "dotenv";
+dotenv.config();
 
 /**
  * Generate 2FA secret and QR code for enabling 2FA
@@ -234,25 +236,23 @@ export const disable2FA = async (req: Request, res: Response, next: NextFunction
  */
 export const verify2FALogin = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { emailOrUsername, token, backupCode } = req.body as {
-      emailOrUsername?: string;
+    // Require authentication - user should be authenticated from login step
+    if (!req.user) {
+      throw new UnauthorizedError("Authentication required. Please login first.");
+    }
+
+    const { token, backupCode } = req.body as {
       token?: string;
       backupCode?: string;
     };
-
-    if (!emailOrUsername) {
-      throw new BadRequestError("Email or username is required");
-    }
 
     if (!token && !backupCode) {
       throw new BadRequestError("Token or backup code is required");
     }
 
-    // Get user
-    const user = await prisma.user.findFirst({
-      where: {
-        OR: [{ email: emailOrUsername }, { username: emailOrUsername }],
-      },
+    // Get user using authenticated user ID
+    const user = await prisma.user.findUnique({
+      where: { id: req.user.id },
       select: {
         id: true,
         email: true,
@@ -263,7 +263,7 @@ export const verify2FALogin = async (req: Request, res: Response, next: NextFunc
     });
 
     if (!user) {
-      throw new UnauthorizedError("Invalid credentials");
+      throw new NotFoundError("User not found");
     }
 
     if (!user.twoFactorEnabled) {

@@ -262,11 +262,13 @@ export const loginUser = async (req: Request, res: Response, next: NextFunction)
 
         // Check if 2FA is enabled (do this after device check)
         if (user.twoFactorEnabled) {
-            // 2FA is enabled - require token verification
+            // 2FA is enabled - issue temporary access token for 2FA verification
+            const tempAccessToken = signAccessToken({ id: user.id, role: user.role });
+            setAuthCookies(res, tempAccessToken);
+            
             return res.status(200).json({
                 message: "2FA verification required",
                 requires2FA: true,
-                emailOrUsername: emailOrUsername,
             });
         }
 
