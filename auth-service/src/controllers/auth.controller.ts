@@ -298,7 +298,52 @@ export const loginUser = async (req: Request, res: Response, next: NextFunction)
         // Check if 2FA is enabled (do this after device check)
         if (user.twoFactorEnabled) {
             // 2FA is enabled - issue temporary access token for 2FA verification
-            const { token: tempAccessToken } = signAccessToken({ id: user.id, role: user.role });
+            const { token: tempAccessToken, jti: tempAccessJti } = signAccessToken({ id: user.id, role: user.role });
+            
+            // Create temporary session for 2FA verification (will be replaced after 2FA succeeds)
+            const sessionDeviceInfo = getSessionDeviceInfo(req);
+            const expiresAt = new Date();
+            expiresAt.setSeconds(expiresAt.getSeconds() + parseInt(process.env.ACCESS_TOKEN_TTL_SEC || "900", 10));
+            
+            // Find or get device ID
+            let deviceId: string | null = null;
+            if (existingDevice) {
+                deviceId = existingDevice.id;
+            } else {
+                // Device was just created, find it
+                const device = await prisma.userDevice.findUnique({
+                    where: {
+                        userId_deviceFingerprint: {
+                            userId: user.id,
+                            deviceFingerprint: deviceInfo.fingerprint,
+                        },
+                    },
+                });
+                if (device) {
+                    deviceId = device.id;
+                }
+            }
+            
+            // Create temporary session (no refresh token yet, will be added after 2FA)
+            // Note: We need to create a session with null refreshToken, but createSession requires a string
+            // So we'll create it directly with Prisma
+            await prisma.session.create({
+                data: {
+                    userId: user.id,
+                    deviceId: deviceId,
+                    sessionToken: tempAccessJti,
+                    refreshToken: null, // Will be updated after 2FA verification
+                    ipAddress: sessionDeviceInfo.ipAddress,
+                    userAgent: sessionDeviceInfo.userAgent,
+                    location: sessionDeviceInfo.location,
+                    expiresAt: expiresAt,
+                    refreshExpiresAt: null, // Will be set after 2FA verification
+                    isActive: true,
+                    isRevoked: false,
+                    lastActivityAt: new Date(),
+                },
+            });
+            
             setAuthCookies(res, tempAccessToken);
             
             return res.status(200).json({
@@ -1013,8 +1058,28 @@ export const verifyDevice = async (req: Request, res: Response, next: NextFuncti
         }
 
         // Issue tokens
-        const { token: accessToken } = signAccessToken({ id: user.id, role: user.role });
-        const { token: refreshToken } = await signAndStoreRefreshToken(user.id);
+        const { token: accessToken, jti: accessJti } = signAccessToken({ id: user.id, role: user.role });
+        const { token: refreshToken, jti: refreshJti } = await signAndStoreRefreshToken(user.id);
+        
+        // Create session record in database
+        const sessionDeviceInfo = getSessionDeviceInfo(req);
+        const expiresAt = new Date();
+        expiresAt.setSeconds(expiresAt.getSeconds() + parseInt(process.env.ACCESS_TOKEN_TTL_SEC || "900", 10));
+        const refreshExpiresAt = new Date();
+        refreshExpiresAt.setSeconds(refreshExpiresAt.getSeconds() + parseInt(process.env.REFRESH_TOKEN_TTL_SEC || "2592000", 10));
+
+        await createSession({
+            userId: user.id,
+            deviceId: device.id,
+            sessionToken: accessJti,
+            refreshTokenJti: refreshJti,
+            ipAddress: sessionDeviceInfo.ipAddress,
+            userAgent: sessionDeviceInfo.userAgent,
+            location: sessionDeviceInfo.location,
+            expiresAt: expiresAt,
+            refreshExpiresAt: refreshExpiresAt,
+        });
+        
         setAuthCookies(res, accessToken, refreshToken);
 
         await prisma.user.update({

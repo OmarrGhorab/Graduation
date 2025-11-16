@@ -13,8 +13,10 @@ import {
 } from "../utils/twoFactor";
 import { signAccessToken, signAndStoreRefreshToken } from "../utils/tokens";
 import { setAuthCookies } from "../utils/cookies";
+import { createSession, getSessionDeviceInfo } from "../utils/sessions";
 import bcrypt from "bcrypt";
 import dotenv from "dotenv";
+import prisma from "../libs/prisma";
 dotenv.config();
 
 /**
@@ -319,8 +321,66 @@ export const verify2FALogin = async (req: Request, res: Response, next: NextFunc
     }
 
     // Issue tokens and complete login
-    const { token: accessToken } = signAccessToken({ id: fullUser.id, role: fullUser.role });
-    const { token: refreshToken } = await signAndStoreRefreshToken(fullUser.id);
+    const { token: accessToken, jti: accessJti } = signAccessToken({ id: fullUser.id, role: fullUser.role });
+    const { token: refreshToken, jti: refreshJti } = await signAndStoreRefreshToken(fullUser.id);
+    
+    // Create session record in database
+    const sessionDeviceInfo = getSessionDeviceInfo(req);
+    const expiresAt = new Date();
+    expiresAt.setSeconds(expiresAt.getSeconds() + parseInt(process.env.ACCESS_TOKEN_TTL_SEC || "900", 10));
+    const refreshExpiresAt = new Date();
+    refreshExpiresAt.setSeconds(refreshExpiresAt.getSeconds() + parseInt(process.env.REFRESH_TOKEN_TTL_SEC || "2592000", 10));
+    
+    // Find existing session from temp token (created during login) and update it, or create new one
+    const existingSession = await prisma.session.findFirst({
+      where: {
+        userId: fullUser.id,
+        sessionToken: req.user?.jti, // Temp token JTI from middleware
+      },
+    });
+    
+    if (existingSession) {
+      // Update existing temporary session with real tokens
+      await prisma.session.update({
+        where: { id: existingSession.id },
+        data: {
+          sessionToken: accessJti,
+          refreshToken: refreshJti,
+          expiresAt: expiresAt,
+          refreshExpiresAt: refreshExpiresAt,
+          lastActivityAt: new Date(),
+        },
+      });
+    } else {
+      // Create new session if temp session doesn't exist
+      // Find device ID from request (if available)
+      let deviceId: string | null = null;
+      // Try to find device by user agent/IP if needed
+      const device = await prisma.userDevice.findFirst({
+        where: {
+          userId: fullUser.id,
+        },
+        orderBy: {
+          lastLoginAt: "desc",
+        },
+      });
+      if (device) {
+        deviceId = device.id;
+      }
+      
+      await createSession({
+        userId: fullUser.id,
+        deviceId: deviceId,
+        sessionToken: accessJti,
+        refreshTokenJti: refreshJti,
+        ipAddress: sessionDeviceInfo.ipAddress,
+        userAgent: sessionDeviceInfo.userAgent,
+        location: sessionDeviceInfo.location,
+        expiresAt: expiresAt,
+        refreshExpiresAt: refreshExpiresAt,
+      });
+    }
+    
     setAuthCookies(res, accessToken, refreshToken);
 
     // Update last login

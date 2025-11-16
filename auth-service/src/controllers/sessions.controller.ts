@@ -119,15 +119,15 @@ export const revokeSessionById = async (req: Request, res: Response, next: NextF
         if (isCurrentSession) {
             clearAuthCookies(res);
             return res.json({
-                message: "Session deleted successfully. You have been logged out.",
-                deleted: true,
+                message: "Session revoked successfully. You have been logged out.",
+                revoked: true,
                 loggedOut: true,
             });
         }
 
         res.json({
-            message: "Session deleted successfully",
-            deleted: true,
+            message: "Session revoked successfully",
+            revoked: true,
             loggedOut: false,
         });
     } catch (err) {
@@ -176,17 +176,17 @@ export const revokeAllSessions = async (req: Request, res: Response, next: NextF
         if (wasCurrentIncluded) {
             clearAuthCookies(res);
             return res.json({
-                message: `Deleted ${deletedCount} session(s) successfully. You have been logged out.`,
-                deletedCount,
+                message: `Revoked ${deletedCount} session(s) successfully. You have been logged out.`,
+                revokedCount: deletedCount,
                 loggedOut: true,
             });
         }
 
         res.json({
             message: deletedCount > 0 
-                ? `Deleted ${deletedCount} session(s) successfully`
-                : "No sessions to delete.",
-            deletedCount,
+                ? `Revoked ${deletedCount} session(s) successfully`
+                : "No sessions to revoke.",
+            revokedCount: deletedCount,
             loggedOut: false,
         });
     } catch (err) {
