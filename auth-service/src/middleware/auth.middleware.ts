@@ -54,11 +54,12 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
       throw new UnauthorizedError("Account is deactivated");
     }
 
-    // Verify session exists in database (ensures immediate logout after session deletion)
+    // Verify session exists in database and is not revoked (ensures immediate logout after session revocation)
     const session = await prisma.session.findFirst({
       where: {
         sessionToken: payload.jti,
         userId: user.id,
+        isRevoked: false, // Exclude revoked sessions
       },
       select: {
         id: true,

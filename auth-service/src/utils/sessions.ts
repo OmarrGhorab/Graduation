@@ -60,8 +60,8 @@ export async function updateSessionActivity(sessionToken: string) {
 }
 
 /**
- * Revoke a specific session (hard delete)
- * Deletes session from DB and revokes refresh token in Redis
+ * Revoke a specific session (soft delete)
+ * Marks session as revoked in DB and revokes refresh token in Redis
  * Returns whether it was the current session
  */
 export async function revokeSession(sessionId: string, userId: string, currentSessionToken?: string | null) {
@@ -72,6 +72,7 @@ export async function revokeSession(sessionId: string, userId: string, currentSe
       userId: true,
       sessionToken: true,
       refreshToken: true,
+      isRevoked: true,
     },
   });
 
@@ -81,6 +82,13 @@ export async function revokeSession(sessionId: string, userId: string, currentSe
 
   if (session.userId !== userId) {
     throw new Error("Unauthorized to revoke this session");
+  }
+
+  // Check if already revoked
+  if (session.isRevoked) {
+    // Still check if it's the current session for logout purposes
+    const isCurrentSession = currentSessionToken && session.sessionToken === currentSessionToken;
+    return { isCurrentSession };
   }
 
   // Check if this is the current session
@@ -95,19 +103,25 @@ export async function revokeSession(sessionId: string, userId: string, currentSe
     }
   }
 
-  // Hard delete session from DB
-  await prisma.session.delete({
+  // Soft delete session - mark as revoked
+  await prisma.session.update({
     where: { id: sessionId },
+    data: {
+      isRevoked: true,
+      isActive: false,
+      revokedAt: new Date(),
+    },
   });
 
   return { isCurrentSession };
 }
 
 /**
- * Revoke all sessions for a user (hard delete)
+ * Revoke all sessions for a user (soft delete)
+ * Marks sessions as revoked in DB and revokes refresh tokens in Redis
  * @param userId - User ID
  * @param currentSessionToken - Current session token to optionally exclude
- * @param includeCurrent - If true, includes current session in deletion (default: false)
+ * @param includeCurrent - If true, includes current session in revocation (default: false)
  * @returns Object with deletedCount and wasCurrentIncluded
  */
 export async function revokeAllUserSessions(
@@ -115,9 +129,10 @@ export async function revokeAllUserSessions(
   currentSessionToken: string,
   includeCurrent: boolean = false
 ) {
-  // Build where clause
+  // Build where clause - only revoke sessions that aren't already revoked
   const whereClause: any = {
     userId: userId,
+    isRevoked: false, // Only revoke sessions that aren't already revoked
   };
 
   // Exclude current session if not including it
@@ -127,16 +142,17 @@ export async function revokeAllUserSessions(
     };
   }
 
-  // Get refresh tokens before deleting
-  const sessionsToDelete = await prisma.session.findMany({
+  // Get sessions to revoke (including refresh tokens)
+  const sessionsToRevoke = await prisma.session.findMany({
     where: whereClause,
     select: {
+      id: true,
       refreshToken: true,
     },
   });
 
   // Revoke refresh tokens in Redis
-  for (const session of sessionsToDelete) {
+  for (const session of sessionsToRevoke) {
     if (session.refreshToken) {
       try {
         await revokeRefreshTokenByJti(session.refreshToken);
@@ -146,9 +162,14 @@ export async function revokeAllUserSessions(
     }
   }
 
-  // Hard delete sessions
-  const result = await prisma.session.deleteMany({
+  // Soft delete sessions - mark as revoked
+  const result = await prisma.session.updateMany({
     where: whereClause,
+    data: {
+      isRevoked: true,
+      isActive: false,
+      revokedAt: new Date(),
+    },
   });
 
   return {

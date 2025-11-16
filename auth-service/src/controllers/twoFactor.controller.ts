@@ -16,7 +16,6 @@ import { setAuthCookies } from "../utils/cookies";
 import { createSession, getSessionDeviceInfo } from "../utils/sessions";
 import bcrypt from "bcrypt";
 import dotenv from "dotenv";
-import prisma from "../libs/prisma";
 dotenv.config();
 
 /**
