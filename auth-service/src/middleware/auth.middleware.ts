@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from "express";
 import { verifyAccessToken } from "../utils/tokens";
 import { UnauthorizedError } from "../utils/errors";
 import { getAccessTokenFromRequest } from "../utils/cookies";
+import prisma from "../libs/prisma";
 
 /**
  * Authentication middleware to verify access token and attach user info to request
@@ -29,10 +30,33 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
       throw new UnauthorizedError("Invalid token type");
     }
 
+    // Check user account status
+    const user = await prisma.user.findUnique({
+      where: { id: payload.sub },
+      select: {
+        id: true,
+        isActive: true,
+        deletedAt: true,
+        role: true,
+      },
+    });
+
+    if (!user) {
+      throw new UnauthorizedError("User not found");
+    }
+
+    if (user.deletedAt) {
+      throw new UnauthorizedError("Account has been deleted");
+    }
+
+    if (!user.isActive) {
+      throw new UnauthorizedError("Account is deactivated");
+    }
+
     // Attach user info to request object
     req.user = {
-      id: payload.sub,
-      role: payload.role,
+      id: user.id,
+      role: user.role,
       jti: payload.jti,
     };
 

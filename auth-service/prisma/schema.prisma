@@ -27,6 +27,8 @@ model User {
   twoFactorBackupCodes     String[]        @default([]) // Encrypted backup codes
   deviceBlocked            Boolean         @default(false) // Blocked due to new device
   pendingDeviceFingerprint String? // Device fingerprint waiting for verification
+  isActive                 Boolean         @default(true) // Account active status
+  deletedAt                DateTime? // Soft delete timestamp
   lastLoginAt              DateTime?
   createdAt                DateTime        @default(now())
   updatedAt                DateTime        @updatedAt

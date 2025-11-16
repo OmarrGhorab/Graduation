@@ -13,6 +13,7 @@ import {
 } from "../utils/twoFactor";
 import { signAccessToken, signAndStoreRefreshToken } from "../utils/tokens";
 import { setAuthCookies } from "../utils/cookies";
+import bcrypt from "bcrypt";
 import dotenv from "dotenv";
 dotenv.config();
 
@@ -176,8 +177,7 @@ export const disable2FA = async (req: Request, res: Response, next: NextFunction
         throw new BadRequestError("Password is required to disable 2FA");
       }
 
-      const bcrypt = await import("bcrypt");
-      const isValidPassword = await bcrypt.default.compare(password, user.password);
+      const isValidPassword = await bcrypt.compare(password, user.password);
 
       if (!isValidPassword) {
         throw new UnauthorizedError("Invalid password");

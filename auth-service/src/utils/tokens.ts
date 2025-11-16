@@ -39,6 +39,12 @@ export async function signAndStoreRefreshToken(userId: string): Promise<{ token:
   // Store mapping jti -> userId with TTL
   const key = `rt:${jti}`;
   await redis.set(key, userId, "EX", REFRESH_TOKEN_TTL_SEC);
+  
+  // Also store jti in user's refresh token set for bulk revocation
+  const userTokensKey = `user:${userId}:refresh_tokens`;
+  await redis.sadd(userTokensKey, jti);
+  await redis.expire(userTokensKey, REFRESH_TOKEN_TTL_SEC);
+  
   return { token, jti };
 }
 
@@ -56,12 +62,38 @@ export async function verifyRefreshToken(token: string): Promise<JwtPayload> {
 }
 
 export async function revokeRefreshTokenByJti(jti: string): Promise<void> {
-  await redis.del(`rt:${jti}`);
+  const key = `rt:${jti}`;
+  const userId = await redis.get(key);
+  await redis.del(key);
+  
+  // Remove from user's refresh token set if exists
+  if (userId) {
+    const userTokensKey = `user:${userId}:refresh_tokens`;
+    await redis.srem(userTokensKey, jti);
+  }
 }
 
 export async function rotateRefreshToken(oldJti: string, userId: string): Promise<{ token: string; jti: string }>{
   await revokeRefreshTokenByJti(oldJti);
   return signAndStoreRefreshToken(userId);
+}
+
+/**
+ * Revoke all refresh tokens for a user
+ * This is used when deactivating or deleting an account
+ */
+export async function revokeAllUserRefreshTokens(userId: string): Promise<void> {
+  const userTokensKey = `user:${userId}:refresh_tokens`;
+  const jtis = await redis.smembers(userTokensKey);
+  
+  // Delete all refresh token keys
+  if (jtis.length > 0) {
+    const keys = jtis.map(jti => `rt:${jti}`);
+    await redis.del(...keys);
+  }
+  
+  // Delete the user's refresh token set
+  await redis.del(userTokensKey);
 }
 
 

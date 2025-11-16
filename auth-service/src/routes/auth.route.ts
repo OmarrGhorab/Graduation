@@ -9,6 +9,10 @@ import {
   get2FAStatus,
   regenerateBackupCodes,
 } from "../controllers/twoFactor.controller";
+import {
+  deactivateAccount,
+  deleteAccount,
+} from "../controllers/account.controller";
 
 const router = Router();
 
@@ -41,5 +45,9 @@ router.post("/2fa/enable", authenticate, enable2FA);
 router.post("/2fa/verify-setup", authenticate, verify2FASetup);
 router.post("/2fa/disable", authenticate, disable2FA);
 router.post("/2fa/regenerate-backup-codes", authenticate, regenerateBackupCodes);
+
+// Account management (Danger Zone)
+router.post("/account/deactivate", authenticate, deactivateAccount);
+router.post("/account/delete", authenticate, deleteAccount);
 
 export default router;
