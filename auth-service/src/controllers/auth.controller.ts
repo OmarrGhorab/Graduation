@@ -24,6 +24,7 @@ import {
   setResendOtpCooldown,
 } from "../utils/emailVerification";
 import { extractDeviceInfo, extractDeviceName } from "../utils/device";
+import { createSession, getSessionDeviceInfo } from "../utils/sessions";
 
 
 dotenv.config();
@@ -65,7 +66,7 @@ export const registerUser = async (req: Request, res: Response, next: NextFuncti
         });
 
         // issue tokens; store refresh in Redis only (no DB storage)
-        const accessToken = signAccessToken({ id: user.id, role: user.role });
+        const { token: accessToken } = signAccessToken({ id: user.id, role: user.role });
         const { token: refreshToken } = await signAndStoreRefreshToken(user.id);
         setAuthCookies(res, accessToken, refreshToken);
 
@@ -297,7 +298,7 @@ export const loginUser = async (req: Request, res: Response, next: NextFunction)
         // Check if 2FA is enabled (do this after device check)
         if (user.twoFactorEnabled) {
             // 2FA is enabled - issue temporary access token for 2FA verification
-            const tempAccessToken = signAccessToken({ id: user.id, role: user.role });
+            const { token: tempAccessToken } = signAccessToken({ id: user.id, role: user.role });
             setAuthCookies(res, tempAccessToken);
             
             return res.status(200).json({
@@ -310,9 +311,47 @@ export const loginUser = async (req: Request, res: Response, next: NextFunction)
         }
 
         // Verified but not onboarded: issue token but flag the state
-        const accessToken = signAccessToken({ id: user.id, role: user.role });
-        const { token: refreshToken } = await signAndStoreRefreshToken(user.id);
+        const { token: accessToken, jti: accessJti } = signAccessToken({ id: user.id, role: user.role });
+        const { token: refreshToken, jti: refreshJti } = await signAndStoreRefreshToken(user.id);
         setAuthCookies(res, accessToken, refreshToken);
+
+        // Create session record in database
+        const sessionDeviceInfo = getSessionDeviceInfo(req);
+        const expiresAt = new Date();
+        expiresAt.setSeconds(expiresAt.getSeconds() + parseInt(process.env.ACCESS_TOKEN_TTL_SEC || "900", 10));
+        const refreshExpiresAt = new Date();
+        refreshExpiresAt.setSeconds(refreshExpiresAt.getSeconds() + parseInt(process.env.REFRESH_TOKEN_TTL_SEC || "2592000", 10));
+
+        // Find or get device ID
+        let deviceId: string | null = null;
+        if (existingDevice) {
+            deviceId = existingDevice.id;
+        } else {
+            // Device was just created, find it
+            const device = await prisma.userDevice.findUnique({
+                where: {
+                    userId_deviceFingerprint: {
+                        userId: user.id,
+                        deviceFingerprint: deviceInfo.fingerprint,
+                    },
+                },
+            });
+            if (device) {
+                deviceId = device.id;
+            }
+        }
+
+        await createSession({
+            userId: user.id,
+            deviceId: deviceId,
+            sessionToken: accessJti,
+            refreshTokenJti: refreshJti,
+            ipAddress: sessionDeviceInfo.ipAddress,
+            userAgent: sessionDeviceInfo.userAgent,
+            location: sessionDeviceInfo.location,
+            expiresAt: expiresAt,
+            refreshExpiresAt: refreshExpiresAt,
+        });
 
         await prisma.user.update({
             where: { id: user.id },
@@ -416,11 +455,38 @@ export const refreshToken = async (req: Request, res: Response, next: NextFuncti
             throw new UnauthorizedError("Account not verified");
         }
 
+        // Find session by old refresh token JTI BEFORE rotating token
+        const session = await prisma.session.findFirst({
+            where: {
+                userId: user.id,
+                refreshToken: payload.jti, // Old refresh token JTI
+            },
+        });
+
         // Generate new access token with current user role
-        const accessToken = signAccessToken({ id: user.id, role: user.role });
+        const { token: accessToken, jti: newAccessJti } = signAccessToken({ id: user.id, role: user.role });
 
         // Rotate refresh token for security (revoke old, create new)
-        const { token: newRefreshToken } = await rotateRefreshToken(payload.jti, user.id);
+        const { token: newRefreshToken, jti: newRefreshJti } = await rotateRefreshToken(payload.jti, user.id);
+
+        // Update session record with new tokens if session exists
+        if (session) {
+            const expiresAt = new Date();
+            expiresAt.setSeconds(expiresAt.getSeconds() + parseInt(process.env.ACCESS_TOKEN_TTL_SEC || "900", 10));
+            const refreshExpiresAt = new Date();
+            refreshExpiresAt.setSeconds(refreshExpiresAt.getSeconds() + parseInt(process.env.REFRESH_TOKEN_TTL_SEC || "2592000", 10));
+
+            await prisma.session.update({
+                where: { id: session.id },
+                data: {
+                    sessionToken: newAccessJti, // Update with new access token JTI
+                    refreshToken: newRefreshJti, // Update with new refresh token JTI
+                    expiresAt: expiresAt,
+                    refreshExpiresAt: refreshExpiresAt,
+                    lastActivityAt: new Date(),
+                },
+            });
+        }
 
         // Set new tokens in cookies
         setAuthCookies(res, accessToken, newRefreshToken);
@@ -844,14 +910,14 @@ export const googleCallback = async (req: Request, res: Response, next: NextFunc
         if (!user.onboardingCompleted) {
             const frontendUrl = process.env.FRONTEND_URL || "http://localhost:3000";
             // Issue tokens but redirect to onboarding
-            const accessToken = signAccessToken({ id: user.id, role: user.role });
+            const { token: accessToken } = signAccessToken({ id: user.id, role: user.role });
             const { token: refreshToken } = await signAndStoreRefreshToken(user.id);
             setAuthCookies(res, accessToken, refreshToken);
             return res.redirect(`${frontendUrl}/auth/google/callback?success=true&token=${accessToken}&requiresOnboarding=true`);
         }
 
         // Issue tokens
-        const accessToken = signAccessToken({ id: user.id, role: user.role });
+        const { token: accessToken } = signAccessToken({ id: user.id, role: user.role });
         const { token: refreshToken } = await signAndStoreRefreshToken(user.id);
         setAuthCookies(res, accessToken, refreshToken);
 
@@ -947,7 +1013,7 @@ export const verifyDevice = async (req: Request, res: Response, next: NextFuncti
         }
 
         // Issue tokens
-        const accessToken = signAccessToken({ id: user.id, role: user.role });
+        const { token: accessToken } = signAccessToken({ id: user.id, role: user.role });
         const { token: refreshToken } = await signAndStoreRefreshToken(user.id);
         setAuthCookies(res, accessToken, refreshToken);
 

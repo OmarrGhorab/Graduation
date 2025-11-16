@@ -13,6 +13,12 @@ import {
   deactivateAccount,
   deleteAccount,
 } from "../controllers/account.controller";
+import { getActivity } from "../controllers/activity.controller";
+import {
+  getSessions,
+  revokeSessionById,
+  revokeAllSessions,
+} from "../controllers/sessions.controller";
 
 const router = Router();
 
@@ -49,5 +55,12 @@ router.post("/2fa/regenerate-backup-codes", authenticate, regenerateBackupCodes)
 // Account management (Danger Zone)
 router.post("/account/deactivate", authenticate, deactivateAccount);
 router.post("/account/delete", authenticate, deleteAccount);
+
+// Activity and Sessions
+router.get("/activity", authenticate, getActivity);
+router.get("/sessions", authenticate, getSessions);
+// IMPORTANT: Put /all route BEFORE /:sessionId route to avoid route conflict
+router.delete("/sessions/all", authenticate, revokeAllSessions);
+router.delete("/sessions/:sessionId", authenticate, revokeSessionById);
 
 export default router;

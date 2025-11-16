@@ -319,7 +319,7 @@ export const verify2FALogin = async (req: Request, res: Response, next: NextFunc
     }
 
     // Issue tokens and complete login
-    const accessToken = signAccessToken({ id: fullUser.id, role: fullUser.role });
+    const { token: accessToken } = signAccessToken({ id: fullUser.id, role: fullUser.role });
     const { token: refreshToken } = await signAndStoreRefreshToken(fullUser.id);
     setAuthCookies(res, accessToken, refreshToken);
 

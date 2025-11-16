@@ -3,6 +3,7 @@ import { verifyAccessToken } from "../utils/tokens";
 import { UnauthorizedError } from "../utils/errors";
 import { getAccessTokenFromRequest } from "../utils/cookies";
 import prisma from "../libs/prisma";
+import { updateSessionActivity } from "../utils/sessions";
 
 /**
  * Authentication middleware to verify access token and attach user info to request
@@ -53,12 +54,33 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
       throw new UnauthorizedError("Account is deactivated");
     }
 
+    // Verify session exists in database (ensures immediate logout after session deletion)
+    const session = await prisma.session.findFirst({
+      where: {
+        sessionToken: payload.jti,
+        userId: user.id,
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    if (!session) {
+      throw new UnauthorizedError("Session not found or has been revoked");
+    }
+
     // Attach user info to request object
     req.user = {
       id: user.id,
       role: user.role,
       jti: payload.jti,
     };
+
+    // Update session activity (non-blocking)
+    updateSessionActivity(payload.jti).catch((err) => {
+      // Log error but don't block request
+      console.error("Failed to update session activity:", err);
+    });
 
     next();
   } catch (err) {

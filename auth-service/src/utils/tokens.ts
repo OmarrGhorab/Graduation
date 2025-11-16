@@ -19,15 +19,17 @@ export function generateJti(): string {
   return crypto.randomUUID();
 }
 
-export function signAccessToken(user: { id: string; role?: string }): string {
+export function signAccessToken(user: { id: string; role?: string }): { token: string; jti: string } {
+  const jti = generateJti();
   const payload: JwtPayload = {
     sub: user.id,
-    jti: generateJti(),
+    jti: jti,
     role: user.role,
     type: "access",
   };
   const opts: SignOptions = { expiresIn: ACCESS_TOKEN_TTL_SEC, algorithm: "HS256" };
-  return jwt.sign(payload, ACCESS_TOKEN_SECRET, opts);
+  const token = jwt.sign(payload, ACCESS_TOKEN_SECRET, opts);
+  return { token, jti };
 }
 
 export async function signAndStoreRefreshToken(userId: string): Promise<{ token: string; jti: string }> {
