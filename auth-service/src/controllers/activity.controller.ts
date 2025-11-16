@@ -15,10 +15,15 @@ export const getActivity = async (req: Request, res: Response, next: NextFunctio
             throw new UnauthorizedError("Authentication required");
         }
 
-        // Get most recent session activity
+        // Get most recent session activity from active sessions only
         const mostRecentSession = await prisma.session.findFirst({
             where: {
                 userId: userId,
+                isActive: true,
+                isRevoked: false,
+                expiresAt: {
+                    gt: new Date(), // Not expired
+                },
             },
             orderBy: {
                 lastActivityAt: "desc",

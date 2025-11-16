@@ -3,8 +3,8 @@ import bcrypt from "bcrypt";
 import prisma from "../libs/prisma";
 import { BadRequestError, UnauthorizedError, TooManyRequestsError } from "../utils/errors";
 import { createAndStoreOtp, verifyOtp } from "../utils/otp";
-import { signAccessToken, signAndStoreRefreshToken, verifyRefreshToken, revokeRefreshTokenByJti, rotateRefreshToken } from "../utils/tokens";
-import { setAuthCookies, clearAuthCookies, getRefreshTokenFromRequest } from "../utils/cookies";
+import { signAccessToken, signAndStoreRefreshToken, verifyRefreshToken, revokeRefreshTokenByJti, rotateRefreshToken, verifyAccessToken } from "../utils/tokens";
+import { setAuthCookies, clearAuthCookies, getRefreshTokenFromRequest, getAccessTokenFromRequest } from "../utils/cookies";
 import { aj } from "../libs/arcjet";
 import { generateUsernameSuggestions, generateUniqueUsername } from "../utils/username";
 import { OAuth2Client } from "google-auth-library";
@@ -65,9 +65,50 @@ export const registerUser = async (req: Request, res: Response, next: NextFuncti
             data: { name, username, email, password: hashed, verified: false },
         });
 
-        // issue tokens; store refresh in Redis only (no DB storage)
-        const { token: accessToken } = signAccessToken({ id: user.id, role: user.role });
-        const { token: refreshToken } = await signAndStoreRefreshToken(user.id);
+        // Issue tokens
+        const { token: accessToken, jti: accessJti } = signAccessToken({ id: user.id, role: user.role });
+        const { token: refreshToken, jti: refreshJti } = await signAndStoreRefreshToken(user.id);
+        
+        // Create session record in database
+        const sessionDeviceInfo = getSessionDeviceInfo(req);
+        const expiresAt = new Date();
+        expiresAt.setSeconds(expiresAt.getSeconds() + parseInt(process.env.ACCESS_TOKEN_TTL_SEC || "900", 10));
+        const refreshExpiresAt = new Date();
+        refreshExpiresAt.setSeconds(refreshExpiresAt.getSeconds() + parseInt(process.env.REFRESH_TOKEN_TTL_SEC || "2592000", 10));
+        
+        // Extract device info and create device record
+        const deviceInfo = extractDeviceInfo(req);
+        let deviceId: string | null = null;
+        
+        // Create device record for new user
+        const deviceName = extractDeviceName(deviceInfo.userAgent);
+        const newDevice = await prisma.userDevice.create({
+            data: {
+                userId: user.id,
+                deviceFingerprint: deviceInfo.fingerprint,
+                deviceName: deviceName,
+                platform: deviceInfo.platform,
+                ipAddress: deviceInfo.ipAddress,
+                isTrusted: true, // New registrations are trusted by default
+                loginCount: 1,
+                lastLoginAt: new Date(),
+            },
+        });
+        deviceId = newDevice.id;
+        
+        // Create session
+        await createSession({
+            userId: user.id,
+            deviceId: deviceId,
+            sessionToken: accessJti,
+            refreshTokenJti: refreshJti,
+            ipAddress: sessionDeviceInfo.ipAddress,
+            userAgent: sessionDeviceInfo.userAgent,
+            location: sessionDeviceInfo.location,
+            expiresAt: expiresAt,
+            refreshExpiresAt: refreshExpiresAt,
+        });
+        
         setAuthCookies(res, accessToken, refreshToken);
 
         // email verification OTP
@@ -429,9 +470,63 @@ export const loginUser = async (req: Request, res: Response, next: NextFunction)
 
 export const logoutUser = async (req: Request, res: Response, next: NextFunction) => {
     try {
-        // Extract refresh token from request
+        // Extract tokens from request
         const refreshToken = getRefreshTokenFromRequest(req);
+        const accessToken = getAccessTokenFromRequest(req);
         
+        let sessionTokenJti: string | null = null;
+        
+        // Get access token JTI to revoke session
+        if (accessToken) {
+            try {
+                const payload = await verifyAccessToken(accessToken);
+                sessionTokenJti = payload.jti;
+            } catch {
+                // ignore errors when verifying token during logout
+            }
+        }
+        
+        // Revoke session in database if access token is valid
+        if (sessionTokenJti) {
+            try {
+                // Find session to get refresh token before revoking
+                const session = await prisma.session.findFirst({
+                    where: {
+                        sessionToken: sessionTokenJti,
+                        isRevoked: false,
+                    },
+                    select: {
+                        id: true,
+                        refreshToken: true,
+                    },
+                });
+                
+                if (session) {
+                    // Revoke refresh token in Redis if it exists
+                    if (session.refreshToken) {
+                        try {
+                            await revokeRefreshTokenByJti(session.refreshToken);
+                        } catch {
+                            // ignore errors when revoking token during logout
+                        }
+                    }
+                    
+                    // Revoke session in database
+                    await prisma.session.update({
+                        where: { id: session.id },
+                        data: {
+                            isRevoked: true,
+                            isActive: false,
+                            revokedAt: new Date(),
+                        },
+                    });
+                }
+            } catch {
+                // ignore errors when revoking session during logout
+            }
+        }
+        
+        // Also revoke refresh token from request if provided (fallback)
         if (refreshToken) {
             try {
                 const payload = await verifyRefreshToken(refreshToken);
@@ -440,6 +535,7 @@ export const logoutUser = async (req: Request, res: Response, next: NextFunction
                 // ignore errors when revoking token during logout
             }
         }
+        
         clearAuthCookies(res);
         res.json({ message: "Logged out" });
     } catch (err) {
@@ -938,10 +1034,10 @@ export const googleCallback = async (req: Request, res: Response, next: NextFunc
                 });
             }
 
-            // Update last login
+            // Update verified status (lastLoginAt will be updated after session creation)
             await prisma.user.update({
                 where: { id: user.id },
-                data: { lastLoginAt: new Date(), verified: true },
+                data: { verified: true },
             });
         }
 
@@ -951,20 +1047,85 @@ export const googleCallback = async (req: Request, res: Response, next: NextFunc
             return res.redirect(`${frontendUrl}/auth/google/callback?error=verification_required&message=Please verify your account`);
         }
 
+        // Issue tokens
+        const { token: accessToken, jti: accessJti } = signAccessToken({ id: user.id, role: user.role });
+        const { token: refreshToken, jti: refreshJti } = await signAndStoreRefreshToken(user.id);
+        
+        // Create session record in database
+        const sessionDeviceInfo = getSessionDeviceInfo(req);
+        const expiresAt = new Date();
+        expiresAt.setSeconds(expiresAt.getSeconds() + parseInt(process.env.ACCESS_TOKEN_TTL_SEC || "900", 10));
+        const refreshExpiresAt = new Date();
+        refreshExpiresAt.setSeconds(refreshExpiresAt.getSeconds() + parseInt(process.env.REFRESH_TOKEN_TTL_SEC || "2592000", 10));
+        
+        // Extract device info and find or create device
+        const deviceInfo = extractDeviceInfo(req);
+        let deviceId: string | null = null;
+        
+        // Try to find existing device
+        const existingDevice = await prisma.userDevice.findUnique({
+            where: {
+                userId_deviceFingerprint: {
+                    userId: user.id,
+                    deviceFingerprint: deviceInfo.fingerprint,
+                },
+            },
+        });
+        
+        if (existingDevice) {
+            deviceId = existingDevice.id;
+            // Update device login count and last login
+            await prisma.userDevice.update({
+                where: { id: existingDevice.id },
+                data: {
+                    loginCount: { increment: 1 },
+                    lastLoginAt: new Date(),
+                },
+            });
+        } else {
+            // Create new device
+            const deviceName = extractDeviceName(deviceInfo.userAgent);
+            const newDevice = await prisma.userDevice.create({
+                data: {
+                    userId: user.id,
+                    deviceFingerprint: deviceInfo.fingerprint,
+                    deviceName: deviceName,
+                    platform: deviceInfo.platform,
+                    ipAddress: deviceInfo.ipAddress,
+                    isTrusted: true, // Google OAuth users are trusted by default
+                    loginCount: 1,
+                    lastLoginAt: new Date(),
+                },
+            });
+            deviceId = newDevice.id;
+        }
+        
+        // Create session
+        await createSession({
+            userId: user.id,
+            deviceId: deviceId,
+            sessionToken: accessJti,
+            refreshTokenJti: refreshJti,
+            ipAddress: sessionDeviceInfo.ipAddress,
+            userAgent: sessionDeviceInfo.userAgent,
+            location: sessionDeviceInfo.location,
+            expiresAt: expiresAt,
+            refreshExpiresAt: refreshExpiresAt,
+        });
+        
+        setAuthCookies(res, accessToken, refreshToken);
+        
+        // Update last login
+        await prisma.user.update({
+            where: { id: user.id },
+            data: { lastLoginAt: new Date() },
+        });
+
         // Check if onboarding is completed
         if (!user.onboardingCompleted) {
             const frontendUrl = process.env.FRONTEND_URL || "http://localhost:3000";
-            // Issue tokens but redirect to onboarding
-            const { token: accessToken } = signAccessToken({ id: user.id, role: user.role });
-            const { token: refreshToken } = await signAndStoreRefreshToken(user.id);
-            setAuthCookies(res, accessToken, refreshToken);
             return res.redirect(`${frontendUrl}/auth/google/callback?success=true&token=${accessToken}&requiresOnboarding=true`);
         }
-
-        // Issue tokens
-        const { token: accessToken } = signAccessToken({ id: user.id, role: user.role });
-        const { token: refreshToken } = await signAndStoreRefreshToken(user.id);
-        setAuthCookies(res, accessToken, refreshToken);
 
         // Redirect to frontend with success (you can customize this redirect URL)
         const frontendUrl = process.env.FRONTEND_URL || "http://localhost:3000";
@@ -1049,6 +1210,34 @@ export const verifyDevice = async (req: Request, res: Response, next: NextFuncti
 
         // Check if 2FA is enabled
         if (user.twoFactorEnabled) {
+            // 2FA is enabled - issue temporary access token for 2FA verification
+            const { token: tempAccessToken, jti: tempAccessJti } = signAccessToken({ id: user.id, role: user.role });
+            
+            // Create temporary session for 2FA verification (will be replaced after 2FA succeeds)
+            const sessionDeviceInfo = getSessionDeviceInfo(req);
+            const expiresAt = new Date();
+            expiresAt.setSeconds(expiresAt.getSeconds() + parseInt(process.env.ACCESS_TOKEN_TTL_SEC || "900", 10));
+            
+            // Create temporary session (no refresh token yet, will be added after 2FA)
+            await prisma.session.create({
+                data: {
+                    userId: user.id,
+                    deviceId: device.id,
+                    sessionToken: tempAccessJti,
+                    refreshToken: null, // Will be updated after 2FA verification
+                    ipAddress: sessionDeviceInfo.ipAddress,
+                    userAgent: sessionDeviceInfo.userAgent,
+                    location: sessionDeviceInfo.location,
+                    expiresAt: expiresAt,
+                    refreshExpiresAt: null, // Will be set after 2FA verification
+                    isActive: true,
+                    isRevoked: false,
+                    lastActivityAt: new Date(),
+                },
+            });
+            
+            setAuthCookies(res, tempAccessToken);
+            
             return res.status(200).json({
                 message: "Device verified successfully. 2FA verification required.",
                 deviceVerified: true,
