@@ -87,12 +87,14 @@ export async function revokeSession(sessionId: string, userId: string, currentSe
   // Check if already revoked
   if (session.isRevoked) {
     // Still check if it's the current session for logout purposes
-    const isCurrentSession = currentSessionToken && session.sessionToken === currentSessionToken;
+    const isCurrentSession =
+      !!currentSessionToken && session.sessionToken === currentSessionToken;
     return { isCurrentSession };
   }
 
   // Check if this is the current session
-  const isCurrentSession = currentSessionToken && session.sessionToken === currentSessionToken;
+  const isCurrentSession =
+    !!currentSessionToken && session.sessionToken === currentSessionToken;
 
   // Revoke refresh token in Redis if exists
   if (session.refreshToken) {

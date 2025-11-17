@@ -320,6 +320,9 @@ export const loginUser = async (req: Request, res: Response, next: NextFunction)
                         pendingDeviceFingerprint: null,
                     },
                 });
+                // Keep local state in sync with DB so downstream checks behave correctly
+                user.deviceBlocked = false;
+                user.pendingDeviceFingerprint = null;
             }
         }
 
@@ -1039,6 +1042,8 @@ export const googleCallback = async (req: Request, res: Response, next: NextFunc
                 where: { id: user.id },
                 data: { verified: true },
             });
+            // Keep local user state in sync for subsequent checks
+            user.verified = true;
         }
 
         // Check if user account is verified (should always be true for Google users, but check for safety)

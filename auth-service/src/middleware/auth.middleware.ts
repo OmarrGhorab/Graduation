@@ -60,6 +60,9 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
         sessionToken: payload.jti,
         userId: user.id,
         isRevoked: false, // Exclude revoked sessions
+        expiresAt: {
+          gt: new Date(), // Exclude expired sessions
+        },
       },
       select: {
         id: true,
@@ -67,7 +70,7 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
     });
 
     if (!session) {
-      throw new UnauthorizedError("Session not found or has been revoked");
+      throw new UnauthorizedError("Session not found, has been revoked, or has expired");
     }
 
     // Attach user info to request object
