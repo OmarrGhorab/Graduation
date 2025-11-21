@@ -12,7 +12,7 @@ type JwtPayload = {
 const ACCESS_TOKEN_TTL_SEC = parseInt(process.env.ACCESS_TOKEN_TTL_SEC || "900", 10); // 15 minutes
 const REFRESH_TOKEN_TTL_SEC = parseInt(process.env.REFRESH_TOKEN_TTL_SEC || "2592000", 10); // 30 days
 
-const ACCESS_TOKEN_SECRET: Secret = process.env.ACCESS_TOKEN_SECRET || "dev-access-secret";
+const ACCESS_TOKEN_SECRET: Secret = process.env.JWT_ACCESS_SECRET || "dev-access-secret";
 const REFRESH_TOKEN_SECRET: Secret = process.env.REFRESH_TOKEN_SECRET || "dev-refresh-secret";
 
 export function generateJti(): string {

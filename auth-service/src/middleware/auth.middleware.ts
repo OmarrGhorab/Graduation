@@ -16,8 +16,13 @@ import { updateSessionActivity } from "../utils/sessions";
  */
 export const authenticate = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    // Extract token from request (cookies or Authorization header)
-    const token = getAccessTokenFromRequest(req);
+    // Extract token from request (cookies, Authorization header, or query param for SSE)
+    let token = getAccessTokenFromRequest(req);
+    
+    // For SSE connections, also check query parameter
+    if (!token && req.query.token) {
+      token = req.query.token as string;
+    }
 
     if (!token) {
       throw new UnauthorizedError("Access token is required");

@@ -70,7 +70,14 @@ async function buildUserUpdateData(
   }
 
   if (body.profileImg) {
-    userUpdateData.profileImg = await uploadProfileImage(body.profileImg, userId);
+    // Check if profileImg is a URL or base64 data
+    if (body.profileImg.startsWith('http')) {
+      // For URLs, store them directly without uploading to Cloudinary
+      userUpdateData.profileImg = body.profileImg;
+    } else {
+      // For base64 data, upload to Cloudinary
+      userUpdateData.profileImg = await uploadProfileImage(body.profileImg, userId);
+    }
   }
 
   return userUpdateData;

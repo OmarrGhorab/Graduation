@@ -23,6 +23,7 @@ export const REQUEST_LIMIT = "10mb";
 // Proxy configuration
 export const PROXY_CONFIG: ProxyConfig = {
   authServiceUrl: "http://localhost:6001",
+  notificationServiceUrl: "http://localhost:6003",
   timeout: 30000, // 30 seconds
 };
 

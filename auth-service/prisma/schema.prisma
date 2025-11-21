@@ -46,6 +46,7 @@ model User {
   receivedUnlinkRequests UnlinkRequest[]     @relation("ReceivedUnlinkRequests")
   parentLinks            ParentChildLink[]   @relation("ChildLinks")
   childLinks             ParentChildLink[]   @relation("ParentLinks")
+  notifications          Notification[]
 
   @@index([username])
   @@index([role])
@@ -73,8 +74,6 @@ model UserDevice {
   platform          Platform?
   isTrusted         Boolean   @default(false)
   pushToken         String? // for notifications
-  location          String? // city or country (geo from IP)
-  loginCount        Int       @default(0) // Track number of logins from this device
   lastLoginAt       DateTime?
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
@@ -83,6 +82,7 @@ model UserDevice {
 
   @@unique([userId, deviceFingerprint])
   @@index([userId])
+  @@index([deviceFingerprint])
 }
 
 enum Platform {
@@ -289,4 +289,19 @@ model UnlinkRequest {
   @@index([childId])
   @@index([parentId])
   @@index([status])
+}
+
+model Notification {
+  id        String   @id @default(uuid())
+  userId    String
+  type      String   // Type of notification (e.g., "parent_link_request", "unlink_request_accepted")
+  data      Json     // Additional notification data as JSON
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([userId, read])
+  @@index([createdAt])
 }

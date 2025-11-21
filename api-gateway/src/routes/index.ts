@@ -3,6 +3,7 @@ import { isSpoofedBot } from "@arcjet/inspect";
 import { ARCJET_CONFIG } from "../config/index.js";
 import { initializeArcjet, handleArcjetDecision, shouldApplyArcjetProtection } from "../services/arcjet.js";
 import { createAuthServiceProxy } from "../services/proxy.js";
+import { createNotificationServiceProxy } from "../services/notification-proxy.js";
 import { sendErrorResponse } from "../utils/responses.js";
 
 /**
@@ -11,9 +12,17 @@ import { sendErrorResponse } from "../utils/responses.js";
 export const createRootHandler = (arcjetKey: string) => {
   const aj = initializeArcjet(arcjetKey);
   const authServiceProxy = createAuthServiceProxy();
+  const notificationServiceProxy = createNotificationServiceProxy();
 
   return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
+      // Route notification endpoints to notification service
+      if (req.path.startsWith('/api/v1/notifications')) {
+        console.log("Routing to notification service:", req.method, req.path);
+        notificationServiceProxy(req, res, next);
+        return;
+      }
+
       // Only run Arcjet protection if key is configured
       if (!shouldApplyArcjetProtection(arcjetKey)) {
         console.log("Skipping Arcjet protection (no key configured)");

@@ -24,6 +24,7 @@ export type ErrorHandler = (err: Error, req: Request, res: Response, next: NextF
 // Proxy configuration interface
 export interface ProxyConfig {
   authServiceUrl: string;
+  notificationServiceUrl: string;
   timeout: number;
 }
 

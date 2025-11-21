@@ -70,7 +70,7 @@ export const registerUser = async (req: Request, res: Response, next: NextFuncti
         const { token: refreshToken, jti: refreshJti } = await signAndStoreRefreshToken(user.id);
         
         // Create session record in database
-        const sessionDeviceInfo = getSessionDeviceInfo(req);
+        const sessionDeviceInfo = await getSessionDeviceInfo(req);
         const expiresAt = new Date();
         expiresAt.setSeconds(expiresAt.getSeconds() + parseInt(process.env.ACCESS_TOKEN_TTL_SEC || "900", 10));
         const refreshExpiresAt = new Date();
@@ -81,16 +81,15 @@ export const registerUser = async (req: Request, res: Response, next: NextFuncti
         let deviceId: string | null = null;
         
         // Create device record for new user
-        const deviceName = extractDeviceName(deviceInfo.userAgent);
+        const deviceName = extractDeviceName(sessionDeviceInfo.userAgent);
         const newDevice = await prisma.userDevice.create({
             data: {
                 userId: user.id,
                 deviceFingerprint: deviceInfo.fingerprint,
                 deviceName: deviceName,
                 platform: deviceInfo.platform,
-                ipAddress: deviceInfo.ipAddress,
+                ipAddress: sessionDeviceInfo.ipAddress,
                 isTrusted: true, // New registrations are trusted by default
-                loginCount: 1,
                 lastLoginAt: new Date(),
             },
         });
@@ -219,7 +218,7 @@ export const loginUser = async (req: Request, res: Response, next: NextFunction)
             // Get user's devices, ordered by login count (most used first)
             const userDevices = await prisma.userDevice.findMany({
                 where: { userId: user.id },
-                orderBy: { loginCount: "desc" },
+                orderBy: { lastLoginAt: "desc" },
             });
 
             // If user has 2 or more devices, block account and require verification
@@ -242,7 +241,7 @@ export const loginUser = async (req: Request, res: Response, next: NextFunction)
                         userAgent: deviceInfo.userAgent,
                         ipAddress: deviceInfo.ipAddress,
                         platform: deviceInfo.platform,
-                        loginCount: 0, // Don't increment yet - device not verified
+                        // Device not verified yet
                         lastLoginAt: null,
                         isTrusted: false,
                     },
@@ -276,7 +275,7 @@ export const loginUser = async (req: Request, res: Response, next: NextFunction)
                     userAgent: deviceInfo.userAgent,
                     ipAddress: deviceInfo.ipAddress,
                     platform: deviceInfo.platform,
-                    loginCount: 1,
+                    // Device verified for first time
                     lastLoginAt: new Date(),
                     isTrusted: true, // First 2 devices are trusted by default
                 },
@@ -286,7 +285,6 @@ export const loginUser = async (req: Request, res: Response, next: NextFunction)
             existingDevice = await prisma.userDevice.update({
                 where: { id: existingDevice.id },
                 data: {
-                    loginCount: { increment: 1 },
                     lastLoginAt: new Date(),
                     // Update IP and user agent in case they changed
                     ipAddress: deviceInfo.ipAddress,
@@ -345,7 +343,7 @@ export const loginUser = async (req: Request, res: Response, next: NextFunction)
             const { token: tempAccessToken, jti: tempAccessJti } = signAccessToken({ id: user.id, role: user.role });
             
             // Create temporary session for 2FA verification (will be replaced after 2FA succeeds)
-            const sessionDeviceInfo = getSessionDeviceInfo(req);
+            const sessionDeviceInfo = await getSessionDeviceInfo(req);
             const expiresAt = new Date();
             expiresAt.setSeconds(expiresAt.getSeconds() + parseInt(process.env.ACCESS_TOKEN_TTL_SEC || "900", 10));
             
@@ -405,7 +403,7 @@ export const loginUser = async (req: Request, res: Response, next: NextFunction)
         setAuthCookies(res, accessToken, refreshToken);
 
         // Create session record in database
-        const sessionDeviceInfo = getSessionDeviceInfo(req);
+        const sessionDeviceInfo = await getSessionDeviceInfo(req);
         const expiresAt = new Date();
         expiresAt.setSeconds(expiresAt.getSeconds() + parseInt(process.env.ACCESS_TOKEN_TTL_SEC || "900", 10));
         const refreshExpiresAt = new Date();
@@ -1057,7 +1055,7 @@ export const googleCallback = async (req: Request, res: Response, next: NextFunc
         const { token: refreshToken, jti: refreshJti } = await signAndStoreRefreshToken(user.id);
         
         // Create session record in database
-        const sessionDeviceInfo = getSessionDeviceInfo(req);
+        const sessionDeviceInfo = await getSessionDeviceInfo(req);
         const expiresAt = new Date();
         expiresAt.setSeconds(expiresAt.getSeconds() + parseInt(process.env.ACCESS_TOKEN_TTL_SEC || "900", 10));
         const refreshExpiresAt = new Date();
@@ -1083,7 +1081,6 @@ export const googleCallback = async (req: Request, res: Response, next: NextFunc
             await prisma.userDevice.update({
                 where: { id: existingDevice.id },
                 data: {
-                    loginCount: { increment: 1 },
                     lastLoginAt: new Date(),
                 },
             });
@@ -1199,7 +1196,6 @@ export const verifyDevice = async (req: Request, res: Response, next: NextFuncti
             where: { id: device.id },
             data: {
                 isTrusted: true,
-                loginCount: { increment: 1 },
                 lastLoginAt: new Date(),
             },
         });
@@ -1219,7 +1215,7 @@ export const verifyDevice = async (req: Request, res: Response, next: NextFuncti
             const { token: tempAccessToken, jti: tempAccessJti } = signAccessToken({ id: user.id, role: user.role });
             
             // Create temporary session for 2FA verification (will be replaced after 2FA succeeds)
-            const sessionDeviceInfo = getSessionDeviceInfo(req);
+            const sessionDeviceInfo = await getSessionDeviceInfo(req);
             const expiresAt = new Date();
             expiresAt.setSeconds(expiresAt.getSeconds() + parseInt(process.env.ACCESS_TOKEN_TTL_SEC || "900", 10));
             
@@ -1256,7 +1252,7 @@ export const verifyDevice = async (req: Request, res: Response, next: NextFuncti
         const { token: refreshToken, jti: refreshJti } = await signAndStoreRefreshToken(user.id);
         
         // Create session record in database
-        const sessionDeviceInfo = getSessionDeviceInfo(req);
+        const sessionDeviceInfo = await getSessionDeviceInfo(req);
         const expiresAt = new Date();
         expiresAt.setSeconds(expiresAt.getSeconds() + parseInt(process.env.ACCESS_TOKEN_TTL_SEC || "900", 10));
         const refreshExpiresAt = new Date();
