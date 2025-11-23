@@ -25,8 +25,6 @@ export const authenticate = async (
 
     const token = authHeader.substring(7);
     const jwtSecret = process.env.JWT_ACCESS_SECRET;
-
-    console.log('jwt', jwtSecret);
     
     if (!jwtSecret) {
       throw new Error('JWT_SECRET not configured');
@@ -34,9 +32,15 @@ export const authenticate = async (
 
     const decoded = jwt.verify(token, jwtSecret) as any;
     
+    // Check token type - only access tokens allowed
+    if (decoded.type !== 'access') {
+      res.status(401).json({ error: 'Invalid token type' });
+      return;
+    }
+    
     // Cast to AuthenticatedRequest to add user property
     (req as AuthenticatedRequest).user = {
-      id: decoded.sub || decoded.id,
+      id: decoded.sub,
       email: decoded.email,
       username: decoded.username,
       role: decoded.role

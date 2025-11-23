@@ -1,5 +1,6 @@
 import express from 'express';
 import { authenticate } from '../middleware/auth';
+import { authenticateInternalService } from '../middleware/internal-auth';
 import {
   streamNotifications,
   getNotifications,
@@ -9,9 +10,9 @@ import {
 
 const router = express.Router();
 
-// Public endpoint for other services to publish notifications
-// This should be protected by internal service authentication in production
-router.post('/publish', publishNotificationEndpoint);
+// Internal endpoint for other services to publish notifications
+// Protected by internal service authentication
+router.post('/publish', authenticateInternalService, publishNotificationEndpoint);
 
 // SSE endpoint for real-time notifications (requires user authentication)
 router.get('/stream', authenticate, streamNotifications);

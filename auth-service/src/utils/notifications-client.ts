@@ -1,7 +1,3 @@
-import dotenv from "dotenv";
-
-dotenv.config();
-
 const NOTIFICATION_SERVICE_URL = process.env.NOTIFICATION_SERVICE_URL || "http://localhost:6003";
 
 /**
@@ -20,6 +16,9 @@ export async function publishNotification(
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        ...(process.env.INTERNAL_SERVICE_SECRET && {
+          'x-internal-secret': process.env.INTERNAL_SERVICE_SECRET,
+        }),
       },
       body: JSON.stringify({
         userId,

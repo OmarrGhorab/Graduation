@@ -1,6 +1,4 @@
 import { Resend } from 'resend';
-import dotenv from "dotenv";
-dotenv.config();
 
 // Email configuration
 const resend = new Resend(process.env.RESEND_API_KEY);
@@ -71,6 +69,15 @@ const getEmailContent = (type: 'verification' | 'passwordReset' | 'deviceVerific
   return translations[language as keyof typeof translations]?.[type] || translations.en[type];
 };
 
+// HTML escape helper to prevent injection
+const escapeHtml = (value: string) =>
+  value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+
 // Email templates
 const getEmailTemplate = (type: 'verification' | 'passwordReset' | 'deviceVerification', otp: string, language: string = 'en', userName?: string) => {
   const content = getEmailContent(type, language);
@@ -85,7 +92,9 @@ const getEmailTemplate = (type: 'verification' | 'passwordReset' | 'deviceVerifi
     html: `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; direction: ${isRTL ? 'rtl' : 'ltr'};">
         <h2 style="color: #333; text-align: center;">${type === 'verification' ? (language === 'en' ? 'Email Verification' : language === 'ar' ? 'التحقق من البريد الإلكتروني' : 'Vérification e-mail') : type === 'passwordReset' ? (language === 'en' ? 'Password Reset' : language === 'ar' ? 'إعادة تعيين كلمة المرور' : 'Réinitialisation mot de passe') : (language === 'en' ? 'Device Verification' : language === 'ar' ? 'التحقق من الجهاز' : 'Vérification appareil')}</h2>
-        <p>${content.greeting} ${userName || (language === 'ar' ? '' : 'there')},</p>
+        <p>${content.greeting} ${
+          userName ? escapeHtml(userName) : (language === 'ar' ? '' : 'there')
+        },</p>
         <p>${content.message}</p>
         <div style="background: ${bgColor}; padding: 20px; text-align: center; border-radius: 8px; margin: 20px 0; ${borderStyle}">
           <span style="font-size: 32px; font-weight: bold; letter-spacing: 3px; color: ${otpColor};">${otp}</span>

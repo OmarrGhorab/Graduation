@@ -2,7 +2,7 @@ import { Request, Response, NextFunction } from "express";
 import { verifyAccessToken } from "../utils/tokens";
 import { UnauthorizedError } from "../utils/errors";
 import { getAccessTokenFromRequest } from "../utils/cookies";
-import prisma from "../libs/prisma";
+import { prisma } from "../libs/prisma";
 import { updateSessionActivity } from "../utils/sessions";
 
 /**

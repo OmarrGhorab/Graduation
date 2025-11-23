@@ -1176,6 +1176,19 @@ export const verifyDevice = async (req: Request, res: Response, next: NextFuncti
             throw new UnauthorizedError("Invalid credentials");
         }
 
+        // Enforce account state before allowing device verification
+        if (user.deletedAt) {
+            throw new UnauthorizedError("Account has been deleted");
+        }
+
+        if (!user.isActive) {
+            throw new UnauthorizedError("Account is deactivated");
+        }
+
+        if (!user.verified) {
+            throw new UnauthorizedError("Account not verified");
+        }
+
         // Verify OTP
         const otpKey = `device:${user.id}:${deviceFingerprint}`;
         const isValid = await verifyOtp(otpKey, otp);
