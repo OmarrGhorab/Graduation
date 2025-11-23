@@ -35,6 +35,7 @@
     "ioredis": "^5.8.2",
     "jsonwebtoken": "^9.0.2",
     "qrcode": "^1.5.4",
+    "resend": "^6.5.2",
     "speakeasy": "^2.0.0"
   }
 }

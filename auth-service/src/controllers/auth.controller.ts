@@ -25,6 +25,8 @@ import {
 } from "../utils/emailVerification";
 import { extractDeviceInfo, extractDeviceName } from "../utils/device";
 import { createSession, getSessionDeviceInfo } from "../utils/sessions";
+import { sendVerificationOTP, sendPasswordResetOTP, sendDeviceVerificationOTP } from "../utils/email";
+import { getUserLanguage, getUserLanguageByEmail } from "../utils/userLanguage";
 
 
 dotenv.config();
@@ -112,7 +114,10 @@ export const registerUser = async (req: Request, res: Response, next: NextFuncti
 
         // email verification OTP
         const otp = await createAndStoreOtp(`email:${email}`);
-        // TODO: send OTP via email provider
+        // Get user language preference (default to English for new users)
+        const userLanguage = 'en'; // New users don't have preferences yet
+        // Send OTP via email (non-blocking)
+        sendVerificationOTP(email, otp, name, userLanguage).catch(console.error);
 
         res.status(201).json({
             user: { id: user.id, name: user.name, email: user.email, verified: user.verified },
@@ -249,8 +254,10 @@ export const loginUser = async (req: Request, res: Response, next: NextFunction)
 
                 // Create device verification OTP
                 const otp = await createAndStoreOtp(`device:${user.id}:${deviceInfo.fingerprint}`);
-
-                // TODO: Send OTP via email or SMS
+                // Get user language preference
+                const userLanguage = await getUserLanguage(user.id);
+                // Send OTP via email (non-blocking)
+                sendDeviceVerificationOTP(user.email, otp, user.name, userLanguage).catch(console.error);
 
                 return res.status(403).json({
                     error: "New device detected",
@@ -702,7 +709,10 @@ export const forgotPassword = async (req: Request, res: Response, next: NextFunc
         }
 
         const otp = await createAndStoreOtp(`reset:${email}`);
-        // TODO: send OTP via email provider
+        // Get user language preference
+        const userLanguage = await getUserLanguageByEmail(email);
+        // Send OTP via email (non-blocking)
+        sendPasswordResetOTP(email, otp, user?.name, userLanguage).catch(console.error);
         res.json({ message: "If the email exists, an OTP has been sent.", otp: process.env.NODE_ENV === "production" ? undefined : otp });
     } catch (err) {
         next(err);
@@ -799,7 +809,10 @@ export const resendVerificationOtp = async (req: Request, res: Response, next: N
         // Generate and store new OTP only if user exists and is not verified
         if (user && !user.verified) {
             const otp = await createAndStoreOtp(`email:${email}`);
-            // TODO: send OTP via email provider
+            // Get user language preference
+            const userLanguage = await getUserLanguage(user.id);
+            // Send OTP via email (non-blocking)
+            sendVerificationOTP(email, otp, user.name, userLanguage).catch(console.error);
             
             res.json({ 
                 message: "Verification OTP has been sent to your email.",
@@ -1095,7 +1108,6 @@ export const googleCallback = async (req: Request, res: Response, next: NextFunc
                     platform: deviceInfo.platform,
                     ipAddress: deviceInfo.ipAddress,
                     isTrusted: true, // Google OAuth users are trusted by default
-                    loginCount: 1,
                     lastLoginAt: new Date(),
                 },
             });
@@ -1344,8 +1356,10 @@ export const resendDeviceVerificationOtp = async (req: Request, res: Response, n
 
         // Generate new OTP
         const otp = await createAndStoreOtp(`device:${user.id}:${deviceFingerprint}`);
-
-        // TODO: Send OTP via email or SMS
+        // Get user language preference
+        const userLanguage = await getUserLanguage(user.id);
+        // Send OTP via email (non-blocking)
+        sendDeviceVerificationOTP(user.email, otp, user.name, userLanguage).catch(console.error);
 
         return res.json({
             message: "Device verification OTP has been sent.",
