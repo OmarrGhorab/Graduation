@@ -2,7 +2,7 @@ import { Request, Response, NextFunction } from "express";
 import prisma from "../libs/prisma";
 import { BadRequestError, NotFoundError, UnauthorizedError } from "../utils/errors";
 import { UserRole, Prisma } from "@prisma/client";
-import { publishNotification as publishNotificationUtil } from "../utils/notifications";
+import { publishNotification as publishNotificationUtil } from "../utils/notifications-client";
 import { sendParentLinkRequestHelper, sendUnlinkRequestHelper } from "../utils/parent-link";
 import {
   RequestStatus,

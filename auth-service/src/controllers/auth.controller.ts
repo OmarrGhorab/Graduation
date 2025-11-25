@@ -3,8 +3,8 @@ import bcrypt from "bcrypt";
 import prisma from "../libs/prisma";
 import { BadRequestError, UnauthorizedError, TooManyRequestsError } from "../utils/errors";
 import { createAndStoreOtp, verifyOtp } from "../utils/otp";
-import { signAccessToken, signAndStoreRefreshToken, verifyRefreshToken, revokeRefreshTokenByJti, rotateRefreshToken } from "../utils/tokens";
-import { setAuthCookies, clearAuthCookies, getRefreshTokenFromRequest } from "../utils/cookies";
+import { signAccessToken, signAndStoreRefreshToken, verifyRefreshToken, revokeRefreshTokenByJti, rotateRefreshToken, verifyAccessToken } from "../utils/tokens";
+import { setAuthCookies, clearAuthCookies, getRefreshTokenFromRequest, getAccessTokenFromRequest } from "../utils/cookies";
 import { aj } from "../libs/arcjet";
 import { generateUsernameSuggestions, generateUniqueUsername } from "../utils/username";
 import { OAuth2Client } from "google-auth-library";
@@ -23,6 +23,10 @@ import {
   checkResendOtpAllowed,
   setResendOtpCooldown,
 } from "../utils/emailVerification";
+import { extractDeviceInfo, extractDeviceName } from "../utils/device";
+import { createSession, getSessionDeviceInfo } from "../utils/sessions";
+import { sendVerificationOTP, sendPasswordResetOTP, sendDeviceVerificationOTP } from "../utils/email";
+import { getUserLanguage, getUserLanguageByEmail } from "../utils/userLanguage";
 
 
 dotenv.config();
@@ -63,14 +67,57 @@ export const registerUser = async (req: Request, res: Response, next: NextFuncti
             data: { name, username, email, password: hashed, verified: false },
         });
 
-        // issue tokens; store refresh in Redis only (no DB storage)
-        const accessToken = signAccessToken({ id: user.id, role: user.role });
-        const { token: refreshToken } = await signAndStoreRefreshToken(user.id);
+        // Issue tokens
+        const { token: accessToken, jti: accessJti } = signAccessToken({ id: user.id, role: user.role });
+        const { token: refreshToken, jti: refreshJti } = await signAndStoreRefreshToken(user.id);
+        
+        // Create session record in database
+        const sessionDeviceInfo = await getSessionDeviceInfo(req);
+        const expiresAt = new Date();
+        expiresAt.setSeconds(expiresAt.getSeconds() + parseInt(process.env.ACCESS_TOKEN_TTL_SEC || "900", 10));
+        const refreshExpiresAt = new Date();
+        refreshExpiresAt.setSeconds(refreshExpiresAt.getSeconds() + parseInt(process.env.REFRESH_TOKEN_TTL_SEC || "2592000", 10));
+        
+        // Extract device info and create device record
+        const deviceInfo = extractDeviceInfo(req);
+        let deviceId: string | null = null;
+        
+        // Create device record for new user
+        const deviceName = extractDeviceName(sessionDeviceInfo.userAgent);
+        const newDevice = await prisma.userDevice.create({
+            data: {
+                userId: user.id,
+                deviceFingerprint: deviceInfo.fingerprint,
+                deviceName: deviceName,
+                platform: deviceInfo.platform,
+                ipAddress: sessionDeviceInfo.ipAddress,
+                isTrusted: true, // New registrations are trusted by default
+                lastLoginAt: new Date(),
+            },
+        });
+        deviceId = newDevice.id;
+        
+        // Create session
+        await createSession({
+            userId: user.id,
+            deviceId: deviceId,
+            sessionToken: accessJti,
+            refreshTokenJti: refreshJti,
+            ipAddress: sessionDeviceInfo.ipAddress,
+            userAgent: sessionDeviceInfo.userAgent,
+            location: sessionDeviceInfo.location,
+            expiresAt: expiresAt,
+            refreshExpiresAt: refreshExpiresAt,
+        });
+        
         setAuthCookies(res, accessToken, refreshToken);
 
         // email verification OTP
         const otp = await createAndStoreOtp(`email:${email}`);
-        // TODO: send OTP via email provider
+        // Get user language preference (default to English for new users)
+        const userLanguage = 'en'; // New users don't have preferences yet
+        // Send OTP via email (non-blocking)
+        sendVerificationOTP(email, otp, name, userLanguage).catch(console.error);
 
         res.status(201).json({
             user: { id: user.id, name: user.name, email: user.email, verified: user.verified },
@@ -100,42 +147,305 @@ export const loginUser = async (req: Request, res: Response, next: NextFunction)
             where: {
                 OR: [{ email: emailOrUsername }, { username: emailOrUsername }],
             },
+            select: {
+                id: true,
+                name: true,
+                username: true,
+                email: true,
+                password: true,
+                verified: true,
+                role: true,
+                profileImg: true,
+                onboardingCompleted: true,
+                twoFactorEnabled: true,
+                deviceBlocked: true,
+                pendingDeviceFingerprint: true,
+                isActive: true,
+                deletedAt: true,
+            },
         });
 
         if (!user || !user.password) throw new UnauthorizedError("Invalid credentials");
 
+        // Check if account is deleted (before password check for security)
+        if (user.deletedAt) {
+            throw new UnauthorizedError("Account has been deleted");
+        }
+
+        // Verify password first
         const ok = await bcrypt.compare(password, user.password);
         if (!ok) throw new UnauthorizedError("Invalid credentials");
+
+        // Track if account was reactivated during login
+        let wasReactivated = false;
+        
+        // If account is deactivated but password is correct, reactivate it automatically
+        if (!user.isActive) {
+            await prisma.user.update({
+                where: { id: user.id },
+                data: { isActive: true },
+            });
+            wasReactivated = true;
+            // Update user object for rest of login flow
+            user.isActive = true;
+        }
 
         //  Unverified users: block login
         if (!user.verified) {
             return res.status(403).json({
                 error: "Account not verified",
-                message: "Please verify your account before logging in. Check your email for the verification OTP.",
+                message: wasReactivated 
+                    ? "Account reactivated. Please verify your account before logging in. Check your email for the verification OTP."
+                    : "Please verify your account before logging in. Check your email for the verification OTP.",
                 verified: false,
                 requiresVerification: true,
+                accountReactivated: wasReactivated,
             });
         }
 
-        // Check if 2FA is enabled
-        const userWith2FA = await prisma.user.findUnique({
-            where: { id: user.id },
-            select: { twoFactorEnabled: true },
+        // Extract device information
+        const deviceInfo = extractDeviceInfo(req, req.body.deviceName);
+        const deviceName = extractDeviceName(deviceInfo.userAgent || undefined) || deviceInfo.deviceName || "Unknown Device";
+
+        // Check if device exists for this user
+        let existingDevice = await prisma.userDevice.findUnique({
+            where: {
+                userId_deviceFingerprint: {
+                    userId: user.id,
+                    deviceFingerprint: deviceInfo.fingerprint,
+                },
+            },
         });
 
-        if (userWith2FA?.twoFactorEnabled) {
-            // 2FA is enabled - require token verification
+        // Handle device tracking and blocking
+        if (!existingDevice) {
+            // New device - check device limit
+            // Get user's devices, ordered by login count (most used first)
+            const userDevices = await prisma.userDevice.findMany({
+                where: { userId: user.id },
+                orderBy: { lastLoginAt: "desc" },
+            });
+
+            // If user has 2 or more devices, block account and require verification
+            if (userDevices.length >= 2) {
+                // Block account and store pending device fingerprint
+                await prisma.user.update({
+                    where: { id: user.id },
+                    data: {
+                        deviceBlocked: true,
+                        pendingDeviceFingerprint: deviceInfo.fingerprint,
+                    },
+                });
+
+                // Create new device (not trusted)
+                existingDevice = await prisma.userDevice.create({
+                    data: {
+                        userId: user.id,
+                        deviceFingerprint: deviceInfo.fingerprint,
+                        deviceName: deviceName,
+                        userAgent: deviceInfo.userAgent,
+                        ipAddress: deviceInfo.ipAddress,
+                        platform: deviceInfo.platform,
+                        // Device not verified yet
+                        lastLoginAt: null,
+                        isTrusted: false,
+                    },
+                });
+
+                // Create device verification OTP
+                const otp = await createAndStoreOtp(`device:${user.id}:${deviceInfo.fingerprint}`);
+                // Get user language preference
+                const userLanguage = await getUserLanguage(user.id);
+                // Send OTP via email (non-blocking)
+                sendDeviceVerificationOTP(user.email, otp, user.name, userLanguage).catch(console.error);
+
+                return res.status(403).json({
+                    error: "New device detected",
+                    message: wasReactivated 
+                        ? "Account reactivated. A new device has been detected. Your account has been blocked until device verification is completed. Please check your email for verification code."
+                        : "A new device has been detected. Your account has been blocked until device verification is completed. Please check your email for verification code.",
+                    deviceBlocked: true,
+                    requiresDeviceVerification: true,
+                    deviceFingerprint: deviceInfo.fingerprint,
+                    accountReactivated: wasReactivated,
+                    // Expose OTP in non-production for testing
+                    otp: process.env.NODE_ENV === "production" ? undefined : otp,
+                });
+            }
+
+            // User has less than 2 devices, create new device (trusted)
+            existingDevice = await prisma.userDevice.create({
+                data: {
+                    userId: user.id,
+                    deviceFingerprint: deviceInfo.fingerprint,
+                    deviceName: deviceName,
+                    userAgent: deviceInfo.userAgent,
+                    ipAddress: deviceInfo.ipAddress,
+                    platform: deviceInfo.platform,
+                    // Device verified for first time
+                    lastLoginAt: new Date(),
+                    isTrusted: true, // First 2 devices are trusted by default
+                },
+            });
+        } else {
+            // Device exists, update login count and last login
+            existingDevice = await prisma.userDevice.update({
+                where: { id: existingDevice.id },
+                data: {
+                    lastLoginAt: new Date(),
+                    // Update IP and user agent in case they changed
+                    ipAddress: deviceInfo.ipAddress,
+                    userAgent: deviceInfo.userAgent,
+                    platform: deviceInfo.platform,
+                },
+            });
+
+            // If account is blocked for this device and device is not trusted, require verification
+            if (user.deviceBlocked && user.pendingDeviceFingerprint === deviceInfo.fingerprint && !existingDevice.isTrusted) {
+                const otp = await createAndStoreOtp(`device:${user.id}:${deviceInfo.fingerprint}`);
+                return res.status(403).json({
+                    error: "Device verification required",
+                    message: wasReactivated 
+                        ? "Account reactivated. This device needs to be verified. Please check your email for verification code."
+                        : "This device needs to be verified. Please check your email for verification code.",
+                    deviceBlocked: true,
+                    requiresDeviceVerification: true,
+                    deviceFingerprint: deviceInfo.fingerprint,
+                    accountReactivated: wasReactivated,
+                    otp: process.env.NODE_ENV === "production" ? undefined : otp,
+                });
+            }
+
+            // If account is blocked but this device is trusted, unblock account
+            if (user.deviceBlocked && existingDevice.isTrusted) {
+                await prisma.user.update({
+                    where: { id: user.id },
+                    data: {
+                        deviceBlocked: false,
+                        pendingDeviceFingerprint: null,
+                    },
+                });
+                // Keep local state in sync with DB so downstream checks behave correctly
+                user.deviceBlocked = false;
+                user.pendingDeviceFingerprint = null;
+            }
+        }
+
+        // If account is blocked and this is not the pending device, block login
+        if (user.deviceBlocked && user.pendingDeviceFingerprint !== deviceInfo.fingerprint) {
+            return res.status(403).json({
+                error: "Account blocked",
+                message: wasReactivated 
+                    ? "Account reactivated. Your account has been blocked due to a new device login. Please verify the pending device first."
+                    : "Your account has been blocked due to a new device login. Please verify the pending device first.",
+                deviceBlocked: true,
+                requiresDeviceVerification: true,
+                accountReactivated: wasReactivated,
+            });
+        }
+
+        // Check if 2FA is enabled (do this after device check)
+        if (user.twoFactorEnabled) {
+            // 2FA is enabled - issue temporary access token for 2FA verification
+            const { token: tempAccessToken, jti: tempAccessJti } = signAccessToken({ id: user.id, role: user.role });
+            
+            // Create temporary session for 2FA verification (will be replaced after 2FA succeeds)
+            const sessionDeviceInfo = await getSessionDeviceInfo(req);
+            const expiresAt = new Date();
+            expiresAt.setSeconds(expiresAt.getSeconds() + parseInt(process.env.ACCESS_TOKEN_TTL_SEC || "900", 10));
+            
+            // Find or get device ID
+            let deviceId: string | null = null;
+            if (existingDevice) {
+                deviceId = existingDevice.id;
+            } else {
+                // Device was just created, find it
+                const device = await prisma.userDevice.findUnique({
+                    where: {
+                        userId_deviceFingerprint: {
+                            userId: user.id,
+                            deviceFingerprint: deviceInfo.fingerprint,
+                        },
+                    },
+                });
+                if (device) {
+                    deviceId = device.id;
+                }
+            }
+            
+            // Create temporary session (no refresh token yet, will be added after 2FA)
+            // Note: We need to create a session with null refreshToken, but createSession requires a string
+            // So we'll create it directly with Prisma
+            await prisma.session.create({
+                data: {
+                    userId: user.id,
+                    deviceId: deviceId,
+                    sessionToken: tempAccessJti,
+                    refreshToken: null, // Will be updated after 2FA verification
+                    ipAddress: sessionDeviceInfo.ipAddress,
+                    userAgent: sessionDeviceInfo.userAgent,
+                    location: sessionDeviceInfo.location,
+                    expiresAt: expiresAt,
+                    refreshExpiresAt: null, // Will be set after 2FA verification
+                    isActive: true,
+                    isRevoked: false,
+                    lastActivityAt: new Date(),
+                },
+            });
+            
+            setAuthCookies(res, tempAccessToken);
+            
             return res.status(200).json({
-                message: "2FA verification required",
+                message: wasReactivated 
+                    ? "Account reactivated. 2FA verification required" 
+                    : "2FA verification required",
                 requires2FA: true,
-                emailOrUsername: emailOrUsername,
+                accountReactivated: wasReactivated,
             });
         }
 
         // Verified but not onboarded: issue token but flag the state
-        const accessToken = signAccessToken({ id: user.id, role: user.role });
-        const { token: refreshToken } = await signAndStoreRefreshToken(user.id);
+        const { token: accessToken, jti: accessJti } = signAccessToken({ id: user.id, role: user.role });
+        const { token: refreshToken, jti: refreshJti } = await signAndStoreRefreshToken(user.id);
         setAuthCookies(res, accessToken, refreshToken);
+
+        // Create session record in database
+        const sessionDeviceInfo = await getSessionDeviceInfo(req);
+        const expiresAt = new Date();
+        expiresAt.setSeconds(expiresAt.getSeconds() + parseInt(process.env.ACCESS_TOKEN_TTL_SEC || "900", 10));
+        const refreshExpiresAt = new Date();
+        refreshExpiresAt.setSeconds(refreshExpiresAt.getSeconds() + parseInt(process.env.REFRESH_TOKEN_TTL_SEC || "2592000", 10));
+
+        // Find or get device ID
+        let deviceId: string | null = null;
+        if (existingDevice) {
+            deviceId = existingDevice.id;
+        } else {
+            // Device was just created, find it
+            const device = await prisma.userDevice.findUnique({
+                where: {
+                    userId_deviceFingerprint: {
+                        userId: user.id,
+                        deviceFingerprint: deviceInfo.fingerprint,
+                    },
+                },
+            });
+            if (device) {
+                deviceId = device.id;
+            }
+        }
+
+        await createSession({
+            userId: user.id,
+            deviceId: deviceId,
+            sessionToken: accessJti,
+            refreshTokenJti: refreshJti,
+            ipAddress: sessionDeviceInfo.ipAddress,
+            userAgent: sessionDeviceInfo.userAgent,
+            location: sessionDeviceInfo.location,
+            expiresAt: expiresAt,
+            refreshExpiresAt: refreshExpiresAt,
+        });
 
         await prisma.user.update({
             where: { id: user.id },
@@ -154,6 +464,10 @@ export const loginUser = async (req: Request, res: Response, next: NextFunction)
                 profileImg: user.profileImg,
             },
             requiresOnboarding: !user.onboardingCompleted,
+            accountReactivated: wasReactivated,
+            message: wasReactivated 
+                ? "Account reactivated successfully. Welcome back!" 
+                : undefined,
         });
     } catch (err) {
         next(err);
@@ -164,9 +478,63 @@ export const loginUser = async (req: Request, res: Response, next: NextFunction)
 
 export const logoutUser = async (req: Request, res: Response, next: NextFunction) => {
     try {
-        // Extract refresh token from request
+        // Extract tokens from request
         const refreshToken = getRefreshTokenFromRequest(req);
+        const accessToken = getAccessTokenFromRequest(req);
         
+        let sessionTokenJti: string | null = null;
+        
+        // Get access token JTI to revoke session
+        if (accessToken) {
+            try {
+                const payload = await verifyAccessToken(accessToken);
+                sessionTokenJti = payload.jti;
+            } catch {
+                // ignore errors when verifying token during logout
+            }
+        }
+        
+        // Revoke session in database if access token is valid
+        if (sessionTokenJti) {
+            try {
+                // Find session to get refresh token before revoking
+                const session = await prisma.session.findFirst({
+                    where: {
+                        sessionToken: sessionTokenJti,
+                        isRevoked: false,
+                    },
+                    select: {
+                        id: true,
+                        refreshToken: true,
+                    },
+                });
+                
+                if (session) {
+                    // Revoke refresh token in Redis if it exists
+                    if (session.refreshToken) {
+                        try {
+                            await revokeRefreshTokenByJti(session.refreshToken);
+                        } catch {
+                            // ignore errors when revoking token during logout
+                        }
+                    }
+                    
+                    // Revoke session in database
+                    await prisma.session.update({
+                        where: { id: session.id },
+                        data: {
+                            isRevoked: true,
+                            isActive: false,
+                            revokedAt: new Date(),
+                        },
+                    });
+                }
+            } catch {
+                // ignore errors when revoking session during logout
+            }
+        }
+        
+        // Also revoke refresh token from request if provided (fallback)
         if (refreshToken) {
             try {
                 const payload = await verifyRefreshToken(refreshToken);
@@ -175,6 +543,7 @@ export const logoutUser = async (req: Request, res: Response, next: NextFunction
                 // ignore errors when revoking token during logout
             }
         }
+        
         clearAuthCookies(res);
         res.json({ message: "Logged out" });
     } catch (err) {
@@ -207,6 +576,8 @@ export const refreshToken = async (req: Request, res: Response, next: NextFuncti
                 verified: true,
                 onboardingCompleted: true,
                 profileImg: true,
+                isActive: true,
+                deletedAt: true,
             },
         });
 
@@ -216,16 +587,55 @@ export const refreshToken = async (req: Request, res: Response, next: NextFuncti
             throw new UnauthorizedError("User not found");
         }
 
+        // Check if account is deleted
+        if (user.deletedAt) {
+            await revokeRefreshTokenByJti(payload.jti);
+            throw new UnauthorizedError("Account has been deleted");
+        }
+
+        // Check if account is deactivated
+        if (!user.isActive) {
+            await revokeRefreshTokenByJti(payload.jti);
+            throw new UnauthorizedError("Account is deactivated");
+        }
+
         // Check if user account is verified
         if (!user.verified) {
             throw new UnauthorizedError("Account not verified");
         }
 
+        // Find session by old refresh token JTI BEFORE rotating token
+        const session = await prisma.session.findFirst({
+            where: {
+                userId: user.id,
+                refreshToken: payload.jti, // Old refresh token JTI
+            },
+        });
+
         // Generate new access token with current user role
-        const accessToken = signAccessToken({ id: user.id, role: user.role });
+        const { token: accessToken, jti: newAccessJti } = signAccessToken({ id: user.id, role: user.role });
 
         // Rotate refresh token for security (revoke old, create new)
-        const { token: newRefreshToken } = await rotateRefreshToken(payload.jti, user.id);
+        const { token: newRefreshToken, jti: newRefreshJti } = await rotateRefreshToken(payload.jti, user.id);
+
+        // Update session record with new tokens if session exists
+        if (session) {
+            const expiresAt = new Date();
+            expiresAt.setSeconds(expiresAt.getSeconds() + parseInt(process.env.ACCESS_TOKEN_TTL_SEC || "900", 10));
+            const refreshExpiresAt = new Date();
+            refreshExpiresAt.setSeconds(refreshExpiresAt.getSeconds() + parseInt(process.env.REFRESH_TOKEN_TTL_SEC || "2592000", 10));
+
+            await prisma.session.update({
+                where: { id: session.id },
+                data: {
+                    sessionToken: newAccessJti, // Update with new access token JTI
+                    refreshToken: newRefreshJti, // Update with new refresh token JTI
+                    expiresAt: expiresAt,
+                    refreshExpiresAt: refreshExpiresAt,
+                    lastActivityAt: new Date(),
+                },
+            });
+        }
 
         // Set new tokens in cookies
         setAuthCookies(res, accessToken, newRefreshToken);
@@ -299,7 +709,10 @@ export const forgotPassword = async (req: Request, res: Response, next: NextFunc
         }
 
         const otp = await createAndStoreOtp(`reset:${email}`);
-        // TODO: send OTP via email provider
+        // Get user language preference
+        const userLanguage = await getUserLanguageByEmail(email);
+        // Send OTP via email (non-blocking)
+        sendPasswordResetOTP(email, otp, user?.name, userLanguage).catch(console.error);
         res.json({ message: "If the email exists, an OTP has been sent.", otp: process.env.NODE_ENV === "production" ? undefined : otp });
     } catch (err) {
         next(err);
@@ -396,7 +809,10 @@ export const resendVerificationOtp = async (req: Request, res: Response, next: N
         // Generate and store new OTP only if user exists and is not verified
         if (user && !user.verified) {
             const otp = await createAndStoreOtp(`email:${email}`);
-            // TODO: send OTP via email provider
+            // Get user language preference
+            const userLanguage = await getUserLanguage(user.id);
+            // Send OTP via email (non-blocking)
+            sendVerificationOTP(email, otp, user.name, userLanguage).catch(console.error);
             
             res.json({ 
                 message: "Verification OTP has been sent to your email.",
@@ -632,11 +1048,13 @@ export const googleCallback = async (req: Request, res: Response, next: NextFunc
                 });
             }
 
-            // Update last login
+            // Update verified status (lastLoginAt will be updated after session creation)
             await prisma.user.update({
                 where: { id: user.id },
-                data: { lastLoginAt: new Date(), verified: true },
+                data: { verified: true },
             });
+            // Keep local user state in sync for subsequent checks
+            user.verified = true;
         }
 
         // Check if user account is verified (should always be true for Google users, but check for safety)
@@ -645,20 +1063,83 @@ export const googleCallback = async (req: Request, res: Response, next: NextFunc
             return res.redirect(`${frontendUrl}/auth/google/callback?error=verification_required&message=Please verify your account`);
         }
 
+        // Issue tokens
+        const { token: accessToken, jti: accessJti } = signAccessToken({ id: user.id, role: user.role });
+        const { token: refreshToken, jti: refreshJti } = await signAndStoreRefreshToken(user.id);
+        
+        // Create session record in database
+        const sessionDeviceInfo = await getSessionDeviceInfo(req);
+        const expiresAt = new Date();
+        expiresAt.setSeconds(expiresAt.getSeconds() + parseInt(process.env.ACCESS_TOKEN_TTL_SEC || "900", 10));
+        const refreshExpiresAt = new Date();
+        refreshExpiresAt.setSeconds(refreshExpiresAt.getSeconds() + parseInt(process.env.REFRESH_TOKEN_TTL_SEC || "2592000", 10));
+        
+        // Extract device info and find or create device
+        const deviceInfo = extractDeviceInfo(req);
+        let deviceId: string | null = null;
+        
+        // Try to find existing device
+        const existingDevice = await prisma.userDevice.findUnique({
+            where: {
+                userId_deviceFingerprint: {
+                    userId: user.id,
+                    deviceFingerprint: deviceInfo.fingerprint,
+                },
+            },
+        });
+        
+        if (existingDevice) {
+            deviceId = existingDevice.id;
+            // Update device login count and last login
+            await prisma.userDevice.update({
+                where: { id: existingDevice.id },
+                data: {
+                    lastLoginAt: new Date(),
+                },
+            });
+        } else {
+            // Create new device
+            const deviceName = extractDeviceName(deviceInfo.userAgent);
+            const newDevice = await prisma.userDevice.create({
+                data: {
+                    userId: user.id,
+                    deviceFingerprint: deviceInfo.fingerprint,
+                    deviceName: deviceName,
+                    platform: deviceInfo.platform,
+                    ipAddress: deviceInfo.ipAddress,
+                    isTrusted: true, // Google OAuth users are trusted by default
+                    lastLoginAt: new Date(),
+                },
+            });
+            deviceId = newDevice.id;
+        }
+        
+        // Create session
+        await createSession({
+            userId: user.id,
+            deviceId: deviceId,
+            sessionToken: accessJti,
+            refreshTokenJti: refreshJti,
+            ipAddress: sessionDeviceInfo.ipAddress,
+            userAgent: sessionDeviceInfo.userAgent,
+            location: sessionDeviceInfo.location,
+            expiresAt: expiresAt,
+            refreshExpiresAt: refreshExpiresAt,
+        });
+        
+        setAuthCookies(res, accessToken, refreshToken);
+        
+        // Update last login
+        await prisma.user.update({
+            where: { id: user.id },
+            data: { lastLoginAt: new Date() },
+        });
+
         // Check if onboarding is completed
         if (!user.onboardingCompleted) {
             const frontendUrl = process.env.FRONTEND_URL || "http://localhost:3000";
-            // Issue tokens but redirect to onboarding
-            const accessToken = signAccessToken({ id: user.id, role: user.role });
-            const { token: refreshToken } = await signAndStoreRefreshToken(user.id);
-            setAuthCookies(res, accessToken, refreshToken);
             return res.redirect(`${frontendUrl}/auth/google/callback?success=true&token=${accessToken}&requiresOnboarding=true`);
         }
-
-        // Issue tokens
-        const accessToken = signAccessToken({ id: user.id, role: user.role });
-        const { token: refreshToken } = await signAndStoreRefreshToken(user.id);
-        setAuthCookies(res, accessToken, refreshToken);
 
         // Redirect to frontend with success (you can customize this redirect URL)
         const frontendUrl = process.env.FRONTEND_URL || "http://localhost:3000";
@@ -667,3 +1148,238 @@ export const googleCallback = async (req: Request, res: Response, next: NextFunc
         next(err);
     }
 }
+
+/**
+ * Verify device with OTP
+ * This endpoint is called when a new device is detected and needs verification
+ */
+export const verifyDevice = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        const { emailOrUsername, deviceFingerprint, otp } = req.body as {
+            emailOrUsername?: string;
+            deviceFingerprint?: string;
+            otp?: string;
+        };
+
+        if (!emailOrUsername || !deviceFingerprint || !otp) {
+            throw new BadRequestError("Email/username, device fingerprint, and OTP are required");
+        }
+
+        // Find user
+        const user = await prisma.user.findFirst({
+            where: {
+                OR: [{ email: emailOrUsername }, { username: emailOrUsername }],
+            },
+        });
+
+        if (!user) {
+            throw new UnauthorizedError("Invalid credentials");
+        }
+
+        // Enforce account state before allowing device verification
+        if (user.deletedAt) {
+            throw new UnauthorizedError("Account has been deleted");
+        }
+
+        if (!user.isActive) {
+            throw new UnauthorizedError("Account is deactivated");
+        }
+
+        if (!user.verified) {
+            throw new UnauthorizedError("Account not verified");
+        }
+
+        // Verify OTP
+        const otpKey = `device:${user.id}:${deviceFingerprint}`;
+        const isValid = await verifyOtp(otpKey, otp);
+
+        if (!isValid) {
+            throw new UnauthorizedError("Invalid or expired OTP");
+        }
+
+        // Find device
+        const device = await prisma.userDevice.findUnique({
+            where: {
+                userId_deviceFingerprint: {
+                    userId: user.id,
+                    deviceFingerprint: deviceFingerprint,
+                },
+            },
+        });
+
+        if (!device) {
+            throw new BadRequestError("Device not found");
+        }
+
+        // Verify that this is the pending device
+        if (user.deviceBlocked && user.pendingDeviceFingerprint !== deviceFingerprint) {
+            throw new BadRequestError("This device is not the pending device for verification");
+        }
+
+        // Mark device as trusted and update login count
+        await prisma.userDevice.update({
+            where: { id: device.id },
+            data: {
+                isTrusted: true,
+                lastLoginAt: new Date(),
+            },
+        });
+
+        // Unblock account
+        await prisma.user.update({
+            where: { id: user.id },
+            data: {
+                deviceBlocked: false,
+                pendingDeviceFingerprint: null,
+            },
+        });
+
+        // Check if 2FA is enabled
+        if (user.twoFactorEnabled) {
+            // 2FA is enabled - issue temporary access token for 2FA verification
+            const { token: tempAccessToken, jti: tempAccessJti } = signAccessToken({ id: user.id, role: user.role });
+            
+            // Create temporary session for 2FA verification (will be replaced after 2FA succeeds)
+            const sessionDeviceInfo = await getSessionDeviceInfo(req);
+            const expiresAt = new Date();
+            expiresAt.setSeconds(expiresAt.getSeconds() + parseInt(process.env.ACCESS_TOKEN_TTL_SEC || "900", 10));
+            
+            // Create temporary session (no refresh token yet, will be added after 2FA)
+            await prisma.session.create({
+                data: {
+                    userId: user.id,
+                    deviceId: device.id,
+                    sessionToken: tempAccessJti,
+                    refreshToken: null, // Will be updated after 2FA verification
+                    ipAddress: sessionDeviceInfo.ipAddress,
+                    userAgent: sessionDeviceInfo.userAgent,
+                    location: sessionDeviceInfo.location,
+                    expiresAt: expiresAt,
+                    refreshExpiresAt: null, // Will be set after 2FA verification
+                    isActive: true,
+                    isRevoked: false,
+                    lastActivityAt: new Date(),
+                },
+            });
+            
+            setAuthCookies(res, tempAccessToken);
+            
+            return res.status(200).json({
+                message: "Device verified successfully. 2FA verification required.",
+                deviceVerified: true,
+                requires2FA: true,
+                emailOrUsername: emailOrUsername,
+            });
+        }
+
+        // Issue tokens
+        const { token: accessToken, jti: accessJti } = signAccessToken({ id: user.id, role: user.role });
+        const { token: refreshToken, jti: refreshJti } = await signAndStoreRefreshToken(user.id);
+        
+        // Create session record in database
+        const sessionDeviceInfo = await getSessionDeviceInfo(req);
+        const expiresAt = new Date();
+        expiresAt.setSeconds(expiresAt.getSeconds() + parseInt(process.env.ACCESS_TOKEN_TTL_SEC || "900", 10));
+        const refreshExpiresAt = new Date();
+        refreshExpiresAt.setSeconds(refreshExpiresAt.getSeconds() + parseInt(process.env.REFRESH_TOKEN_TTL_SEC || "2592000", 10));
+
+        await createSession({
+            userId: user.id,
+            deviceId: device.id,
+            sessionToken: accessJti,
+            refreshTokenJti: refreshJti,
+            ipAddress: sessionDeviceInfo.ipAddress,
+            userAgent: sessionDeviceInfo.userAgent,
+            location: sessionDeviceInfo.location,
+            expiresAt: expiresAt,
+            refreshExpiresAt: refreshExpiresAt,
+        });
+        
+        setAuthCookies(res, accessToken, refreshToken);
+
+        await prisma.user.update({
+            where: { id: user.id },
+            data: { lastLoginAt: new Date() },
+        });
+
+        return res.json({
+            message: "Device verified successfully",
+            deviceVerified: true,
+            user: {
+                id: user.id,
+                name: user.name,
+                username: user.username,
+                email: user.email,
+                verified: user.verified,
+                onboardingCompleted: user.onboardingCompleted,
+                role: user.role,
+                profileImg: user.profileImg,
+            },
+            requiresOnboarding: !user.onboardingCompleted,
+        });
+    } catch (err) {
+        next(err);
+    }
+};
+
+/**
+ * Resend device verification OTP
+ */
+export const resendDeviceVerificationOtp = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        const { emailOrUsername, deviceFingerprint } = req.body as {
+            emailOrUsername?: string;
+            deviceFingerprint?: string;
+        };
+
+        if (!emailOrUsername || !deviceFingerprint) {
+            throw new BadRequestError("Email/username and device fingerprint are required");
+        }
+
+        // Find user
+        const user = await prisma.user.findFirst({
+            where: {
+                OR: [{ email: emailOrUsername }, { username: emailOrUsername }],
+            },
+        });
+
+        if (!user) {
+            // Don't reveal if user exists
+            return res.json({
+                message: "If the email/username exists and device verification is required, an OTP has been sent.",
+            });
+        }
+
+        // Check if device exists and is pending verification
+        const device = await prisma.userDevice.findUnique({
+            where: {
+                userId_deviceFingerprint: {
+                    userId: user.id,
+                    deviceFingerprint: deviceFingerprint,
+                },
+            },
+        });
+
+        if (!device || user.pendingDeviceFingerprint !== deviceFingerprint) {
+            return res.status(400).json({
+                error: "Device verification not required",
+                message: "This device does not require verification.",
+            });
+        }
+
+        // Generate new OTP
+        const otp = await createAndStoreOtp(`device:${user.id}:${deviceFingerprint}`);
+        // Get user language preference
+        const userLanguage = await getUserLanguage(user.id);
+        // Send OTP via email (non-blocking)
+        sendDeviceVerificationOTP(user.email, otp, user.name, userLanguage).catch(console.error);
+
+        return res.json({
+            message: "Device verification OTP has been sent.",
+            // Expose OTP in non-production for testing
+            otp: process.env.NODE_ENV === "production" ? undefined : otp,
+        });
+    } catch (err) {
+        next(err);
+    }
+};

@@ -2,6 +2,8 @@ import { Request, Response, NextFunction } from "express";
 import { verifyAccessToken } from "../utils/tokens";
 import { UnauthorizedError } from "../utils/errors";
 import { getAccessTokenFromRequest } from "../utils/cookies";
+import { prisma } from "../libs/prisma";
+import { updateSessionActivity } from "../utils/sessions";
 
 /**
  * Authentication middleware to verify access token and attach user info to request
@@ -14,8 +16,13 @@ import { getAccessTokenFromRequest } from "../utils/cookies";
  */
 export const authenticate = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    // Extract token from request (cookies or Authorization header)
-    const token = getAccessTokenFromRequest(req);
+    // Extract token from request (cookies, Authorization header, or query param for SSE)
+    let token = getAccessTokenFromRequest(req);
+    
+    // For SSE connections, also check query parameter
+    if (!token && req.query.token) {
+      token = req.query.token as string;
+    }
 
     if (!token) {
       throw new UnauthorizedError("Access token is required");
@@ -29,12 +36,60 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
       throw new UnauthorizedError("Invalid token type");
     }
 
+    // Check user account status
+    const user = await prisma.user.findUnique({
+      where: { id: payload.sub },
+      select: {
+        id: true,
+        isActive: true,
+        deletedAt: true,
+        role: true,
+      },
+    });
+
+    if (!user) {
+      throw new UnauthorizedError("User not found");
+    }
+
+    if (user.deletedAt) {
+      throw new UnauthorizedError("Account has been deleted");
+    }
+
+    if (!user.isActive) {
+      throw new UnauthorizedError("Account is deactivated");
+    }
+
+    // Verify session exists in database and is not revoked (ensures immediate logout after session revocation)
+    const session = await prisma.session.findFirst({
+      where: {
+        sessionToken: payload.jti,
+        userId: user.id,
+        isRevoked: false, // Exclude revoked sessions
+        expiresAt: {
+          gt: new Date(), // Exclude expired sessions
+        },
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    if (!session) {
+      throw new UnauthorizedError("Session not found, has been revoked, or has expired");
+    }
+
     // Attach user info to request object
     req.user = {
-      id: payload.sub,
-      role: payload.role,
+      id: user.id,
+      role: user.role,
       jti: payload.jti,
     };
+
+    // Update session activity (non-blocking)
+    updateSessionActivity(payload.jti).catch((err) => {
+      // Log error but don't block request
+      console.error("Failed to update session activity:", err);
+    });
 
     next();
   } catch (err) {

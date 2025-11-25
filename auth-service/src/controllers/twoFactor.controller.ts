@@ -13,6 +13,10 @@ import {
 } from "../utils/twoFactor";
 import { signAccessToken, signAndStoreRefreshToken } from "../utils/tokens";
 import { setAuthCookies } from "../utils/cookies";
+import { createSession, getSessionDeviceInfo } from "../utils/sessions";
+import bcrypt from "bcrypt";
+import dotenv from "dotenv";
+dotenv.config();
 
 /**
  * Generate 2FA secret and QR code for enabling 2FA
@@ -174,8 +178,7 @@ export const disable2FA = async (req: Request, res: Response, next: NextFunction
         throw new BadRequestError("Password is required to disable 2FA");
       }
 
-      const bcrypt = await import("bcrypt");
-      const isValidPassword = await bcrypt.default.compare(password, user.password);
+      const isValidPassword = await bcrypt.compare(password, user.password);
 
       if (!isValidPassword) {
         throw new UnauthorizedError("Invalid password");
@@ -234,25 +237,23 @@ export const disable2FA = async (req: Request, res: Response, next: NextFunction
  */
 export const verify2FALogin = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { emailOrUsername, token, backupCode } = req.body as {
-      emailOrUsername?: string;
+    // Require authentication - user should be authenticated from login step
+    if (!req.user) {
+      throw new UnauthorizedError("Authentication required. Please login first.");
+    }
+
+    const { token, backupCode } = req.body as {
       token?: string;
       backupCode?: string;
     };
-
-    if (!emailOrUsername) {
-      throw new BadRequestError("Email or username is required");
-    }
 
     if (!token && !backupCode) {
       throw new BadRequestError("Token or backup code is required");
     }
 
-    // Get user
-    const user = await prisma.user.findFirst({
-      where: {
-        OR: [{ email: emailOrUsername }, { username: emailOrUsername }],
-      },
+    // Get user using authenticated user ID
+    const user = await prisma.user.findUnique({
+      where: { id: req.user.id },
       select: {
         id: true,
         email: true,
@@ -263,7 +264,7 @@ export const verify2FALogin = async (req: Request, res: Response, next: NextFunc
     });
 
     if (!user) {
-      throw new UnauthorizedError("Invalid credentials");
+      throw new NotFoundError("User not found");
     }
 
     if (!user.twoFactorEnabled) {
@@ -319,8 +320,66 @@ export const verify2FALogin = async (req: Request, res: Response, next: NextFunc
     }
 
     // Issue tokens and complete login
-    const accessToken = signAccessToken({ id: fullUser.id, role: fullUser.role });
-    const { token: refreshToken } = await signAndStoreRefreshToken(fullUser.id);
+    const { token: accessToken, jti: accessJti } = signAccessToken({ id: fullUser.id, role: fullUser.role });
+    const { token: refreshToken, jti: refreshJti } = await signAndStoreRefreshToken(fullUser.id);
+    
+    // Create session record in database
+    const sessionDeviceInfo = getSessionDeviceInfo(req);
+    const expiresAt = new Date();
+    expiresAt.setSeconds(expiresAt.getSeconds() + parseInt(process.env.ACCESS_TOKEN_TTL_SEC || "900", 10));
+    const refreshExpiresAt = new Date();
+    refreshExpiresAt.setSeconds(refreshExpiresAt.getSeconds() + parseInt(process.env.REFRESH_TOKEN_TTL_SEC || "2592000", 10));
+    
+    // Find existing session from temp token (created during login) and update it, or create new one
+    const existingSession = await prisma.session.findFirst({
+      where: {
+        userId: fullUser.id,
+        sessionToken: req.user?.jti, // Temp token JTI from middleware
+      },
+    });
+    
+    if (existingSession) {
+      // Update existing temporary session with real tokens
+      await prisma.session.update({
+        where: { id: existingSession.id },
+        data: {
+          sessionToken: accessJti,
+          refreshToken: refreshJti,
+          expiresAt: expiresAt,
+          refreshExpiresAt: refreshExpiresAt,
+          lastActivityAt: new Date(),
+        },
+      });
+    } else {
+      // Create new session if temp session doesn't exist
+      // Find device ID from request (if available)
+      let deviceId: string | null = null;
+      // Try to find device by user agent/IP if needed
+      const device = await prisma.userDevice.findFirst({
+        where: {
+          userId: fullUser.id,
+        },
+        orderBy: {
+          lastLoginAt: "desc",
+        },
+      });
+      if (device) {
+        deviceId = device.id;
+      }
+      
+      await createSession({
+        userId: fullUser.id,
+        deviceId: deviceId,
+        sessionToken: accessJti,
+        refreshTokenJti: refreshJti,
+        ipAddress: sessionDeviceInfo.ipAddress,
+        userAgent: sessionDeviceInfo.userAgent,
+        location: sessionDeviceInfo.location,
+        expiresAt: expiresAt,
+        refreshExpiresAt: refreshExpiresAt,
+      });
+    }
+    
     setAuthCookies(res, accessToken, refreshToken);
 
     // Update last login

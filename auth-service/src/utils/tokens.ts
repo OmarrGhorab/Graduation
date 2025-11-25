@@ -12,22 +12,24 @@ type JwtPayload = {
 const ACCESS_TOKEN_TTL_SEC = parseInt(process.env.ACCESS_TOKEN_TTL_SEC || "900", 10); // 15 minutes
 const REFRESH_TOKEN_TTL_SEC = parseInt(process.env.REFRESH_TOKEN_TTL_SEC || "2592000", 10); // 30 days
 
-const ACCESS_TOKEN_SECRET: Secret = process.env.ACCESS_TOKEN_SECRET || "dev-access-secret";
+const ACCESS_TOKEN_SECRET: Secret = process.env.JWT_ACCESS_SECRET || "dev-access-secret";
 const REFRESH_TOKEN_SECRET: Secret = process.env.REFRESH_TOKEN_SECRET || "dev-refresh-secret";
 
 export function generateJti(): string {
   return crypto.randomUUID();
 }
 
-export function signAccessToken(user: { id: string; role?: string }): string {
+export function signAccessToken(user: { id: string; role?: string }): { token: string; jti: string } {
+  const jti = generateJti();
   const payload: JwtPayload = {
     sub: user.id,
-    jti: generateJti(),
+    jti: jti,
     role: user.role,
     type: "access",
   };
   const opts: SignOptions = { expiresIn: ACCESS_TOKEN_TTL_SEC, algorithm: "HS256" };
-  return jwt.sign(payload, ACCESS_TOKEN_SECRET, opts);
+  const token = jwt.sign(payload, ACCESS_TOKEN_SECRET, opts);
+  return { token, jti };
 }
 
 export async function signAndStoreRefreshToken(userId: string): Promise<{ token: string; jti: string }> {
@@ -39,6 +41,12 @@ export async function signAndStoreRefreshToken(userId: string): Promise<{ token:
   // Store mapping jti -> userId with TTL
   const key = `rt:${jti}`;
   await redis.set(key, userId, "EX", REFRESH_TOKEN_TTL_SEC);
+  
+  // Also store jti in user's refresh token set for bulk revocation
+  const userTokensKey = `user:${userId}:refresh_tokens`;
+  await redis.sadd(userTokensKey, jti);
+  await redis.expire(userTokensKey, REFRESH_TOKEN_TTL_SEC);
+  
   return { token, jti };
 }
 
@@ -56,12 +64,38 @@ export async function verifyRefreshToken(token: string): Promise<JwtPayload> {
 }
 
 export async function revokeRefreshTokenByJti(jti: string): Promise<void> {
-  await redis.del(`rt:${jti}`);
+  const key = `rt:${jti}`;
+  const userId = await redis.get(key);
+  await redis.del(key);
+  
+  // Remove from user's refresh token set if exists
+  if (userId) {
+    const userTokensKey = `user:${userId}:refresh_tokens`;
+    await redis.srem(userTokensKey, jti);
+  }
 }
 
 export async function rotateRefreshToken(oldJti: string, userId: string): Promise<{ token: string; jti: string }>{
   await revokeRefreshTokenByJti(oldJti);
   return signAndStoreRefreshToken(userId);
+}
+
+/**
+ * Revoke all refresh tokens for a user
+ * This is used when deactivating or deleting an account
+ */
+export async function revokeAllUserRefreshTokens(userId: string): Promise<void> {
+  const userTokensKey = `user:${userId}:refresh_tokens`;
+  const jtis = await redis.smembers(userTokensKey);
+  
+  // Delete all refresh token keys
+  if (jtis.length > 0) {
+    const keys = jtis.map(jti => `rt:${jti}`);
+    await redis.del(...keys);
+  }
+  
+  // Delete the user's refresh token set
+  await redis.del(userTokensKey);
 }
 
 

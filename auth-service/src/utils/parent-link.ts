@@ -1,7 +1,7 @@
 import prisma from "../libs/prisma";
 import { BadRequestError, NotFoundError } from "../utils/errors";
 import { UserRole, Prisma } from "@prisma/client";
-import { publishNotification } from "./notifications";
+import { publishNotification } from "./notifications-client";
 import { RequestStatus } from "../types/parent-link.types";
 
 /**

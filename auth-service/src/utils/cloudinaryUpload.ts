@@ -30,7 +30,11 @@ function parseImageData(imageData: string): { base64Data: string; mimeType: stri
     // Extract base64 data
     base64Data = imageData.split(",")[1] || imageData;
   }
-
+  // Fix base64 padding if missing
+  const paddingLength = (4 - base64Data.length % 4) % 4;
+  if (paddingLength > 0) {
+    base64Data += "=".repeat(paddingLength);
+  }
   return { base64Data, mimeType };
 }
 
@@ -74,6 +78,19 @@ export async function uploadImageToCloudinary(
 
     const { base64Data, mimeType } = parseImageData(imageData);
 
+    // Debug logging
+    console.log("Image data length:", imageData.length);
+    console.log("Base64 data length:", base64Data.length);
+    console.log("MIME type:", mimeType);
+    console.log("Base64 data preview:", base64Data.substring(0, 100) + "...");
+    console.log("Base64 data end:", "..." + base64Data.substring(base64Data.length - 50));
+    console.log("Base64 length % 4:", base64Data.length % 4);
+
+    // Validate base64 data
+    if (base64Data.length === 0) {
+      throw new BadRequestError("Empty base64 data after parsing");
+    }
+
     // Build upload options
     const uploadOptions: Record<string, unknown> = {
       folder: options.folder,
@@ -88,8 +105,13 @@ export async function uploadImageToCloudinary(
       uploadOptions.transformation = transformations;
     }
 
+    // Construct the data URI for Cloudinary
+    const dataUri = `data:${mimeType};base64,${base64Data}`;
+    console.log("Data URI length:", dataUri.length);
+    console.log("Data URI preview:", dataUri.substring(0, 100) + "...");
+
     // Upload to Cloudinary
-    const result = await cloudinary.uploader.upload(`data:${mimeType};base64,${base64Data}`, uploadOptions);
+    const result = await cloudinary.uploader.upload(dataUri, uploadOptions);
 
     return result.secure_url;
   } catch (error) {
