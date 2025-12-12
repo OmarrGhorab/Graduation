@@ -324,7 +324,7 @@ export const verify2FALogin = async (req: Request, res: Response, next: NextFunc
     const { token: refreshToken, jti: refreshJti } = await signAndStoreRefreshToken(fullUser.id);
     
     // Create session record in database
-    const sessionDeviceInfo = getSessionDeviceInfo(req);
+    const sessionDeviceInfo = await getSessionDeviceInfo(req);
     const expiresAt = new Date();
     expiresAt.setSeconds(expiresAt.getSeconds() + parseInt(process.env.ACCESS_TOKEN_TTL_SEC || "900", 10));
     const refreshExpiresAt = new Date();
