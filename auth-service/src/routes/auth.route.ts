@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { forgotPassword, loginUser, logoutUser, registerUser, resetPassword, verifyEmailOtp, resendVerificationOtp, googleAuth, googleCallback, refreshToken, verifyDevice, resendDeviceVerificationOtp } from "../controllers/auth.controller";
+import { forgotPassword, loginUser, logoutUser, registerUser, resetPassword, verifyEmailOtp, resendVerificationOtp, googleMobileAuth, refreshToken, verifyDevice, resendDeviceVerificationOtp } from "../controllers/auth.controller";
 import { authenticate } from "../middleware";
 import {
   enable2FA,
@@ -28,9 +28,8 @@ router.post("/login", loginUser);
 router.post("/logout", logoutUser);
 router.post("/refresh", refreshToken);
 
-// Google OAuth
-router.get("/google", googleAuth);
-router.get("/google/callback", googleCallback);
+// Google OAuth (Mobile App - ID Token Verification)
+router.post("/google/mobile", googleMobileAuth); // Accepts idToken in body, returns tokens in JSON
 
 // Password recovery
 router.post("/forgot-password", forgotPassword);

@@ -15,8 +15,8 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(cors(
     {
         origin: ["http://localhost:3000", "http://localhost:8080"],
-        credentials: true,
-        allowedHeaders: ["Content-Type", "Authorization"],
+        credentials: false, // Not needed for mobile - tokens sent via Authorization header
+        allowedHeaders: ["Content-Type", "Authorization", "x-refresh-token"],
     }
 ));
 

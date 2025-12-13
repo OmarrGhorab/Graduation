@@ -2,7 +2,6 @@ import { Request, Response, NextFunction } from "express";
 import prisma from "../libs/prisma";
 import { BadRequestError } from "../utils/errors";
 import { signAccessToken, signAndStoreRefreshToken } from "../utils/tokens";
-import { setAuthCookies } from "../utils/cookies";
 import { generateUniqueUsername } from "../utils/username";
 import { extractDeviceInfo, extractDeviceName } from "../utils/device";
 import { createSession, getSessionDeviceInfo } from "../utils/sessions";
@@ -12,103 +11,52 @@ import dotenv from "dotenv";
 dotenv.config();
 
 /**
- * Initiates Google OAuth flow - redirects user to Google
+ * Handles Google Sign-In for mobile apps using ID token verification
+ * Accepts Google ID token from mobile app and verifies it directly
  */
-export const googleAuth = async (req: Request, res: Response, next: NextFunction) => {
+export const googleMobileAuth = async (req: Request, res: Response, next: NextFunction) => {
     try {
-        const clientId = process.env.GOOGLE_CLIENT_ID;
-        const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
-        const redirectUri = process.env.GOOGLE_REDIRECT_URI;
+        // Extract ID token from request body
+        const idToken = req.body?.idToken;
+        
+        if (!idToken || typeof idToken !== 'string') {
+            throw new BadRequestError("ID token is required in request body");
+        }
 
-        if (!clientId || !clientSecret || !redirectUri) {
+        const clientId = process.env.GOOGLE_CLIENT_ID;
+
+        if (!clientId) {
             throw new BadRequestError("Google OAuth credentials not configured");
         }
 
-        const oauth2Client = new OAuth2Client(clientId, clientSecret, redirectUri);
+        // Create OAuth2Client with only clientId (no secret or redirectUri needed for ID token verification)
+        const client = new OAuth2Client(clientId);
 
-        // Generate the authorization URL
-        const authUrl = oauth2Client.generateAuthUrl({
-            access_type: "offline",
-            scope: [
-                "https://www.googleapis.com/auth/userinfo.profile",
-                "https://www.googleapis.com/auth/userinfo.email",
-            ],
-            prompt: "consent", // Force consent to get refresh token
-        });
-
-        res.redirect(authUrl);
-    } catch (err) {
-        next(err);
-    }
-}
-
-/**
- * Handles Google OAuth callback - creates or logs in user
- */
-export const googleCallback = async (req: Request, res: Response, next: NextFunction) => {
-    try {
-        
-        // Handle code parameter - try multiple ways to extract it
-        let code: string | undefined;
-        
-        // Method 1: Direct from req.query (Express default)
-        const queryCode = req.query.code;
-        if (queryCode) {
-            if (Array.isArray(queryCode)) {
-                code = typeof queryCode[0] === 'string' ? queryCode[0] : undefined;
-            } else if (typeof queryCode === 'string') {
-                code = queryCode;
-            }
-        }
-        
-        // Method 2: If not found, try parsing from URL directly
-        if (!code && req.url) {
-            const queryString = req.url.split('?')[1] || '';
-            const urlParams = new URLSearchParams(queryString);
-            code = urlParams.get('code') || undefined;
-        }
-        
-        if (!code || typeof code !== 'string') {
-            console.error("Code parameter missing or invalid:", { 
-                code, 
-                type: typeof code, 
-                query: req.query,
-                hasCodeInQuery: !!req.query.code,
-                url: req.url
-            });
-            throw new BadRequestError("Authorization code not provided");
-        }
-        
-
-        const clientId = process.env.GOOGLE_CLIENT_ID;
-        const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
-        const redirectUri = process.env.GOOGLE_REDIRECT_URI;
-
-        if (!clientId || !clientSecret || !redirectUri) {
-            throw new BadRequestError("Google OAuth credentials not configured");
-        }
-
-        const oauth2Client = new OAuth2Client(clientId, clientSecret, redirectUri);
-
-        // Exchange code for tokens
-        const { tokens } = await oauth2Client.getToken(code);
-        oauth2Client.setCredentials(tokens);
-
-        // Get user info from Google
-        const ticket = await oauth2Client.verifyIdToken({
-            idToken: tokens.id_token!,
+        // Verify the ID token
+        const ticket = await client.verifyIdToken({
+            idToken: idToken,
             audience: clientId,
         });
 
         const payload = ticket.getPayload();
-        if (!payload) throw new BadRequestError("Failed to get user info from Google");
+        if (!payload) {
+            throw new BadRequestError("Failed to verify ID token");
+        }
 
+        // Extract user information from verified token
         const googleId = payload.sub;
         const email = payload.email;
         const name = payload.name || "";
         const picture = payload.picture;
 
-        if (!email) throw new BadRequestError("Email not provided by Google");
+        if (!email) {
+            throw new BadRequestError("Email not provided by Google");
+        }
+
+        // Security: Verify that Google has verified this email
+        if (!payload.email_verified) {
+            throw new BadRequestError("Google email is not verified");
+        }
 
         // Check if user exists by email
         let user = await prisma.user.findUnique({
@@ -122,19 +70,21 @@ export const googleCallback = async (req: Request, res: Response, next: NextFunc
             const baseUsername = name || email.split("@")[0];
             const username = await generateUniqueUsername(baseUsername);
 
+            // Create new user - automatically verified since Google email is verified
             user = await prisma.user.create({
                 data: {
                     name,
                     username,
                     email,
                     profileImg: picture || undefined,
-                    verified: true, // Google email is already verified
+                    verified: true, // Google OAuth users are automatically verified (no email verification needed)
                     providers: {
                         create: {
                             provider: "GOOGLE",
                             providerId: googleId,
-                            accessToken: tokens.access_token || undefined,
-                            refreshToken: tokens.refresh_token || undefined,
+                            // Do NOT store Google access/refresh tokens for mobile users
+                            accessToken: null,
+                            refreshToken: null,
                         },
                     },
                 },
@@ -144,24 +94,31 @@ export const googleCallback = async (req: Request, res: Response, next: NextFunc
             // User exists - check if Google provider is linked
             const googleProvider = user.providers.find((p) => p.provider === "GOOGLE");
 
+            // Security: Prevent account hijacking via email reuse with different Google account
+            if (googleProvider && googleProvider.providerId !== googleId) {
+                throw new BadRequestError("Google account mismatch");
+            }
+
             if (googleProvider) {
-                // Update existing provider tokens
+                // Update existing provider (do NOT store Google tokens for mobile)
                 await prisma.authProvider.update({
                     where: { id: googleProvider.id },
                     data: {
-                        accessToken: tokens.access_token || undefined,
-                        refreshToken: tokens.refresh_token || undefined,
+                        // Do NOT store Google access/refresh tokens for mobile users
+                        accessToken: null,
+                        refreshToken: null,
                     },
                 });
             } else {
-                // Link Google provider to existing user
+                // Link Google provider to existing user (first time linking Google)
                 await prisma.authProvider.create({
                     data: {
                         provider: "GOOGLE",
                         providerId: googleId,
                         userId: user.id,
-                        accessToken: tokens.access_token || undefined,
-                        refreshToken: tokens.refresh_token || undefined,
+                        // Do NOT store Google access/refresh tokens for mobile users
+                        accessToken: null,
+                        refreshToken: null,
                     },
                 });
             }
@@ -174,7 +131,9 @@ export const googleCallback = async (req: Request, res: Response, next: NextFunc
                 });
             }
 
-            // Update verified status (lastLoginAt will be updated after session creation)
+            // Automatically verify user when signing in with Google OAuth
+            // This ensures users who sign up or log in with Google are always verified
+            // No need for separate email verification step
             await prisma.user.update({
                 where: { id: user.id },
                 data: { verified: true },
@@ -185,8 +144,11 @@ export const googleCallback = async (req: Request, res: Response, next: NextFunc
 
         // Check if user account is verified (should always be true for Google users, but check for safety)
         if (!user.verified) {
-            const frontendUrl = process.env.FRONTEND_URL || "http://localhost:3000";
-            return res.redirect(`${frontendUrl}/auth/google/callback?error=verification_required&message=Please verify your account`);
+            return res.status(400).json({
+                success: false,
+                error: "verification_required",
+                message: "Please verify your account",
+            });
         }
 
         // Issue tokens
@@ -216,7 +178,7 @@ export const googleCallback = async (req: Request, res: Response, next: NextFunc
         
         if (existingDevice) {
             deviceId = existingDevice.id;
-            // Update device login count and last login
+            // Update device last login
             await prisma.userDevice.update({
                 where: { id: existingDevice.id },
                 data: {
@@ -253,23 +215,29 @@ export const googleCallback = async (req: Request, res: Response, next: NextFunc
             refreshExpiresAt: refreshExpiresAt,
         });
         
-        setAuthCookies(res, accessToken, refreshToken);
-        
         // Update last login
         await prisma.user.update({
             where: { id: user.id },
             data: { lastLoginAt: new Date() },
         });
 
-        // Check if onboarding is completed
-        if (!user.onboardingCompleted) {
-            const frontendUrl = process.env.FRONTEND_URL || "http://localhost:3000";
-            return res.redirect(`${frontendUrl}/auth/google/callback?success=true&token=${accessToken}&requiresOnboarding=true`);
-        }
-
-        // Redirect to frontend with success (you can customize this redirect URL)
-        const frontendUrl = process.env.FRONTEND_URL || "http://localhost:3000";
-        res.redirect(`${frontendUrl}/auth/google/callback?success=true&token=${accessToken}`);
+        // Return JSON response for mobile apps
+        res.json({
+            success: true,
+            accessToken,
+            refreshToken,
+            user: {
+                id: user.id,
+                email: user.email,
+                name: user.name,
+                username: user.username,
+                profileImg: user.profileImg,
+                role: user.role,
+                verified: user.verified,
+                onboardingCompleted: user.onboardingCompleted,
+            },
+            requiresOnboarding: !user.onboardingCompleted,
+        });
     } catch (err) {
         next(err);
     }

@@ -2,10 +2,11 @@ import express from 'express';
 import { authenticate } from '../middleware/auth';
 import { authenticateInternalService } from '../middleware/internal-auth';
 import {
-  streamNotifications,
   getNotifications,
   markNotificationsRead,
   publishNotificationEndpoint,
+  registerFcmTokenEndpoint,
+  unregisterFcmTokenEndpoint,
 } from '../controllers/notifications.controller';
 
 const router = express.Router();
@@ -14,10 +15,11 @@ const router = express.Router();
 // Protected by internal service authentication
 router.post('/publish', authenticateInternalService, publishNotificationEndpoint);
 
-// SSE endpoint for real-time notifications (requires user authentication)
-router.get('/stream', authenticate, streamNotifications);
+// FCM token management endpoints (requires user authentication)
+router.post('/register-token', authenticate, registerFcmTokenEndpoint);
+router.delete('/unregister-token', authenticate, unregisterFcmTokenEndpoint);
 
-// Polling endpoint (fallback) (requires user authentication)
+// Get notification history (requires user authentication)
 router.get('/', authenticate, getNotifications);
 
 // Mark notifications as read (requires user authentication)

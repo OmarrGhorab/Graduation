@@ -96,16 +96,18 @@ This directory contains all the files needed to test the Auth Service API endpoi
 - `GET /api/v1/parent-link/linked` - Get linked accounts
 
 ### Notifications
-- `GET /api/v1/notifications/stream` - SSE stream for real-time notifications
-- `GET /api/v1/notifications` - Polling endpoint (fallback)
+- `POST /api/v1/notifications/register-token` - Register FCM token for push notifications
+- `DELETE /api/v1/notifications/unregister-token` - Unregister FCM token
+- `GET /api/v1/notifications` - Get notification history
 
 ## Important Notes
 
 ### Authentication
 - All endpoints (except auth) require authentication
-- Authentication is handled via **cookies** (httpOnly)
-- Cookies are automatically set after login/register
-- Postman handles cookies automatically (no manual token management needed)
+- Authentication is handled via **Authorization header** with Bearer token
+- Tokens are returned in response body after login/register
+- Include `Authorization: Bearer <accessToken>` header in requests
+- For refresh token, use `x-refresh-token` header
 
 ### Testing Order
 1. Always register/login first to get authentication cookies

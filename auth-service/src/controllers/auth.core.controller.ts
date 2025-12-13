@@ -3,7 +3,7 @@ import bcrypt from "bcrypt";
 import prisma from "../libs/prisma";
 import { BadRequestError, UnauthorizedError } from "../utils/errors";
 import { signAccessToken, signAndStoreRefreshToken, verifyRefreshToken, revokeRefreshTokenByJti, rotateRefreshToken, verifyAccessToken } from "../utils/tokens";
-import { setAuthCookies, clearAuthCookies, getRefreshTokenFromRequest, getAccessTokenFromRequest } from "../utils/cookies";
+import { getRefreshTokenFromRequest, getAccessTokenFromRequest } from "../utils/cookies";
 import { aj } from "../libs/arcjet";
 import { generateUsernameSuggestions } from "../utils/username";
 import { createAndStoreOtp } from "../utils/otp";
@@ -91,8 +91,6 @@ export const registerUser = async (req: Request, res: Response, next: NextFuncti
             refreshExpiresAt: refreshExpiresAt,
         });
         
-        setAuthCookies(res, accessToken, refreshToken);
-
         // email verification OTP
         const otp = await createAndStoreOtp(`email:${email}`);
         // Get user language preference (default to English for new users)
@@ -102,6 +100,8 @@ export const registerUser = async (req: Request, res: Response, next: NextFuncti
 
         res.status(201).json({
             user: { id: user.id, name: user.name, email: user.email, verified: user.verified },
+            accessToken,
+            refreshToken,
             message: "Registration successful. Please Verify your account with the OTP Via Email.",
             // expose OTP in non-production for testing
             otp: process.env.NODE_ENV === "production" ? undefined : otp,
@@ -374,9 +374,8 @@ export const loginUser = async (req: Request, res: Response, next: NextFunction)
                 },
             });
             
-            setAuthCookies(res, tempAccessToken);
-            
             return res.status(200).json({
+                accessToken: tempAccessToken,
                 message: wasReactivated 
                     ? "Account reactivated. 2FA verification required" 
                     : "2FA verification required",
@@ -388,7 +387,6 @@ export const loginUser = async (req: Request, res: Response, next: NextFunction)
         // Verified but not onboarded: issue token but flag the state
         const { token: accessToken, jti: accessJti } = signAccessToken({ id: user.id, role: user.role });
         const { token: refreshToken, jti: refreshJti } = await signAndStoreRefreshToken(user.id);
-        setAuthCookies(res, accessToken, refreshToken);
 
         // Create session record in database
         const sessionDeviceInfo = await getSessionDeviceInfo(req);
@@ -444,6 +442,8 @@ export const loginUser = async (req: Request, res: Response, next: NextFunction)
                 role: user.role,
                 profileImg: user.profileImg,
             },
+            accessToken,
+            refreshToken,
             requiresOnboarding: !user.onboardingCompleted,
             accountReactivated: wasReactivated,
             message: wasReactivated 
@@ -523,7 +523,6 @@ export const logoutUser = async (req: Request, res: Response, next: NextFunction
             }
         }
         
-        clearAuthCookies(res);
         res.json({ message: "Logged out" });
     } catch (err) {
         next(err);
@@ -616,9 +615,6 @@ export const refreshToken = async (req: Request, res: Response, next: NextFuncti
             });
         }
 
-        // Set new tokens in cookies
-        setAuthCookies(res, accessToken, newRefreshToken);
-
         res.json({
             user: {
                 id: user.id,
@@ -630,6 +626,8 @@ export const refreshToken = async (req: Request, res: Response, next: NextFuncti
                 role: user.role,
                 profileImg: user.profileImg,
             },
+            accessToken,
+            refreshToken: newRefreshToken,
         });
     } catch (err) {
         // Handle JWT verification errors

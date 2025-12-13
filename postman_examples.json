@@ -155,8 +155,10 @@
       "getLinked": "GET /api/v1/parent-link/linked"
     },
     "notifications": {
-      "stream": "GET /api/v1/notifications/stream",
-      "polling": "GET /api/v1/notifications"
+      "registerToken": "POST /api/v1/notifications/register-token",
+      "unregisterToken": "DELETE /api/v1/notifications/unregister-token",
+      "getHistory": "GET /api/v1/notifications",
+      "markAsRead": "PATCH /api/v1/notifications/read"
     }
   }
 }

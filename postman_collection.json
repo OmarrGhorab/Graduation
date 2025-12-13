@@ -297,12 +297,25 @@
 			"name": "Notifications",
 			"item": [
 				{
-					"name": "Stream Notifications (SSE)",
+					"name": "Register FCM Token",
 					"request": {
-						"method": "GET",
-						"header": [],
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"token\": \"FCM_DEVICE_TOKEN\",\n    \"platform\": \"ios\",\n    \"deviceId\": \"optional-device-id\"\n}"
+						},
 						"url": {
-							"raw": "{{base_url}}/api/v1/notifications/stream",
+							"raw": "{{base_url}}/api/v1/notifications/register-token",
 							"host": [
 								"{{base_url}}"
 							],
@@ -310,20 +323,59 @@
 								"api",
 								"v1",
 								"notifications",
-								"stream"
+								"register-token"
 							]
 						},
-						"description": "Server-Sent Events endpoint for real-time notifications. Connect to this endpoint to receive real-time notifications. Cookies are automatically sent for authentication."
+						"description": "Register FCM token for push notifications. Mobile clients should call this after obtaining FCM token from Firebase."
 					},
 					"response": []
 				},
 				{
-					"name": "Get Notifications (Polling)",
+					"name": "Unregister FCM Token",
+					"request": {
+						"method": "DELETE",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"token\": \"FCM_DEVICE_TOKEN\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/notifications/unregister-token",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"notifications",
+								"unregister-token"
+							]
+						},
+						"description": "Unregister FCM token. Mobile clients should call this on logout or when token becomes invalid."
+					},
+					"response": []
+				},
+				{
+					"name": "Get Notifications (History)",
 					"request": {
 						"method": "GET",
-						"header": [],
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							}
+						],
 						"url": {
-							"raw": "{{base_url}}/api/v1/notifications",
+							"raw": "{{base_url}}/api/v1/notifications?page=1&limit=10&unreadOnly=false",
 							"host": [
 								"{{base_url}}"
 							],
@@ -331,9 +383,23 @@
 								"api",
 								"v1",
 								"notifications"
+							],
+							"query": [
+								{
+									"key": "page",
+									"value": "1"
+								},
+								{
+									"key": "limit",
+									"value": "10"
+								},
+								{
+									"key": "unreadOnly",
+									"value": "false"
+								}
 							]
 						},
-						"description": "Fallback polling endpoint for notifications. Returns empty array with message to use SSE stream."
+						"description": "Get paginated notification history. Real-time notifications are delivered via FCM push notifications."
 					},
 					"response": []
 				}

@@ -23,8 +23,7 @@ export {
 
 // OAuth controllers
 export {
-    googleAuth,
-    googleCallback,
+    googleMobileAuth,
 } from "./oauth.controller";
 
 // Device verification controllers

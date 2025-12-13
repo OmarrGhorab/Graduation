@@ -295,34 +295,34 @@ Postman automatically handles cookies when:
 
 ### Step 4: Notifications
 
-#### 4.1 Stream Notifications (SSE)
-- **Endpoint**: `GET /api/v1/notifications/stream`
-- **Authentication**: Required (cookies automatically sent)
-- **Method**: Server-Sent Events (SSE)
-- **Expected Behavior**:
-  - Connection stays open
-  - Receives real-time notifications as they occur
-  - Heartbeat every 30 seconds
-  - Initial connection message
-- **Notes**: 
-  - In Postman, this will show as a streaming response
-  - Notifications are received when:
-    - Parent link request is sent (parent receives notification)
-    - Parent responds to request (child receives notification)
-  - Format: `data: {json_data}\n\n`
-
-#### 4.2 Get Notifications (Polling)
-- **Endpoint**: `GET /api/v1/notifications`
-- **Authentication**: Required
-- **Expected Response**: 200 OK
-- **Response**: 
+#### 4.1 Register FCM Token
+- **Endpoint**: `POST /api/v1/notifications/register-token`
+- **Authentication**: Required (Authorization header)
+- **Body**:
 ```json
 {
-    "data": [],
-    "message": "Use /api/v1/notifications/stream for real-time notifications"
+    "token": "FCM_DEVICE_TOKEN",
+    "platform": "ios",
+    "deviceId": "optional-device-id"
 }
 ```
-- **Notes**: This is a fallback endpoint. Use SSE stream for real-time notifications.
+- **Expected Response**: 200 OK
+- **Notes**: 
+  - Mobile clients should register FCM token after login
+  - Token is used to send push notifications to the device
+  - Platform should be "ios" or "android"
+
+#### 4.2 Get Notifications (History)
+- **Endpoint**: `GET /api/v1/notifications`
+- **Authentication**: Required (Authorization header)
+- **Query Parameters**:
+  - `page` (optional, default: 1)
+  - `limit` (optional, default: 10, max: 50)
+  - `unreadOnly` (optional, default: false)
+- **Expected Response**: 200 OK with paginated notification list
+- **Notes**: 
+  - Returns notification history from database
+  - Real-time notifications are delivered via FCM push notifications
 
 ## Complete Test Scenarios
 
