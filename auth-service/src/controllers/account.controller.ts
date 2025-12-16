@@ -3,7 +3,6 @@ import bcrypt from "bcrypt";
 import prisma from "../libs/prisma";
 import { BadRequestError, UnauthorizedError } from "../utils/errors";
 import { revokeAllUserRefreshTokens } from "../utils/tokens";
-import { clearAuthCookies } from "../utils/cookies";
 
 /**
  * Deactivate user account
@@ -50,9 +49,6 @@ export const deactivateAccount = async (req: Request, res: Response, next: NextF
             where: { id: userId },
             data: { isActive: false },
         });
-
-        // Clear auth cookies
-        clearAuthCookies(res);
 
         res.json({
             message: "Account deactivated successfully",
@@ -122,9 +118,6 @@ export const deleteAccount = async (req: Request, res: Response, next: NextFunct
                 isActive: false, // Also deactivate
             },
         });
-
-        // Clear auth cookies
-        clearAuthCookies(res);
 
         res.json({
             message: "Account deleted successfully",

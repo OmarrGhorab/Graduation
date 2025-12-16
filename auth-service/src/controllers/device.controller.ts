@@ -2,7 +2,6 @@ import { Request, Response, NextFunction } from "express";
 import prisma from "../libs/prisma";
 import { BadRequestError, UnauthorizedError } from "../utils/errors";
 import { signAccessToken, signAndStoreRefreshToken } from "../utils/tokens";
-import { setAuthCookies } from "../utils/cookies";
 import { createAndStoreOtp, verifyOtp } from "../utils/otp";
 import { extractDeviceInfo } from "../utils/device";
 import { createSession, getSessionDeviceInfo } from "../utils/sessions";
@@ -122,8 +121,6 @@ export const verifyDevice = async (req: Request, res: Response, next: NextFuncti
                 },
             });
             
-            setAuthCookies(res, tempAccessToken);
-            
             return res.status(200).json({
                 message: "Device verified successfully. 2FA verification required.",
                 deviceVerified: true,
@@ -154,8 +151,6 @@ export const verifyDevice = async (req: Request, res: Response, next: NextFuncti
             expiresAt: expiresAt,
             refreshExpiresAt: refreshExpiresAt,
         });
-        
-        setAuthCookies(res, accessToken, refreshToken);
 
         await prisma.user.update({
             where: { id: user.id },

@@ -1,25 +1,18 @@
-import { PrismaClient } from '@prisma/client'
-import dotenv from "dotenv";
+import { PrismaClient } from '@prisma/client';
 
-dotenv.config();
+const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient };
 
-const prisma = new PrismaClient({
-  log: process.env.NODE_ENV === 'development' ? ['query', 'info', 'warn', 'error'] : ['error'],
-})
-
-// Handle database connection errors
-prisma.$connect()
-  .then(() => {
-    console.log('Connected to database');
-  })
-  .catch((error: Error) => {
-    console.error('Database connection error:', error);
-    process.exit(1);
+export const prisma =
+  globalForPrisma.prisma ||
+  new PrismaClient({
+    log: process.env.NODE_ENV === 'development' ? ['error', 'warn'] : ['error'],
   });
+
+if (process.env.NODE_ENV !== "production") globalForPrisma.prisma = prisma;
 
 // Graceful shutdown
 process.on('beforeExit', async () => {
   await prisma.$disconnect();
 });
 
-export default prisma
+export default prisma;

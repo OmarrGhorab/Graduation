@@ -1,83 +1,106 @@
-import express from "express";
-import { getServerConfig, getArcjetKey, PROXY_CONFIG } from "./config/index.js";
-import { corsMiddleware, setupBasicMiddleware, globalErrorHandler, notFoundHandler } from "./middleware/index.js";
-import { createRootHandler } from "./routes/index.js";
+import dotenv from "dotenv";
+dotenv.config();
 
-/**
- * Initialize and configure the Express application
- */
-const createApp = (): express.Application => {
-  const app = express();
-  
-  // Setup middleware
-  app.use(corsMiddleware);
-  setupBasicMiddleware(app);
-  
-  return app;
-};
+import express, { Request, Response, NextFunction } from "express";
+import cors from "cors";
+import proxy from "express-http-proxy";
+import arcjet, { detectBot } from "@arcjet/node";
 
-/**
- * Setup routes
- */
-const setupRoutes = (app: express.Application, arcjetKey: string): void => {
-  // Proxy all routes to auth service with Arcjet protection if configured
-  app.use("/", createRootHandler(arcjetKey));
-  
-  // Error handling middleware (must be last)
-  app.use(globalErrorHandler);
-  app.use(notFoundHandler);
-};
+// Initialize Arcjet with bot detection
+const aj = arcjet({
+    key: process.env.ARCJET_KEY || "",
+    rules: [
+        detectBot({
+            mode: process.env.NODE_ENV === "production" ? "LIVE" : "DRY_RUN",
+            allow: [
+                "CATEGORY:SEARCH_ENGINE", // Google, Bing, etc
+                "CATEGORY:MONITOR", // Uptime monitoring services
+            ],
+        }),
+    ],
+});
 
-/**
- * Start the server
- */
-const startServer = (app: express.Application, config: ReturnType<typeof getServerConfig>, arcjetKey: string): void => {
-  app.listen(config.port, config.host, (): void => {
-    console.log(`🚀 Server is running on http://${config.host}:${config.port}`);
-    console.log(`📝 Environment: ${process.env.NODE_ENV || "development"}`);
-    console.log(`🔄 Proxy: Root endpoint (/) → ${PROXY_CONFIG.authServiceUrl}`);
-    
-    if (!arcjetKey) {
-      console.log(`Arcjet protection: DISABLED (set ARCJET_KEY to enable)`);
-    } else {
-      console.log(`Arcjet protection: ENABLED`);
+const app = express();
+
+// Middleware
+app.use(express.json({ limit: "10mb" }));
+app.use(express.urlencoded({ extended: true, limit: "10mb" }));
+// CORS configuration - allow mobile apps and web clients
+const allowedOrigins = process.env.ALLOWED_ORIGINS 
+    ? process.env.ALLOWED_ORIGINS.split(',').map(origin => origin.trim())
+    : ["http://localhost:3000", "http://localhost:8080"];
+
+app.use(cors({
+    origin: (origin, callback) => {
+        // Allow requests with no origin (mobile apps, Postman, etc.)
+        if (!origin) {
+            return callback(null, true);
+        }
+        // Allow if origin is in whitelist
+        if (allowedOrigins.includes(origin) || allowedOrigins.includes("*")) {
+            return callback(null, true);
+        }
+        callback(new Error("Not allowed by CORS"));
+    },
+    credentials: true,
+    allowedHeaders: ["Content-Type", "Authorization", "x-refresh-token"],
+}));
+
+// Health check (skip protection)
+app.get("/health", (req: Request, res: Response) => {
+    res.json({ status: "ok", service: "api-gateway" });
+});
+
+// Arcjet protection middleware (bot + VPN/proxy/hosting detection)
+const arcjetProtection = async (req: Request, res: Response, next: NextFunction) => {
+    // Skip protection if no Arcjet key configured
+    if (!process.env.ARCJET_KEY) {
+        return next();
     }
-  });
+
+    try {
+        const decision = await aj.protect(req);
+
+        // Block if request is denied (bot detected)
+        if (decision.isDenied()) {
+            if (decision.reason.isBot()) {
+                console.log("Bot detected, blocking request");
+                return res.status(403).json({ error: "Forbidden: Bot detected" });
+            }
+            return res.status(403).json({ error: "Forbidden" });
+        }
+
+        // Block VPN, proxy, hosting, and relay IPs
+        if (
+            decision.ip.isHosting() ||
+            decision.ip.isVpn() ||
+            decision.ip.isProxy() ||
+            decision.ip.isRelay()
+        ) {
+            console.log("VPN/Proxy/Hosting detected, blocking request");
+            return res.status(403).json({ error: "Forbidden: VPN/Proxy not allowed" });
+        }
+
+        // Request passed all checks
+        next();
+    } catch (error) {
+        console.error("Arcjet protection error:", error);
+        // On error, allow request through (fail open)
+        next();
+    }
 };
 
-/**
- * Setup graceful shutdown handlers
- */
-const setupGracefulShutdown = (): void => {
-  process.on('SIGTERM', (): void => {
-    console.log('SIGTERM received, shutting down gracefully');
-    process.exit(0);
-  });
+// Apply Arcjet protection to all routes except health check
+app.use(arcjetProtection);
 
-  process.on('SIGINT', (): void => {
-    console.log('SIGINT received, shutting down gracefully');
-    process.exit(0);
-  });
-};
+// Notification service proxy
+app.use("/api/v1/notifications", proxy("http://localhost:6003"));
 
-/**
- * Main application entry point
- */
-const main = (): void => {
-  // Get configuration
-  const config = getServerConfig();
-  const arcjetKey = getArcjetKey();
-  
-  // Create and configure app
-  const app = createApp();
-  setupRoutes(app, arcjetKey);
-  
-  // Setup graceful shutdown
-  setupGracefulShutdown();
-  
-  // Start server
-  startServer(app, config, arcjetKey);
-};
+// Auth service proxy (everything else)
+app.use("/", proxy("http://localhost:6001"));
 
-// Start the application
-main();
+const PORT = process.env.PORT || 3000;
+
+app.listen(PORT, () => {
+    console.log(`api-gateway is running on port ${PORT}`);
+});

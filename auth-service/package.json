@@ -8,7 +8,10 @@
     "start": "tsx src/main.ts",
     "build": "tsc",
     "migrate": "npx prisma migrate dev --schema=./prisma/schema.prisma",
-    "generate": "npx prisma generate --schema=./prisma/schema.prisma"
+    "generate": "npx prisma generate --schema=./prisma/schema.prisma",
+    "test": "vitest --run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest --coverage"
   },
   "devDependencies": {
     "@types/bcrypt": "^5.0.2",

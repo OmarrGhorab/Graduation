@@ -11,7 +11,12 @@ export async function publishNotification(
     [key: string]: any;
   }
 ): Promise<void> {
+  const startTime = Date.now();
   try {
+    if (!process.env.INTERNAL_SERVICE_SECRET) {
+      console.warn(`[Notification Client] INTERNAL_SERVICE_SECRET not configured, notification may fail for user ${userId}`);
+    }
+
     const response = await fetch(`${NOTIFICATION_SERVICE_URL}/api/v1/notifications/publish`, {
       method: 'POST',
       headers: {
@@ -27,12 +32,18 @@ export async function publishNotification(
     });
 
     if (!response.ok) {
-      throw new Error(`Failed to publish notification: ${response.statusText}`);
+      const errorText = await response.text().catch(() => response.statusText);
+      throw new Error(`Failed to publish notification: ${response.status} ${errorText}`);
     }
 
-    console.log(`Notification published successfully for user ${userId}`);
+    const duration = Date.now() - startTime;
+    console.log(`[Notification Client] Published notification for user ${userId}, type: ${data.type}, duration: ${duration}ms`);
   } catch (error) {
-    console.error("Error publishing notification via service:", error);
+    const duration = Date.now() - startTime;
+    console.error(`[Notification Client] Error publishing notification for user ${userId}, type: ${data.type}, duration: ${duration}ms`, error);
+    if (error instanceof Error) {
+      console.error(`[Notification Client] Error details: ${error.message}`, error.stack);
+    }
     // Don't throw - notification failure shouldn't break the request
   }
 }

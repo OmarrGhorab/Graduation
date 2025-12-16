@@ -12,7 +12,6 @@ import {
   verifyBackupCode,
 } from "../utils/twoFactor";
 import { signAccessToken, signAndStoreRefreshToken } from "../utils/tokens";
-import { setAuthCookies } from "../utils/cookies";
 import { createSession, getSessionDeviceInfo } from "../utils/sessions";
 import bcrypt from "bcrypt";
 import dotenv from "dotenv";
@@ -379,8 +378,6 @@ export const verify2FALogin = async (req: Request, res: Response, next: NextFunc
         refreshExpiresAt: refreshExpiresAt,
       });
     }
-    
-    setAuthCookies(res, accessToken, refreshToken);
 
     // Update last login
     await prisma.user.update({

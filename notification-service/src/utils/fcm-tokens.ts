@@ -5,6 +5,7 @@ import { BadRequestError } from "./errors";
  * Register or update an FCM token for a user
  * If the token already exists for the user, it will be updated
  * If the token exists for another user, it will be transferred to the current user
+ * (This handles cases where user logs in on a device previously used by another user)
  */
 export async function registerFcmToken(
   userId: string,
@@ -16,44 +17,62 @@ export async function registerFcmToken(
     throw new BadRequestError("FCM token is required");
   }
 
-  // Check if token already exists
-  const existingToken = await prisma.fcmToken.findUnique({
-    where: { token },
-  });
+  // Validate token format (basic check - FCM tokens are typically long strings)
+  if (token.length < 50) {
+    throw new BadRequestError("Invalid FCM token format");
+  }
 
-  if (existingToken) {
-    if (existingToken.userId === userId) {
-      // Token already registered for this user, just update metadata
-      await prisma.fcmToken.update({
-        where: { token },
-        data: {
-          deviceId: deviceId || existingToken.deviceId,
-          platform: platform || existingToken.platform,
-          updatedAt: new Date(),
-        },
-      });
+  // Validate platform if provided
+  if (platform && platform !== "ios" && platform !== "android") {
+    throw new BadRequestError("Platform must be 'ios' or 'android'");
+  }
+
+  try {
+    // Check if token already exists
+    const existingToken = await prisma.fcmToken.findUnique({
+      where: { token },
+    });
+
+    if (existingToken) {
+      if (existingToken.userId === userId) {
+        // Token already registered for this user, just update metadata
+        await prisma.fcmToken.update({
+          where: { token },
+          data: {
+            deviceId: deviceId || existingToken.deviceId,
+            platform: platform || existingToken.platform,
+            updatedAt: new Date(),
+          },
+        });
+        console.log(`[FCM Token] Updated token for user ${userId}, platform: ${platform || existingToken.platform}`);
+      } else {
+        // Token belongs to another user - transfer it (device reused by different user)
+        console.log(`[FCM Token] Transferring token from user ${existingToken.userId} to user ${userId}`);
+        await prisma.fcmToken.update({
+          where: { token },
+          data: {
+            userId,
+            deviceId: deviceId || existingToken.deviceId,
+            platform: platform || existingToken.platform,
+            updatedAt: new Date(),
+          },
+        });
+      }
     } else {
-      // Token belongs to another user, transfer it to current user
-      await prisma.fcmToken.update({
-        where: { token },
+      // New token, create it
+      await prisma.fcmToken.create({
         data: {
           userId,
-          deviceId: deviceId || existingToken.deviceId,
-          platform: platform || existingToken.platform,
-          updatedAt: new Date(),
+          token,
+          deviceId: deviceId || null,
+          platform: platform || null,
         },
       });
+      console.log(`[FCM Token] Registered new token for user ${userId}, platform: ${platform || "unknown"}`);
     }
-  } else {
-    // New token, create it
-    await prisma.fcmToken.create({
-      data: {
-        userId,
-        token,
-        deviceId: deviceId || null,
-        platform: platform || null,
-      },
-    });
+  } catch (error) {
+    console.error(`[FCM Token] Error registering token for user ${userId}:`, error);
+    throw error;
   }
 }
 
@@ -87,6 +106,18 @@ export async function getUserFcmTokens(userId: string): Promise<string[]> {
   });
 
   return tokens.map((t: { token: string }) => t.token);
+}
+
+/**
+ * Get FCM tokens with platform information for a user
+ */
+export async function getUserFcmTokensWithPlatform(userId: string): Promise<Array<{ token: string; platform: string | null }>> {
+  const tokens = await prisma.fcmToken.findMany({
+    where: { userId },
+    select: { token: true, platform: true },
+  });
+
+  return tokens.map((t) => ({ token: t.token, platform: t.platform }));
 }
 
 /**

@@ -13,24 +13,19 @@
   "license": "ISC",
   "description": "",
   "devDependencies": {
-    "@types/cookie-parser": "^1.4.10",
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.4",
     "@types/express-http-proxy": "^1.6.7",
-    "@types/morgan": "^1.9.10",
     "nodemon": "^3.1.10",
-    "ts-node": "^10.9.2",
     "tsx": "^4.20.6",
     "typescript": "^5.9.3"
   },
   "dependencies": {
     "@arcjet/inspect": "^1.0.0-beta.13",
     "@arcjet/node": "^1.0.0-beta.13",
-    "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
     "dotenv": "^17.2.3",
     "express": "^5.1.0",
-    "express-http-proxy": "^2.1.2",
-    "morgan": "^1.10.1"
+    "express-http-proxy": "^2.1.2"
   }
 }

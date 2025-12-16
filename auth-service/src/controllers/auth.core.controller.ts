@@ -531,15 +531,37 @@ export const logoutUser = async (req: Request, res: Response, next: NextFunction
 
 export const refreshToken = async (req: Request, res: Response, next: NextFunction) => {
     try {
-        // Extract refresh token from request
-        const refreshToken = getRefreshTokenFromRequest(req);
+        // Extract refresh token from request (header or body)
+        let refreshToken = getRefreshTokenFromRequest(req);
+        
+        // Fallback: Check request body (common for mobile apps)
+        if (!refreshToken && req.body?.refreshToken) {
+            refreshToken = req.body.refreshToken;
+        }
         
         if (!refreshToken) {
-            throw new UnauthorizedError("Refresh token is required");
+            throw new UnauthorizedError("Refresh token is required. Send it in x-refresh-token header or request body.");
         }
 
         // Verify the refresh token
-        const payload = await verifyRefreshToken(refreshToken);
+        let payload;
+        try {
+            payload = await verifyRefreshToken(refreshToken);
+        } catch (error) {
+            console.error("[Refresh Token] Verification failed:", error instanceof Error ? error.message : error);
+            if (error instanceof Error) {
+                if (error.name === "JsonWebTokenError") {
+                    throw new UnauthorizedError("Invalid refresh token format");
+                }
+                if (error.name === "TokenExpiredError") {
+                    throw new UnauthorizedError("Refresh token has expired");
+                }
+                if (error.message.includes("revoked") || error.message.includes("expired")) {
+                    throw new UnauthorizedError("Refresh token has been revoked or expired");
+                }
+            }
+            throw error;
+        }
         const userId = payload.sub;
 
         // Get user from database to ensure user still exists and get current role
@@ -630,12 +652,58 @@ export const refreshToken = async (req: Request, res: Response, next: NextFuncti
             refreshToken: newRefreshToken,
         });
     } catch (err) {
-        // Handle JWT verification errors
-        if (err instanceof Error) {
-            if (err.name === "JsonWebTokenError" || err.name === "TokenExpiredError" || err.message.includes("Refresh token")) {
-                return next(new UnauthorizedError("Invalid or expired refresh token"));
-            }
+        // Log error for debugging
+        console.error("[Refresh Token] Error:", err instanceof Error ? err.message : err);
+        if (err instanceof Error && err.stack) {
+            console.error("[Refresh Token] Stack:", err.stack);
         }
         next(err);
     }
 }
+
+export const getMyProfile = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        // Extract user ID from req.user (populated by authenticate middleware)
+        const userId = req.user?.id;
+        
+        if (!userId) {
+            throw new UnauthorizedError("User not authenticated");
+        }
+        
+        // Query database using Prisma to get user profile
+        const user = await prisma.user.findUnique({
+            where: { id: userId },
+            select: {
+                id: true,
+                name: true,
+                username: true,
+                email: true,
+                verified: true,
+                onboardingCompleted: true,
+                role: true,
+                profileImg: true,
+                isActive: true,
+                lastLoginAt: true,
+                createdAt: true,
+                updatedAt: true,
+                deviceBlocked: true,
+                // Explicitly exclude sensitive fields
+                password: false,
+                deletedAt: false,
+                pendingDeviceFingerprint: false,
+                twoFactorSecret: false,
+                twoFactorBackupCodes: false,
+            },
+        });
+        
+        // Return 404 error if user not found
+        if (!user) {
+            return res.status(404).json({ error: "User not found" });
+        }
+        
+        // Return user profile data in response
+        res.json({ user });
+    } catch (err) {
+        next(err);
+    }
+};
