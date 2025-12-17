@@ -18,8 +18,11 @@ model User {
   gender                   Gender?
   role                     UserRole        @default(STUDENT)
   profileImg               String?
+  bio                      String?         @db.VarChar(200)
   country                  String?
   onboardingCompleted      Boolean         @default(false)
+  goals                    String[]        @default([])
+  newsletterEnabled        Boolean         @default(false)
   preferences              UserPreference?
   verified                 Boolean         @default(false)
   twoFactorEnabled         Boolean         @default(false)

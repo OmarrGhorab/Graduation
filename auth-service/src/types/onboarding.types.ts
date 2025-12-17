@@ -9,6 +9,9 @@ export interface OnboardingRequestBody {
   country?: string;
   role?: UserRole;
   profileImg?: string; // Base64 string or data URL
+  bio?: string; // Max 200 characters
+  goals?: string[]; // Max 3 goals
+  newsletterEnabled?: boolean;
   preferences?: {
     language?: string;
     themePreference?: string;
@@ -27,6 +30,9 @@ export interface UserUpdateData {
   country?: string;
   role?: UserRole;
   profileImg?: string;
+  bio?: string;
+  goals?: string[];
+  newsletterEnabled?: boolean;
   onboardingCompleted: boolean;
 }
 
@@ -45,6 +51,9 @@ export interface OnboardingResponse {
     country: string | null;
     role: UserRole;
     profileImg: string | null;
+    bio: string | null;
+    goals: string[];
+    newsletterEnabled: boolean;
     onboardingCompleted: boolean;
     preferences: {
       id: string;

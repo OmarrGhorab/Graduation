@@ -41,6 +41,24 @@ function validateRole(role: UserRole): void {
 }
 
 /**
+ * Validates bio field
+ */
+function validateBio(bio: string): void {
+  if (bio.length > 200) {
+    throw new BadRequestError("Bio must be at most 200 characters");
+  }
+}
+
+/**
+ * Validates goals array
+ */
+function validateGoals(goals: string[]): void {
+  if (goals.length > 3) {
+    throw new BadRequestError("Maximum 3 goals allowed");
+  }
+}
+
+/**
  * Builds user update data object from request body
  */
 async function buildUserUpdateData(
@@ -78,6 +96,20 @@ async function buildUserUpdateData(
       // For base64 data, upload to Cloudinary
       userUpdateData.profileImg = await uploadProfileImage(body.profileImg, userId);
     }
+  }
+
+  if (body.bio !== undefined) {
+    validateBio(body.bio);
+    userUpdateData.bio = body.bio;
+  }
+
+  if (body.goals) {
+    validateGoals(body.goals);
+    userUpdateData.goals = body.goals;
+  }
+
+  if (body.newsletterEnabled !== undefined) {
+    userUpdateData.newsletterEnabled = body.newsletterEnabled;
   }
 
   return userUpdateData;
@@ -244,6 +276,9 @@ export const createOnboarding = async (req: Request, res: Response, next: NextFu
         country: result?.country,
         role: result?.role,
         profileImg: result?.profileImg,
+        bio: result?.bio,
+        goals: result?.goals || [],
+        newsletterEnabled: result?.newsletterEnabled || false,
         onboardingCompleted: result?.onboardingCompleted,
         preferences: result?.preferences,
         interests: result?.interests.map((ui) => ({
