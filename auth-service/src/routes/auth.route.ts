@@ -13,6 +13,7 @@ import {
 import {
   deactivateAccount,
   deleteAccount,
+  deleteProfileImage,
 } from "../controllers/account.controller";
 import { getActivity } from "../controllers/activity.controller";
 import {
@@ -58,6 +59,7 @@ router.post("/2fa/regenerate-backup-codes", authenticate, regenerateBackupCodes)
 // Account management (Danger Zone)
 router.post("/account/deactivate", authenticate, deactivateAccount);
 router.post("/account/delete", authenticate, deleteAccount);
+router.delete("/account/profile-image", authenticate, deleteProfileImage);
 
 // Activity and Sessions
 router.get("/activity", authenticate, getActivity);

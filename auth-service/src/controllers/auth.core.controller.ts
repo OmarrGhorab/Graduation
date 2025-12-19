@@ -16,14 +16,18 @@ export const registerUser = async (req: Request, res: Response, next: NextFuncti
     try {
         const { name, username, email, password: rawPassword } = req.body as { name?: string; username?: string; email?: string; password?: unknown };
         if (!name || !username || !email || rawPassword === undefined || rawPassword === null) throw new BadRequestError("Missing required fields");
-        const decision = await aj.protect(req, { email });
-        console.log("Arcjet decision:", decision);
+        const isProd = process.env.NODE_ENV === "production";
 
-        if (decision.isDenied()) {
-            if (decision.reason.isEmail()) {
-            return res.status(400).json({ error: "Invalid email" });
-            } else {
-            return res.status(403).json({ error: "Forbidden" });
+        if (isProd) {
+            const decision = await aj.protect(req, { email });
+            console.log("Arcjet decision:", decision);
+
+            if (decision.isDenied()) {
+                if (decision.reason.isEmail()) {
+                    return res.status(400).json({ error: "Invalid email" });
+                } else {
+                    return res.status(403).json({ error: "Forbidden" });
+                }
             }
         }
         const password = typeof rawPassword === "string" ? rawPassword : String(rawPassword);
@@ -51,18 +55,18 @@ export const registerUser = async (req: Request, res: Response, next: NextFuncti
         // Issue tokens
         const { token: accessToken, jti: accessJti } = signAccessToken({ id: user.id, role: user.role });
         const { token: refreshToken, jti: refreshJti } = await signAndStoreRefreshToken(user.id);
-        
+
         // Create session record in database
         const sessionDeviceInfo = await getSessionDeviceInfo(req);
         const expiresAt = new Date();
         expiresAt.setSeconds(expiresAt.getSeconds() + parseInt(process.env.ACCESS_TOKEN_TTL_SEC || "900", 10));
         const refreshExpiresAt = new Date();
         refreshExpiresAt.setSeconds(refreshExpiresAt.getSeconds() + parseInt(process.env.REFRESH_TOKEN_TTL_SEC || "2592000", 10));
-        
+
         // Extract device info and create device record
         const deviceInfo = extractDeviceInfo(req);
         let deviceId: string | null = null;
-        
+
         // Create device record for new user
         const deviceName = extractDeviceName(sessionDeviceInfo.userAgent);
         const newDevice = await prisma.userDevice.create({
@@ -77,7 +81,7 @@ export const registerUser = async (req: Request, res: Response, next: NextFuncti
             },
         });
         deviceId = newDevice.id;
-        
+
         // Create session
         await createSession({
             userId: user.id,
@@ -90,7 +94,7 @@ export const registerUser = async (req: Request, res: Response, next: NextFuncti
             expiresAt: expiresAt,
             refreshExpiresAt: refreshExpiresAt,
         });
-        
+
         // email verification OTP
         const otp = await createAndStoreOtp(`email:${email}`);
         // Get user language preference (default to English for new users)
@@ -159,7 +163,7 @@ export const loginUser = async (req: Request, res: Response, next: NextFunction)
 
         // Track if account was reactivated during login
         let wasReactivated = false;
-        
+
         // If account is deactivated but password is correct, reactivate it automatically
         if (!user.isActive) {
             await prisma.user.update({
@@ -175,7 +179,7 @@ export const loginUser = async (req: Request, res: Response, next: NextFunction)
         if (!user.verified) {
             return res.status(403).json({
                 error: "Account not verified",
-                message: wasReactivated 
+                message: wasReactivated
                     ? "Account reactivated. Please verify your account before logging in. Check your email for the verification OTP."
                     : "Please verify your account before logging in. Check your email for the verification OTP.",
                 verified: false,
@@ -242,7 +246,7 @@ export const loginUser = async (req: Request, res: Response, next: NextFunction)
 
                 return res.status(403).json({
                     error: "New device detected",
-                    message: wasReactivated 
+                    message: wasReactivated
                         ? "Account reactivated. A new device has been detected. Your account has been blocked until device verification is completed. Please check your email for verification code."
                         : "A new device has been detected. Your account has been blocked until device verification is completed. Please check your email for verification code.",
                     deviceBlocked: true,
@@ -286,7 +290,7 @@ export const loginUser = async (req: Request, res: Response, next: NextFunction)
                 const otp = await createAndStoreOtp(`device:${user.id}:${deviceInfo.fingerprint}`);
                 return res.status(403).json({
                     error: "Device verification required",
-                    message: wasReactivated 
+                    message: wasReactivated
                         ? "Account reactivated. This device needs to be verified. Please check your email for verification code."
                         : "This device needs to be verified. Please check your email for verification code.",
                     deviceBlocked: true,
@@ -316,7 +320,7 @@ export const loginUser = async (req: Request, res: Response, next: NextFunction)
         if (user.deviceBlocked && user.pendingDeviceFingerprint !== deviceInfo.fingerprint) {
             return res.status(403).json({
                 error: "Account blocked",
-                message: wasReactivated 
+                message: wasReactivated
                     ? "Account reactivated. Your account has been blocked due to a new device login. Please verify the pending device first."
                     : "Your account has been blocked due to a new device login. Please verify the pending device first.",
                 deviceBlocked: true,
@@ -329,12 +333,12 @@ export const loginUser = async (req: Request, res: Response, next: NextFunction)
         if (user.twoFactorEnabled) {
             // 2FA is enabled - issue temporary access token for 2FA verification
             const { token: tempAccessToken, jti: tempAccessJti } = signAccessToken({ id: user.id, role: user.role });
-            
+
             // Create temporary session for 2FA verification (will be replaced after 2FA succeeds)
             const sessionDeviceInfo = await getSessionDeviceInfo(req);
             const expiresAt = new Date();
             expiresAt.setSeconds(expiresAt.getSeconds() + parseInt(process.env.ACCESS_TOKEN_TTL_SEC || "900", 10));
-            
+
             // Find or get device ID
             let deviceId: string | null = null;
             if (existingDevice) {
@@ -353,7 +357,7 @@ export const loginUser = async (req: Request, res: Response, next: NextFunction)
                     deviceId = device.id;
                 }
             }
-            
+
             // Create temporary session (no refresh token yet, will be added after 2FA)
             // Note: We need to create a session with null refreshToken, but createSession requires a string
             // So we'll create it directly with Prisma
@@ -373,11 +377,11 @@ export const loginUser = async (req: Request, res: Response, next: NextFunction)
                     lastActivityAt: new Date(),
                 },
             });
-            
+
             return res.status(200).json({
                 accessToken: tempAccessToken,
-                message: wasReactivated 
-                    ? "Account reactivated. 2FA verification required" 
+                message: wasReactivated
+                    ? "Account reactivated. 2FA verification required"
                     : "2FA verification required",
                 requires2FA: true,
                 accountReactivated: wasReactivated,
@@ -446,8 +450,8 @@ export const loginUser = async (req: Request, res: Response, next: NextFunction)
             refreshToken,
             requiresOnboarding: !user.onboardingCompleted,
             accountReactivated: wasReactivated,
-            message: wasReactivated 
-                ? "Account reactivated successfully. Welcome back!" 
+            message: wasReactivated
+                ? "Account reactivated successfully. Welcome back!"
                 : undefined,
         });
     } catch (err) {
@@ -460,9 +464,9 @@ export const logoutUser = async (req: Request, res: Response, next: NextFunction
         // Extract tokens from request
         const refreshToken = getRefreshTokenFromRequest(req);
         const accessToken = getAccessTokenFromRequest(req);
-        
+
         let sessionTokenJti: string | null = null;
-        
+
         // Get access token JTI to revoke session
         if (accessToken) {
             try {
@@ -472,7 +476,7 @@ export const logoutUser = async (req: Request, res: Response, next: NextFunction
                 // ignore errors when verifying token during logout
             }
         }
-        
+
         // Revoke session in database if access token is valid
         if (sessionTokenJti) {
             try {
@@ -487,7 +491,7 @@ export const logoutUser = async (req: Request, res: Response, next: NextFunction
                         refreshToken: true,
                     },
                 });
-                
+
                 if (session) {
                     // Revoke refresh token in Redis if it exists
                     if (session.refreshToken) {
@@ -497,7 +501,7 @@ export const logoutUser = async (req: Request, res: Response, next: NextFunction
                             // ignore errors when revoking token during logout
                         }
                     }
-                    
+
                     // Revoke session in database
                     await prisma.session.update({
                         where: { id: session.id },
@@ -512,7 +516,7 @@ export const logoutUser = async (req: Request, res: Response, next: NextFunction
                 // ignore errors when revoking session during logout
             }
         }
-        
+
         // Also revoke refresh token from request if provided (fallback)
         if (refreshToken) {
             try {
@@ -522,7 +526,7 @@ export const logoutUser = async (req: Request, res: Response, next: NextFunction
                 // ignore errors when revoking token during logout
             }
         }
-        
+
         res.json({ message: "Logged out" });
     } catch (err) {
         next(err);
@@ -533,12 +537,12 @@ export const refreshToken = async (req: Request, res: Response, next: NextFuncti
     try {
         // Extract refresh token from request (header or body)
         let refreshToken = getRefreshTokenFromRequest(req);
-        
+
         // Fallback: Check request body (common for mobile apps)
         if (!refreshToken && req.body?.refreshToken) {
             refreshToken = req.body.refreshToken;
         }
-        
+
         if (!refreshToken) {
             throw new UnauthorizedError("Refresh token is required. Send it in x-refresh-token header or request body.");
         }
@@ -668,11 +672,11 @@ export const getMyProfile = async (req: Request, res: Response, next: NextFuncti
     try {
         // Extract user ID from req.user (populated by authenticate middleware)
         const userId = req.user?.id;
-        
+
         if (!userId) {
             throw new UnauthorizedError("User not authenticated");
         }
-        
+
         // Query database using Prisma to get user profile
         const user = await prisma.user.findUnique({
             where: { id: userId },
@@ -701,12 +705,12 @@ export const getMyProfile = async (req: Request, res: Response, next: NextFuncti
                 twoFactorBackupCodes: false,
             },
         });
-        
+
         // Return 404 error if user not found
         if (!user) {
             return res.status(404).json({ error: "User not found" });
         }
-        
+
         // Return user profile data in response
         res.json({ user });
     } catch (err) {

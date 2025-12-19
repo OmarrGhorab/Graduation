@@ -2,7 +2,7 @@ import { Request, Response, NextFunction } from "express";
 import prisma from "../libs/prisma";
 import { BadRequestError } from "../utils/errors";
 import { Gender, Prisma, UserRole } from "@prisma/client";
-import { uploadProfileImage } from "../utils/cloudinaryUpload";
+import { uploadProfileImage, deleteImageFromCloudinary } from "../utils/cloudinaryUpload";
 import { sendMultipleParentLinkRequests } from "../utils/parent-link";
 import type {
   OnboardingRequestBody,
@@ -88,9 +88,25 @@ async function buildUserUpdateData(
   }
 
   if (body.profileImg) {
+    // Fetch current user to check for existing Cloudinary image
+    const currentUser = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { profileImg: true },
+    });
+
+    // If existing image is on Cloudinary, delete it
+    if (currentUser?.profileImg?.includes("cloudinary.com")) {
+      try {
+        await deleteImageFromCloudinary(currentUser.profileImg);
+      } catch (error) {
+        console.error("Failed to delete existing profile image from Cloudinary:", error);
+        // Continue even if deletion fails
+      }
+    }
+
     // Check if profileImg is a URL or base64 data
     if (body.profileImg.startsWith('http')) {
-      // For URLs, store them directly without uploading to Cloudinary
+      // For URLs, store them directly
       userUpdateData.profileImg = body.profileImg;
     } else {
       // For base64 data, upload to Cloudinary

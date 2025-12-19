@@ -26,9 +26,9 @@ const app = express();
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 // CORS configuration - allow mobile apps and web clients
-const allowedOrigins = process.env.ALLOWED_ORIGINS 
+const allowedOrigins = process.env.ALLOWED_ORIGINS
     ? process.env.ALLOWED_ORIGINS.split(',').map(origin => origin.trim())
-    : ["http://localhost:3000", "http://localhost:8080"];
+    : ["http://localhost:3000", "http://localhost:8080", 'http://10.0.2.2'];
 
 app.use(cors({
     origin: (origin, callback) => {
@@ -53,8 +53,9 @@ app.get("/health", (req: Request, res: Response) => {
 
 // Arcjet protection middleware (bot + VPN/proxy/hosting detection)
 const arcjetProtection = async (req: Request, res: Response, next: NextFunction) => {
-    // Skip protection if no Arcjet key configured
-    if (!process.env.ARCJET_KEY) {
+    // Skip protection if no Arcjet key configured or if not in production
+    const isProd = process.env.NODE_ENV === "production";
+    if (!process.env.ARCJET_KEY || !isProd) {
         return next();
     }
 
