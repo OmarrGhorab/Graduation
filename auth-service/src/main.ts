@@ -15,7 +15,7 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(cors({
     origin: true, // Allow all origins (mobile apps don't send origin header)
     credentials: false, // Not needed for mobile - tokens sent via Authorization header
-    allowedHeaders: ["Content-Type", "Authorization", "x-refresh-token"],
+    allowedHeaders: ["Content-Type", "Authorization", "x-refresh-token", "x-forwarded-for"],
 }));
 
 app.get("/", async (req: Request, res: Response) => {

@@ -43,7 +43,7 @@ app.use(cors({
         callback(new Error("Not allowed by CORS"));
     },
     credentials: true,
-    allowedHeaders: ["Content-Type", "Authorization", "x-refresh-token"],
+    allowedHeaders: ["Content-Type", "Authorization", "x-refresh-token", "x-forwarded-for"],
 }));
 
 // Health check (skip protection)
@@ -95,7 +95,9 @@ const arcjetProtection = async (req: Request, res: Response, next: NextFunction)
 app.use(arcjetProtection);
 
 // Notification service proxy
-app.use("/api/v1/notifications", proxy("http://localhost:6003"));
+app.use("/api/v1/notifications", proxy("http://localhost:6003", {
+    proxyReqPathResolver: (req) => req.originalUrl
+}));
 
 // Auth service proxy (everything else)
 app.use("/", proxy("http://localhost:6001"));
