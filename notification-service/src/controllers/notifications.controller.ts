@@ -229,7 +229,9 @@ export const publishNotificationEndpoint = async (
 
     // Import the publish function to avoid circular dependencies
     const { publishNotification } = await import("../utils/notifications");
-    
+
+    console.log(`[Notification Controller] Received publish request for user ${userId}, type: ${type}`, data);
+
     await publishNotification(userId, {
       type,
       ...data,

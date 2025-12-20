@@ -29,7 +29,7 @@ export async function publishNotification(
 
     // Execute both in parallel
     await Promise.all([dbPromise, fcmPromise]);
-    
+
     const duration = Date.now() - startTime;
     console.log(`[Notification] Published notification for user ${userId}, type: ${data.type}, duration: ${duration}ms`);
   } catch (error) {
@@ -82,9 +82,9 @@ async function sendFcmNotification(
       }
     });
 
-    const title = getNotificationTitle(data.type);
-    const body = getNotificationBody(data.type, data);
-    
+    const title = data.title || getNotificationTitle(data.type);
+    const body = data.body || getNotificationBody(data.type, data);
+
     // Prepare data payload (all values must be strings)
     const dataPayload: Record<string, string> = {
       type: data.type,
@@ -179,9 +179,9 @@ async function sendFcmNotification(
     responses.forEach((response, responseIdx) => {
       totalSuccess += response.successCount;
       totalFailure += response.failureCount;
-      
+
       const tokenGroup = responseIdx === 0 ? iosTokens : responseIdx === 1 ? androidTokens : unknownTokens;
-      
+
       response.responses.forEach((resp, idx) => {
         if (!resp.success) {
           const token = tokenGroup[idx];

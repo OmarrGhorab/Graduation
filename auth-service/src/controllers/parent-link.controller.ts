@@ -49,12 +49,12 @@ export const searchParents = async (
     // Build search condition
     const searchCondition = query
       ? {
-          OR: [
-            { username: { contains: query, mode: "insensitive" as const } },
-            { email: { contains: query, mode: "insensitive" as const } },
-            { name: { contains: query, mode: "insensitive" as const } },
-          ],
-        }
+        OR: [
+          { username: { contains: query, mode: "insensitive" as const } },
+          { email: { contains: query, mode: "insensitive" as const } },
+          { name: { contains: query, mode: "insensitive" as const } },
+        ],
+      }
       : {};
 
     // Find parents matching the search, excluding current user
@@ -274,6 +274,8 @@ export const respondToRequest = async (
     // Publish real-time notification to child
     await publishNotificationUtil(request.childId, {
       type: `parent_link_request_${action}ed`,
+      title: action === "accept" ? "Link Request Accepted" : "Link Request Declined",
+      body: `${parent.name || parent.username} ${action}ed your link request`,
       requestId: request.id,
       parent: {
         id: parent.id,
@@ -480,6 +482,8 @@ export const respondToUnlinkRequest = async (
     // Publish real-time notification to child
     await publishNotificationUtil(request.childId, {
       type: `unlink_request_${action}ed`,
+      title: action === "accept" ? "Unlink Request Accepted" : "Unlink Request Declined",
+      body: `${parent.name || parent.username} ${action}ed your unlink request`,
       requestId: request.id,
       parent: {
         id: parent.id,

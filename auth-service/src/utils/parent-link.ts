@@ -113,6 +113,8 @@ export async function sendParentLinkRequestHelper(
   if (!skipNotification) {
     await publishNotification(parentId, {
       type: "parent_link_request",
+      title: "New Parent Link Request",
+      body: `${child.name || child.username} sent you a link request`,
       requestId: request.id,
       child: {
         id: child.id,
@@ -263,6 +265,8 @@ export async function sendUnlinkRequestHelper(
   if (!skipNotification) {
     await publishNotification(parentId, {
       type: "unlink_request",
+      title: "New Unlink Request",
+      body: `${child.name || child.username} sent you an unlink request`,
       requestId: request.id,
       child: {
         id: child.id,

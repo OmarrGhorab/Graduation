@@ -269,7 +269,7 @@ export const createOnboarding = async (req: Request, res: Response, next: NextFu
         parentLinkRequests = await sendMultipleParentLinkRequests(
           userId,
           body.parentIds,
-          true // Skip notifications during onboarding
+          false // Enable notifications during onboarding
         );
       } catch (error) {
         // Log error but don't fail onboarding
