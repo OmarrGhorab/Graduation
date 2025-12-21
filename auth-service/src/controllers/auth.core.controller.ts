@@ -67,14 +67,14 @@ export const registerUser = async (req: Request, res: Response, next: NextFuncti
         const deviceInfo = extractDeviceInfo(req);
         let deviceId: string | null = null;
 
-        // Create device record for new user
-        const deviceName = extractDeviceName(sessionDeviceInfo.userAgent);
+        // Create device record for new user - use device name from headers if available
+        const deviceName = sessionDeviceInfo.deviceName || extractDeviceName(sessionDeviceInfo.userAgent);
         const newDevice = await prisma.userDevice.create({
             data: {
                 userId: user.id,
                 deviceFingerprint: deviceInfo.fingerprint,
                 deviceName: deviceName,
-                platform: deviceInfo.platform,
+                platform: sessionDeviceInfo.platform as any,
                 ipAddress: sessionDeviceInfo.ipAddress,
                 isTrusted: true, // New registrations are trusted by default
                 lastLoginAt: new Date(),

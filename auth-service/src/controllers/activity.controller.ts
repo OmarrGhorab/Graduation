@@ -1,7 +1,7 @@
 import { Request, Response, NextFunction } from "express";
 import prisma from "../libs/prisma";
 import { UnauthorizedError } from "../utils/errors";
-import { extractDeviceInfo } from "../utils/device";
+import { getDeviceInfoFromRequest } from "../middleware/deviceInfo.middleware";
 
 /**
  * Parse user agent string to extract device info
@@ -135,24 +135,24 @@ export const getActivity = async (req: Request, res: Response, next: NextFunctio
             },
         });
 
-        // Get current device info from request
-        const deviceInfo = extractDeviceInfo(req);
+        // Get current device info from request headers
+        const deviceInfo = getDeviceInfoFromRequest(req);
         const parsedUA = parseUserAgent(deviceInfo.userAgent);
 
         const currentDevice = {
             // Use client-provided name/model if available
-            deviceName: deviceInfo.clientDeviceName || deviceInfo.clientDeviceModel || deviceInfo.deviceName || `${parsedUA.browser || "Unknown"} on ${parsedUA.os || "Unknown"}`,
-            deviceModel: deviceInfo.clientDeviceModel || null,
+            deviceName: deviceInfo.deviceName || deviceInfo.deviceModel || `${parsedUA.browser || "Unknown"} on ${parsedUA.os || "Unknown"}`,
+            deviceModel: deviceInfo.deviceModel,
             platform: deviceInfo.platform,
             browser: parsedUA.browser,
             browserVersion: parsedUA.browserVersion,
-            os: deviceInfo.clientOsVersion || (parsedUA.os ? `${parsedUA.os}${parsedUA.osVersion ? ` ${parsedUA.osVersion}` : ""}` : null),
+            os: deviceInfo.osVersion || (parsedUA.os ? `${parsedUA.os}${parsedUA.osVersion ? ` ${parsedUA.osVersion}` : ""}` : null),
             deviceType: parsedUA.deviceType,
             ipAddress: deviceInfo.ipAddress,
             // Client-provided location and timezone
-            location: deviceInfo.clientLocation || null,
-            timezone: deviceInfo.clientTimezone || null,
-            appVersion: deviceInfo.clientAppVersion || null,
+            location: deviceInfo.location,
+            timezone: deviceInfo.timezone,
+            appVersion: deviceInfo.appVersion,
         };
 
         // Get trusted devices count

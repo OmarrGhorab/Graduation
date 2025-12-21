@@ -1,7 +1,7 @@
 import { Request } from "express";
 import prisma from "../libs/prisma";
-import { extractDeviceInfo } from "./device";
 import { revokeRefreshTokenByJti } from "./tokens";
+import { getDeviceInfoFromRequest, DeviceInfo } from "../middleware/deviceInfo.middleware";
 
 interface CreateSessionParams {
   userId: string;
@@ -360,26 +360,38 @@ async function getLocationFromIp(ip: string): Promise<string | null> {
 
 /**
  * Get device info from request for session creation
- * Prefers client-provided location over IP geolocation
+ * Uses device info from headers (set by middleware)
+ * Falls back to IP geolocation if no location header provided
  */
-export async function getSessionDeviceInfo(req: Request) {
-  const deviceInfo = extractDeviceInfo(req);
+export async function getSessionDeviceInfo(req: Request): Promise<{
+  ipAddress: string;
+  userAgent: string | null;
+  location: string | null;
+  deviceName: string;
+  platform: string;
+  timezone: string | null;
+  appVersion: string | null;
+  deviceModel: string | null;
+  osVersion: string | null;
+}> {
+  const deviceInfo = getDeviceInfoFromRequest(req);
   
   // Use client-provided location if available, otherwise try IP geolocation
-  let location = deviceInfo.clientLocation;
-  if (!location) {
-    location = await getLocationFromIp(deviceInfo.ipAddress || '');
+  let location = deviceInfo.location;
+  if (!location && deviceInfo.ipAddress) {
+    location = await getLocationFromIp(deviceInfo.ipAddress);
   }
 
   return {
     ipAddress: deviceInfo.ipAddress,
     userAgent: deviceInfo.userAgent,
     location: location,
-    // Include client-provided device info for richer session data
-    deviceName: deviceInfo.clientDeviceName || deviceInfo.clientDeviceModel || deviceInfo.deviceName,
+    deviceName: deviceInfo.deviceName,
     platform: deviceInfo.platform,
-    timezone: deviceInfo.clientTimezone,
-    appVersion: deviceInfo.clientAppVersion,
+    timezone: deviceInfo.timezone,
+    appVersion: deviceInfo.appVersion,
+    deviceModel: deviceInfo.deviceModel,
+    osVersion: deviceInfo.osVersion,
   };
 }
 

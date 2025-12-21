@@ -189,23 +189,25 @@ export const googleMobileAuth = async (req: Request, res: Response, next: NextFu
         
         if (existingDevice) {
             deviceId = existingDevice.id;
-            // Update device last login
+            // Update device last login and name if provided
             await prisma.userDevice.update({
                 where: { id: existingDevice.id },
                 data: {
                     lastLoginAt: new Date(),
+                    ...(sessionDeviceInfo.deviceName && { deviceName: sessionDeviceInfo.deviceName }),
+                    ...(sessionDeviceInfo.platform && { platform: sessionDeviceInfo.platform as any }),
                 },
             });
         } else {
-            // Create new device
-            const deviceName = extractDeviceName(deviceInfo.userAgent);
+            // Create new device - use device name from headers if available
+            const deviceName = sessionDeviceInfo.deviceName || extractDeviceName(deviceInfo.userAgent);
             const newDevice = await prisma.userDevice.create({
                 data: {
                     userId: user.id,
                     deviceFingerprint: deviceInfo.fingerprint,
                     deviceName: deviceName,
-                    platform: deviceInfo.platform,
-                    ipAddress: deviceInfo.ipAddress,
+                    platform: sessionDeviceInfo.platform as any || deviceInfo.platform,
+                    ipAddress: sessionDeviceInfo.ipAddress,
                     isTrusted: true, // Google OAuth users are trusted by default
                     lastLoginAt: new Date(),
                 },
