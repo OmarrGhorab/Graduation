@@ -1,5 +1,6 @@
 import { Router } from "express";
-import { forgotPassword, loginUser, logoutUser, registerUser, resetPassword, verifyEmailOtp, resendVerificationOtp, googleAuth, googleCallback, refreshToken, verifyDevice, resendDeviceVerificationOtp } from "../controllers/auth.controller";
+import { forgotPassword, loginUser, logoutUser, registerUser, resetPassword, verifyEmailOtp, resendVerificationOtp, googleMobileAuth, refreshToken, verifyDevice, resendDeviceVerificationOtp } from "../controllers/auth.controller";
+import { getMyProfile } from "../controllers/auth.core.controller";
 import { authenticate } from "../middleware";
 import {
   enable2FA,
@@ -12,6 +13,7 @@ import {
 import {
   deactivateAccount,
   deleteAccount,
+  deleteProfileImage,
 } from "../controllers/account.controller";
 import { getActivity } from "../controllers/activity.controller";
 import {
@@ -28,9 +30,11 @@ router.post("/login", loginUser);
 router.post("/logout", logoutUser);
 router.post("/refresh", refreshToken);
 
-// Google OAuth
-router.get("/google", googleAuth);
-router.get("/google/callback", googleCallback);
+// Profile
+router.get("/myprofile", authenticate, getMyProfile);
+
+// Google OAuth (Mobile App - ID Token Verification)
+router.post("/google/mobile", googleMobileAuth); // Accepts idToken in body, returns tokens in JSON
 
 // Password recovery
 router.post("/forgot-password", forgotPassword);
@@ -55,6 +59,7 @@ router.post("/2fa/regenerate-backup-codes", authenticate, regenerateBackupCodes)
 // Account management (Danger Zone)
 router.post("/account/deactivate", authenticate, deactivateAccount);
 router.post("/account/delete", authenticate, deleteAccount);
+router.delete("/account/profile-image", authenticate, deleteProfileImage);
 
 // Activity and Sessions
 router.get("/activity", authenticate, getActivity);

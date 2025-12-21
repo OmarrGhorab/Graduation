@@ -1,13 +1,13 @@
 # Notification Service
 
-A microservice for handling real-time notifications using Redis pub/sub and Server-Sent Events (SSE).
+A microservice for handling real-time push notifications using Firebase Cloud Messaging (FCM).
 
 ## Features
 
-- **Real-time notifications** via Redis pub/sub
-- **Server-Sent Events (SSE)** for live updates
+- **Real-time push notifications** via Firebase Cloud Messaging (FCM)
 - **Persistent storage** with Prisma and PostgreSQL
 - **RESTful API** for publishing notifications
+- **FCM token management** for mobile devices
 - **Authentication** middleware for user endpoints
 - **Pagination** support for notification history
 
@@ -16,9 +16,9 @@ A microservice for handling real-time notifications using Redis pub/sub and Serv
 The notification service follows a microservice pattern:
 
 - **Auth Service** → publishes notifications via API calls
-- **Notification Service** → handles Redis pub/sub, database storage, and SSE streaming
+- **Notification Service** → handles FCM push notifications, database storage, and token management
 - **API Gateway** → routes `/api/v1/notifications/*` to notification service
-- **Client Applications** → connect to SSE endpoint for real-time updates
+- **Mobile Clients** → register FCM tokens and receive push notifications
 
 ## API Endpoints
 
@@ -26,7 +26,8 @@ The notification service follows a microservice pattern:
 - `POST /api/v1/notifications/publish` - Publish a notification (used by other services)
 
 ### Authenticated (User Endpoints)
-- `GET /api/v1/notifications/stream` - SSE endpoint for real-time notifications
+- `POST /api/v1/notifications/register-token` - Register FCM token for push notifications
+- `DELETE /api/v1/notifications/unregister-token` - Unregister FCM token
 - `GET /api/v1/notifications` - Get paginated notification history
 - `PATCH /api/v1/notifications/read` - Mark notifications as read
 
@@ -40,10 +41,14 @@ npm install
 2. Set up environment variables in `.env`:
 ```env
 DATABASE_URL="postgresql://username:password@localhost:5432/graduation_db"
-REDIS_URL="redis://localhost:6379"
 PORT=6003
 JWT_SECRET="your-jwt-secret-key"
 ALLOWED_ORIGINS="http://localhost:3000,http://localhost:8080"
+
+# Firebase Cloud Messaging (FCM) Configuration
+FIREBASE_PROJECT_ID="your-firebase-project-id"
+FIREBASE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
+FIREBASE_CLIENT_EMAIL="firebase-adminsdk-xxxxx@your-project.iam.gserviceaccount.com"
 ```
 
 3. Generate Prisma client:
@@ -62,6 +67,23 @@ npm run dev
 ```
 
 ## Usage Examples
+
+### Registering FCM Token (from mobile client)
+```javascript
+// After obtaining FCM token from Firebase
+const response = await fetch('http://localhost:6003/api/v1/notifications/register-token', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+    'Authorization': 'Bearer YOUR_ACCESS_TOKEN'
+  },
+  body: JSON.stringify({
+    token: 'FCM_DEVICE_TOKEN',
+    platform: 'ios', // or 'android'
+    deviceId: 'optional-device-id'
+  })
+});
+```
 
 ### Publishing a Notification (from another service)
 ```javascript

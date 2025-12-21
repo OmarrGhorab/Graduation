@@ -18,8 +18,11 @@ model User {
   gender                   Gender?
   role                     UserRole        @default(STUDENT)
   profileImg               String?
+  bio                      String?         @db.VarChar(200)
   country                  String?
   onboardingCompleted      Boolean         @default(false)
+  goals                    String[]        @default([])
+  newsletterEnabled        Boolean         @default(false)
   preferences              UserPreference?
   verified                 Boolean         @default(false)
   twoFactorEnabled         Boolean         @default(false)
@@ -30,6 +33,7 @@ model User {
   isActive                 Boolean         @default(true) // Account active status
   deletedAt                DateTime? // Soft delete timestamp
   lastLoginAt              DateTime?
+  lastUsernameChange       DateTime? // Track when username was last changed
   createdAt                DateTime        @default(now())
   updatedAt                DateTime        @updatedAt
 

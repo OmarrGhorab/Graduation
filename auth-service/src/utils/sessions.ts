@@ -184,11 +184,8 @@ export async function revokeAllUserSessions(
  * Get location data from IP address using free IP geolocation service
  */
 async function getLocationFromIp(ip: string): Promise<string | null> {
-  // TESTING: Override with specific IP for testing
-  if (process.env.NODE_ENV !== 'production') {
-    ip = '197.63.192.182'; // Your specified test IP
-  }
-  
+  // Override removed to use real IP
+
   if (!ip || ip === '127.0.0.1' || ip === '::1' || ip.startsWith('192.168.') || ip.startsWith('10.') || ip.startsWith('172.')) {
     return 'Local/Private Network';
   }
@@ -196,15 +193,15 @@ async function getLocationFromIp(ip: string): Promise<string | null> {
   try {
     // Use ip-api.com - no auth required, no bot protection, server-friendly
     const response = await fetch(`http://ip-api.com/json/${ip}?fields=status,message,country,region,city`);
-    
+
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}: ${response.statusText}`);
     }
-    
+
     const data = await response.json();
-    
+
     console.log('Location API response:', data);
-    
+
     if (data.status === 'success' && data.city && data.country) {
       const parts = [data.city, data.region, data.country].filter(Boolean);
       const location = parts.length > 0 ? parts.join(', ') : null;
@@ -226,7 +223,7 @@ async function getLocationFromIp(ip: string): Promise<string | null> {
 export async function getSessionDeviceInfo(req: Request) {
   const deviceInfo = extractDeviceInfo(req);
   const location = await getLocationFromIp(deviceInfo.ipAddress || '');
-  
+
   return {
     ipAddress: deviceInfo.ipAddress,
     userAgent: deviceInfo.userAgent,

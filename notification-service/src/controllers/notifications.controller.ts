@@ -1,93 +1,11 @@
 import { Request, Response, NextFunction } from "express";
-import { createNotificationSubscriber, getNotificationChannel } from "../utils/notifications";
 import { UnauthorizedError, BadRequestError } from "../utils/errors";
 import { AuthenticatedRequest } from "../middleware/auth";
 import prisma from "../libs/prisma";
-
-/**
- * Server-Sent Events (SSE) endpoint for real-time notifications
- * Clients can connect to this endpoint to receive real-time notifications
- */
-export const streamNotifications = async (
-  req: AuthenticatedRequest,
-  res: Response,
-  next: NextFunction
-) => {
-  try {
-    console.log("SSE endpoint hit, checking authentication...");
-    
-    if (!req.user) {
-      throw new UnauthorizedError("User not authenticated");
-    }
-
-    const userId = req.user.id;
-    console.log(`User authenticated: ${userId}, setting up SSE...`);
-
-    // Set SSE headers BEFORE any other operations
-    res.setHeader("Content-Type", "text/event-stream");
-    res.setHeader("Cache-Control", "no-cache");
-    res.setHeader("Connection", "keep-alive");
-    res.setHeader("Access-Control-Allow-Origin", "*");
-    res.setHeader("Access-Control-Allow-Credentials", "false");
-
-    console.log("SSE headers set, creating Redis subscriber...");
-
-    // Create Redis subscriber for this user
-    const subscriber = createNotificationSubscriber(userId);
-    
-    console.log("Redis subscriber created, sending initial connection message...");
-
-    // Send initial connection message
-    res.write(`data: ${JSON.stringify({ type: "connected", message: "Notification stream connected" })}\n\n`);
-
-    console.log("Initial message sent, setting up Redis message listener...");
-
-    // Listen for messages from Redis
-    subscriber.on("message", (channel: string, message: string) => {
-      try {
-        const data = JSON.parse(message);
-        res.write(`data: ${JSON.stringify(data)}\n\n`);
-      } catch (error) {
-        console.error("Error parsing notification message:", error);
-      }
-    });
-
-    // Send heartbeat every 30 seconds to keep connection alive
-    const heartbeatInterval = setInterval(() => {
-      res.write(`data: ${JSON.stringify({ type: "heartbeat", timestamp: new Date().toISOString() })}\n\n`);
-    }, 30000);
-
-    // Handle client disconnect
-    (req as any).on("close", () => {
-      console.log(`Client disconnected from notification stream for user ${userId}`);
-      clearInterval(heartbeatInterval);
-      subscriber.unsubscribe();
-      subscriber.quit();
-      res.end();
-    });
-
-    // Log connection details for debugging
-    console.log(`Active SSE connections for user ${userId}: ${getActiveConnections(userId)}`);
-
-    // Handle errors
-    subscriber.on("error", (error: Error) => {
-      console.error("Redis subscriber error:", error);
-      res.write(`data: ${JSON.stringify({ type: "error", message: "Notification stream error" })}\n\n`);
-    });
-
-  } catch (err) {
-    next(err);
-  }
-};
-
-// Track active connections per user for debugging
-const activeConnections = new Map<string, number>();
-
-function getActiveConnections(userId: string): string {
-  const current = activeConnections.get(userId) || 0;
-  activeConnections.set(userId, current + 1);
-  return `${current + 1} connections`;
-}
+import {
+  registerFcmToken,
+  unregisterFcmToken,
+} from "../utils/fcm-tokens";
 
 /**
  * Get paginated notifications for the authenticated user
@@ -227,6 +145,113 @@ export const markNotificationsRead = async (
 };
 
 /**
+ * Register FCM token for push notifications
+ * Mobile clients should call this after obtaining FCM token from Firebase
+ */
+export const registerFcmTokenEndpoint = async (
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    if (!req.user) {
+      throw new UnauthorizedError("User not authenticated");
+    }
+
+    const userId = req.user.id;
+    const { token, deviceId, platform } = req.body;
+
+    if (!token) {
+      throw new BadRequestError("FCM token is required");
+    }
+
+    // Validate platform if provided
+    if (platform && platform !== "ios" && platform !== "android") {
+      throw new BadRequestError("Platform must be 'ios' or 'android'");
+    }
+
+    await registerFcmToken(userId, token, deviceId, platform);
+
+    res.status(200).json({
+      message: "FCM token registered successfully",
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
+ * Unregister FCM token
+ * Mobile clients should call this on logout or when token becomes invalid
+ */
+export const unregisterFcmTokenEndpoint = async (
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    if (!req.user) {
+      throw new UnauthorizedError("User not authenticated");
+    }
+
+    const userId = req.user.id;
+    const { token } = req.body;
+
+    if (!token) {
+      throw new BadRequestError("FCM token is required");
+    }
+
+    await unregisterFcmToken(userId, token);
+
+    res.status(200).json({
+      message: "FCM token unregistered successfully",
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
+ * Delete a specific notification
+ */
+export const deleteNotification = async (
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    if (!req.user) {
+      throw new UnauthorizedError("User not authenticated");
+    }
+
+    const userId = req.user.id;
+    const { id } = req.params;
+
+    if (!id) {
+      throw new BadRequestError("Notification ID is required");
+    }
+
+    // Delete only if notification belongs to the user
+    const result = await prisma.notification.deleteMany({
+      where: {
+        id,
+        userId,
+      },
+    });
+
+    if (result.count === 0) {
+      throw new BadRequestError("Notification not found or already deleted");
+    }
+
+    res.status(200).json({
+      message: "Notification deleted successfully",
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
  * Publish notification endpoint for other services to call
  * This is the main API that other microservices will use to send notifications
  */
@@ -244,7 +269,9 @@ export const publishNotificationEndpoint = async (
 
     // Import the publish function to avoid circular dependencies
     const { publishNotification } = await import("../utils/notifications");
-    
+
+    console.log(`[Notification Controller] Received publish request for user ${userId}, type: ${type}`, data);
+
     await publishNotification(userId, {
       type,
       ...data,

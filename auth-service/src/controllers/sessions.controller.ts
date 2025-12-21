@@ -4,7 +4,6 @@ import { UnauthorizedError, BadRequestError } from "../utils/errors";
 import { revokeSession, revokeAllUserSessions } from "../utils/sessions";
 import { getAccessTokenFromRequest } from "../utils/cookies";
 import { verifyAccessToken } from "../utils/tokens";
-import { clearAuthCookies } from "../utils/cookies";
 
 /**
  * Helper function to extract current session token from request
@@ -119,7 +118,6 @@ export const revokeSessionById = async (req: Request, res: Response, next: NextF
 
         // If revoking current session, log user out
         if (isCurrentSession) {
-            clearAuthCookies(res);
             return res.json({
                 message: "Session revoked successfully. You have been logged out.",
                 revoked: true,
@@ -176,7 +174,6 @@ export const revokeAllSessions = async (req: Request, res: Response, next: NextF
 
         // If current session was included, log user out
         if (wasCurrentIncluded) {
-            clearAuthCookies(res);
             return res.json({
                 message: `Revoked ${deletedCount} session(s) successfully. You have been logged out.`,
                 revokedCount: deletedCount,

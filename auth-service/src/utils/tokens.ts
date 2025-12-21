@@ -56,10 +56,39 @@ export async function verifyAccessToken(token: string): Promise<JwtPayload> {
 }
 
 export async function verifyRefreshToken(token: string): Promise<JwtPayload> {
-  const decoded = jwt.verify(token, REFRESH_TOKEN_SECRET) as JwtPayload;
-  if (decoded.type !== "refresh") throw new Error("Invalid token type");
-  const exists = await redis.get(`rt:${decoded.jti}`);
-  if (!exists) throw new Error("Refresh token revoked or expired");
+  let decoded: JwtPayload;
+  try {
+    decoded = jwt.verify(token, REFRESH_TOKEN_SECRET) as JwtPayload;
+  } catch (error) {
+    // Check if it's a JWT error (JsonWebTokenError, TokenExpiredError, etc.)
+    if (error && typeof error === "object" && "name" in error) {
+      const jwtError = error as { name: string; message: string };
+      if (jwtError.name === "JsonWebTokenError" || jwtError.name === "TokenExpiredError" || jwtError.name === "NotBeforeError") {
+        throw error; // Re-throw JWT errors
+      }
+    }
+    throw new Error("Token verification failed");
+  }
+  
+  if (decoded.type !== "refresh") {
+    throw new Error("Invalid token type");
+  }
+  
+  // Check if token exists in Redis
+  try {
+    const exists = await redis.get(`rt:${decoded.jti}`);
+    if (!exists) {
+      throw new Error("Refresh token revoked or expired");
+    }
+  } catch (error) {
+    // If Redis error, log it but don't fail silently
+    if (error instanceof Error && !error.message.includes("revoked")) {
+      console.error("[Redis] Error checking refresh token:", error);
+      throw new Error("Failed to verify refresh token");
+    }
+    throw error;
+  }
+  
   return decoded;
 }
 

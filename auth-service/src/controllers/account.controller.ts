@@ -3,7 +3,7 @@ import bcrypt from "bcrypt";
 import prisma from "../libs/prisma";
 import { BadRequestError, UnauthorizedError } from "../utils/errors";
 import { revokeAllUserRefreshTokens } from "../utils/tokens";
-import { clearAuthCookies } from "../utils/cookies";
+import { deleteImageFromCloudinary } from "../utils/cloudinaryUpload";
 
 /**
  * Deactivate user account
@@ -12,7 +12,7 @@ import { clearAuthCookies } from "../utils/cookies";
 export const deactivateAccount = async (req: Request, res: Response, next: NextFunction) => {
     try {
         const userId = req.user?.id;
-        
+
         if (!userId) {
             throw new UnauthorizedError("Authentication required");
         }
@@ -50,9 +50,6 @@ export const deactivateAccount = async (req: Request, res: Response, next: NextF
             where: { id: userId },
             data: { isActive: false },
         });
-
-        // Clear auth cookies
-        clearAuthCookies(res);
 
         res.json({
             message: "Account deactivated successfully",
@@ -117,14 +114,11 @@ export const deleteAccount = async (req: Request, res: Response, next: NextFunct
         // Soft delete user account
         await prisma.user.update({
             where: { id: userId },
-            data: { 
+            data: {
                 deletedAt: new Date(),
                 isActive: false, // Also deactivate
             },
         });
-
-        // Clear auth cookies
-        clearAuthCookies(res);
 
         res.json({
             message: "Account deleted successfully",
@@ -135,3 +129,50 @@ export const deleteAccount = async (req: Request, res: Response, next: NextFunct
     }
 };
 
+
+/**
+ * Delete user profile image
+ * Removes image from Cloudinary if applicable and sets profileImg to null
+ */
+export const deleteProfileImage = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        const userId = req.user?.id;
+
+        if (!userId) {
+            throw new UnauthorizedError("Authentication required");
+        }
+
+        // Get user to check current profile image
+        const user = await prisma.user.findUnique({
+            where: { id: userId },
+            select: { profileImg: true },
+        });
+
+        if (!user) {
+            throw new UnauthorizedError("User not found");
+        }
+
+        if (!user.profileImg) {
+            return res.status(200).json({
+                message: "No profile image to delete",
+            });
+        }
+
+        // If it's a Cloudinary URL, delete it from storage
+        if (user.profileImg.includes("cloudinary.com")) {
+            await deleteImageFromCloudinary(user.profileImg);
+        }
+
+        // Update user to remove profile image reference
+        await prisma.user.update({
+            where: { id: userId },
+            data: { profileImg: null },
+        });
+
+        res.json({
+            message: "Profile image deleted successfully",
+        });
+    } catch (err) {
+        next(err);
+    }
+};

@@ -28,7 +28,16 @@ function parseImageData(imageData: string): { base64Data: string; mimeType: stri
       mimeType = mimeMatch[1];
     }
     // Extract base64 data
-    base64Data = imageData.split(",")[1] || imageData;
+    const parts = imageData.split(",");
+    base64Data = parts[1] || imageData;
+
+    // Check if the content is actually a file URI instead of base64
+    if (base64Data.startsWith("file://") || base64Data.startsWith("content://")) {
+      throw new BadRequestError(
+        "Invalid image data: Received a file URI instead of Base64 content. " +
+        "Ensure your mobile client is sending the Base64-encoded image."
+      );
+    }
   }
   // Fix base64 padding if missing
   const paddingLength = (4 - base64Data.length % 4) % 4;
@@ -157,12 +166,23 @@ export async function deleteImageFromCloudinary(publicId: string): Promise<boole
     if (publicId.includes("cloudinary.com")) {
       const urlParts = publicId.split("/");
       const filename = urlParts[urlParts.length - 1];
-      extractedPublicId = filename.split(".")[0];
+      const nameWithoutExtension = filename.split(".")[0];
+
       // Reconstruct folder path if needed
-      const folderIndex = urlParts.findIndex((part) => part === "upload");
-      if (folderIndex > 0 && folderIndex < urlParts.length - 2) {
-        const folderPath = urlParts.slice(folderIndex + 1, -1).join("/");
-        extractedPublicId = `${folderPath}/${extractedPublicId}`;
+      const uploadIndex = urlParts.findIndex((part) => part === "upload");
+      if (uploadIndex !== -1) {
+        // Path after 'upload' but before filename
+        // Usually contains version string (v...) and folders
+        const foldersAndVersion = urlParts.slice(uploadIndex + 1, urlParts.length - 1);
+
+        // Remove version string (starts with v and followed by numbers)
+        const folders = foldersAndVersion.filter(part => !/^v\d+$/.test(part));
+
+        if (folders.length > 0) {
+          extractedPublicId = `${folders.join("/")}/${nameWithoutExtension}`;
+        } else {
+          extractedPublicId = nameWithoutExtension;
+        }
       }
     }
 

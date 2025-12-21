@@ -12,6 +12,13 @@ import {
   type SendUnlinkRequestBody,
   type RespondToUnlinkRequestBody,
 } from "../types/parent-link.types";
+import {
+  getUserRole,
+  fetchPendingLinkRequests,
+  fetchPendingUnlinkRequests,
+  fetchLinkedAccounts,
+  validateParentUser,
+} from "../services/parentLink.service";
 
 /**
  * Search for parents by username or email (paginated)
@@ -42,12 +49,12 @@ export const searchParents = async (
     // Build search condition
     const searchCondition = query
       ? {
-          OR: [
-            { username: { contains: query, mode: "insensitive" as const } },
-            { email: { contains: query, mode: "insensitive" as const } },
-            { name: { contains: query, mode: "insensitive" as const } },
-          ],
-        }
+        OR: [
+          { username: { contains: query, mode: "insensitive" as const } },
+          { email: { contains: query, mode: "insensitive" as const } },
+          { name: { contains: query, mode: "insensitive" as const } },
+        ],
+      }
       : {};
 
     // Find parents matching the search, excluding current user
@@ -164,80 +171,10 @@ export const getPendingRequests = async (
     }
 
     const userId = req.user.id;
+    const userRole = await getUserRole(userId);
+    const requests = await fetchPendingLinkRequests(userId, userRole);
 
-    // Get user role
-    const user = await prisma.user.findUnique({
-      where: { id: userId },
-      select: { role: true },
-    });
-
-    if (!user) {
-      throw new NotFoundError("User not found");
-    }
-
-    if (user.role === UserRole.PARENT) {
-      // Get requests received by parent
-      const parentRequests = await prisma.parentLinkRequest.findMany({
-        where: {
-          parentId: userId,
-          status: RequestStatus.PENDING,
-        },
-        include: {
-          child: {
-            select: {
-              id: true,
-              username: true,
-              name: true,
-              email: true,
-              profileImg: true,
-            },
-          },
-        },
-        orderBy: {
-          createdAt: "desc",
-        },
-      });
-
-      res.status(200).json({
-        data: parentRequests.map((req) => ({
-          id: req.id,
-          status: req.status,
-          createdAt: req.createdAt,
-          child: req.child,
-        })),
-      });
-    } else {
-      // Get requests sent by child
-      const childRequests = await prisma.parentLinkRequest.findMany({
-        where: {
-          childId: userId,
-          status: RequestStatus.PENDING,
-        },
-        include: {
-          parent: {
-            select: {
-              id: true,
-              username: true,
-              name: true,
-              email: true,
-              profileImg: true,
-            },
-          },
-        },
-        orderBy: {
-          createdAt: "desc",
-        },
-      });
-
-      res.status(200).json({
-        data: childRequests.map((req) => ({
-          id: req.id,
-          status: req.status,
-          createdAt: req.createdAt,
-          parent: req.parent,
-        })),
-      });
-    }
+    res.status(200).json({ data: requests });
   } catch (err) {
     next(err);
   }
@@ -268,14 +205,7 @@ export const respondToRequest = async (
     }
 
     // Verify user is a parent and get their info
-    const parent = await prisma.user.findUnique({
-      where: { id: parentId },
-      select: { id: true, role: true, username: true, name: true },
-    });
-
-    if (!parent || parent.role !== UserRole.PARENT) {
-      throw new UnauthorizedError("Only parents can respond to requests");
-    }
+    const parent = await validateParentUser(parentId);
 
     // Find the request
     const request = await prisma.parentLinkRequest.findUnique({
@@ -344,11 +274,14 @@ export const respondToRequest = async (
     // Publish real-time notification to child
     await publishNotificationUtil(request.childId, {
       type: `parent_link_request_${action}ed`,
+      title: action === "accept" ? "Link Request Accepted" : "Link Request Declined",
+      body: `${parent.name || parent.username} ${action}ed your link request`,
       requestId: request.id,
       parent: {
         id: parent.id,
         username: parent.username,
         name: parent.name,
+        profileImg: parent.profileImg,
       },
       status: result.status,
       respondedAt: result.respondedAt?.toISOString(),
@@ -381,73 +314,10 @@ export const getLinkedAccounts = async (
     }
 
     const userId = req.user.id;
+    const userRole = await getUserRole(userId);
+    const links = await fetchLinkedAccounts(userId, userRole);
 
-    const user = await prisma.user.findUnique({
-      where: { id: userId },
-      select: { role: true },
-    });
-
-    if (!user) {
-      throw new NotFoundError("User not found");
-    }
-
-    let links;
-
-    if (user.role === UserRole.PARENT) {
-      // Get children linked to this parent
-      links = await prisma.parentChildLink.findMany({
-        where: { parentId: userId },
-        include: {
-          child: {
-            select: {
-              id: true,
-              username: true,
-              name: true,
-              email: true,
-              profileImg: true,
-            },
-          },
-        },
-        orderBy: {
-          createdAt: "desc",
-        },
-      });
-
-      res.status(200).json({
-        data: links.map((link) => ({
-          id: link.id,
-          child: link.child,
-          linkedAt: link.createdAt,
-        })),
-      });
-    } else {
-      // Get parents linked to this child
-      links = await prisma.parentChildLink.findMany({
-        where: { childId: userId },
-        include: {
-          parent: {
-            select: {
-              id: true,
-              username: true,
-              name: true,
-              email: true,
-              profileImg: true,
-            },
-          },
-        },
-        orderBy: {
-          createdAt: "desc",
-        },
-      });
-
-      res.status(200).json({
-        data: links.map((link) => ({
-          id: link.id,
-          parent: link.parent,
-          linkedAt: link.createdAt,
-        })),
-      });
-    }
+    res.status(200).json({ data: links });
   } catch (err) {
     next(err);
   }
@@ -519,80 +389,10 @@ export const getPendingUnlinkRequests = async (
     }
 
     const userId = req.user.id;
+    const userRole = await getUserRole(userId);
+    const requests = await fetchPendingUnlinkRequests(userId, userRole);
 
-    // Get user role
-    const user = await prisma.user.findUnique({
-      where: { id: userId },
-      select: { role: true },
-    });
-
-    if (!user) {
-      throw new NotFoundError("User not found");
-    }
-
-    if (user.role === UserRole.PARENT) {
-      // Get unlink requests received by parent
-      const parentRequests = await prisma.unlinkRequest.findMany({
-        where: {
-          parentId: userId,
-          status: RequestStatus.PENDING,
-        },
-        include: {
-          child: {
-            select: {
-              id: true,
-              username: true,
-              name: true,
-              email: true,
-              profileImg: true,
-            },
-          },
-        },
-        orderBy: {
-          createdAt: "desc",
-        },
-      });
-
-      res.status(200).json({
-        data: parentRequests.map((unlinkReq) => ({
-          id: unlinkReq.id,
-          status: unlinkReq.status,
-          createdAt: unlinkReq.createdAt,
-          child: unlinkReq.child,
-        })),
-      });
-    } else {
-      // Get unlink requests sent by child
-      const childRequests = await prisma.unlinkRequest.findMany({
-        where: {
-          childId: userId,
-          status: RequestStatus.PENDING,
-        },
-        include: {
-          parent: {
-            select: {
-              id: true,
-              username: true,
-              name: true,
-              email: true,
-              profileImg: true,
-            },
-          },
-        },
-        orderBy: {
-          createdAt: "desc",
-        },
-      });
-
-      res.status(200).json({
-        data: childRequests.map((unlinkReq) => ({
-          id: unlinkReq.id,
-          status: unlinkReq.status,
-          createdAt: unlinkReq.createdAt,
-          parent: unlinkReq.parent,
-        })),
-      });
-    }
+    res.status(200).json({ data: requests });
   } catch (err) {
     next(err);
   }
@@ -623,14 +423,7 @@ export const respondToUnlinkRequest = async (
     }
 
     // Verify user is a parent and get their info
-    const parent = await prisma.user.findUnique({
-      where: { id: parentId },
-      select: { id: true, role: true, username: true, name: true },
-    });
-
-    if (!parent || parent.role !== UserRole.PARENT) {
-      throw new UnauthorizedError("Only parents can respond to unlink requests");
-    }
+    const parent = await validateParentUser(parentId);
 
     // Find the unlink request
     const request = await prisma.unlinkRequest.findUnique({
@@ -690,11 +483,14 @@ export const respondToUnlinkRequest = async (
     // Publish real-time notification to child
     await publishNotificationUtil(request.childId, {
       type: `unlink_request_${action}ed`,
+      title: action === "accept" ? "Unlink Request Accepted" : "Unlink Request Declined",
+      body: `${parent.name || parent.username} ${action}ed your unlink request`,
       requestId: request.id,
       parent: {
         id: parent.id,
         username: parent.username,
         name: parent.name,
+        profileImg: parent.profileImg,
       },
       status: result.status,
       respondedAt: result.respondedAt?.toISOString(),

@@ -20,3 +20,16 @@ model Notification {
   @@index([userId, read])
   @@index([createdAt])
 }
+
+model FcmToken {
+  id        String   @id @default(uuid())
+  userId    String
+  token     String   @unique // FCM device token
+  deviceId  String?  // Optional: link to device if available
+  platform  String?  // "ios" or "android"
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@index([token])
+}

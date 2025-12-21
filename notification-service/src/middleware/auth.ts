@@ -27,7 +27,7 @@ export const authenticate = async (
     const jwtSecret = process.env.JWT_ACCESS_SECRET;
     
     if (!jwtSecret) {
-      throw new Error('JWT_SECRET not configured');
+      throw new Error('JWT_ACCESS_SECRET not configured');
     }
 
     const decoded = jwt.verify(token, jwtSecret) as any;

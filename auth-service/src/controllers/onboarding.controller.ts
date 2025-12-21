@@ -2,7 +2,7 @@ import { Request, Response, NextFunction } from "express";
 import prisma from "../libs/prisma";
 import { BadRequestError } from "../utils/errors";
 import { Gender, Prisma, UserRole } from "@prisma/client";
-import { uploadProfileImage } from "../utils/cloudinaryUpload";
+import { uploadProfileImage, deleteImageFromCloudinary } from "../utils/cloudinaryUpload";
 import { sendMultipleParentLinkRequests } from "../utils/parent-link";
 import type {
   OnboardingRequestBody,
@@ -41,6 +41,24 @@ function validateRole(role: UserRole): void {
 }
 
 /**
+ * Validates bio field
+ */
+function validateBio(bio: string): void {
+  if (bio.length > 200) {
+    throw new BadRequestError("Bio must be at most 200 characters");
+  }
+}
+
+/**
+ * Validates goals array
+ */
+function validateGoals(goals: string[]): void {
+  if (goals.length > 3) {
+    throw new BadRequestError("Maximum 3 goals allowed");
+  }
+}
+
+/**
  * Builds user update data object from request body
  */
 async function buildUserUpdateData(
@@ -70,14 +88,44 @@ async function buildUserUpdateData(
   }
 
   if (body.profileImg) {
+    // Fetch current user to check for existing Cloudinary image
+    const currentUser = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { profileImg: true },
+    });
+
+    // If existing image is on Cloudinary, delete it
+    if (currentUser?.profileImg?.includes("cloudinary.com")) {
+      try {
+        await deleteImageFromCloudinary(currentUser.profileImg);
+      } catch (error) {
+        console.error("Failed to delete existing profile image from Cloudinary:", error);
+        // Continue even if deletion fails
+      }
+    }
+
     // Check if profileImg is a URL or base64 data
     if (body.profileImg.startsWith('http')) {
-      // For URLs, store them directly without uploading to Cloudinary
+      // For URLs, store them directly
       userUpdateData.profileImg = body.profileImg;
     } else {
       // For base64 data, upload to Cloudinary
       userUpdateData.profileImg = await uploadProfileImage(body.profileImg, userId);
     }
+  }
+
+  if (body.bio !== undefined) {
+    validateBio(body.bio);
+    userUpdateData.bio = body.bio;
+  }
+
+  if (body.goals) {
+    validateGoals(body.goals);
+    userUpdateData.goals = body.goals;
+  }
+
+  if (body.newsletterEnabled !== undefined) {
+    userUpdateData.newsletterEnabled = body.newsletterEnabled;
   }
 
   return userUpdateData;
@@ -221,7 +269,7 @@ export const createOnboarding = async (req: Request, res: Response, next: NextFu
         parentLinkRequests = await sendMultipleParentLinkRequests(
           userId,
           body.parentIds,
-          true // Skip notifications during onboarding
+          false // Enable notifications during onboarding
         );
       } catch (error) {
         // Log error but don't fail onboarding
@@ -244,6 +292,9 @@ export const createOnboarding = async (req: Request, res: Response, next: NextFu
         country: result?.country,
         role: result?.role,
         profileImg: result?.profileImg,
+        bio: result?.bio,
+        goals: result?.goals || [],
+        newsletterEnabled: result?.newsletterEnabled || false,
         onboardingCompleted: result?.onboardingCompleted,
         preferences: result?.preferences,
         interests: result?.interests.map((ui) => ({
