@@ -20,6 +20,8 @@ import {
   getSessions,
   revokeSessionById,
   revokeAllSessions,
+  getSessionById,
+  cleanupSessions,
 } from "../controllers/sessions.controller";
 
 const router = Router();
@@ -64,8 +66,10 @@ router.delete("/account/profile-image", authenticate, deleteProfileImage);
 // Activity and Sessions
 router.get("/activity", authenticate, getActivity);
 router.get("/sessions", authenticate, getSessions);
+router.delete("/sessions/cleanup", authenticate, cleanupSessions); // Clean up expired sessions
 // IMPORTANT: Put /all route BEFORE /:sessionId route to avoid route conflict
 router.delete("/sessions/all", authenticate, revokeAllSessions);
+router.get("/sessions/:sessionId", authenticate, getSessionById); // Get session details
 router.delete("/sessions/:sessionId", authenticate, revokeSessionById);
 
 export default router;

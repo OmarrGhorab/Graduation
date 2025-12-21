@@ -15,6 +15,15 @@ interface CreateSessionParams {
   refreshExpiresAt?: Date | null;
 }
 
+export interface SessionActivity {
+  id: string;
+  action: string;
+  ipAddress: string | null;
+  userAgent: string | null;
+  location: string | null;
+  timestamp: Date;
+}
+
 /**
  * Create a new session record in the database
  */
@@ -60,8 +69,8 @@ export async function updateSessionActivity(sessionToken: string) {
 }
 
 /**
- * Revoke a specific session (soft delete)
- * Marks session as revoked in DB and revokes refresh token in Redis
+ * Revoke a specific session (hard delete)
+ * Removes session from DB and revokes refresh token in Redis
  * Returns whether it was the current session
  */
 export async function revokeSession(sessionId: string, userId: string, currentSessionToken?: string | null) {
@@ -72,7 +81,6 @@ export async function revokeSession(sessionId: string, userId: string, currentSe
       userId: true,
       sessionToken: true,
       refreshToken: true,
-      isRevoked: true,
     },
   });
 
@@ -82,14 +90,6 @@ export async function revokeSession(sessionId: string, userId: string, currentSe
 
   if (session.userId !== userId) {
     throw new Error("Unauthorized to revoke this session");
-  }
-
-  // Check if already revoked
-  if (session.isRevoked) {
-    // Still check if it's the current session for logout purposes
-    const isCurrentSession =
-      !!currentSessionToken && session.sessionToken === currentSessionToken;
-    return { isCurrentSession };
   }
 
   // Check if this is the current session
@@ -105,22 +105,17 @@ export async function revokeSession(sessionId: string, userId: string, currentSe
     }
   }
 
-  // Soft delete session - mark as revoked
-  await prisma.session.update({
+  // Hard delete session from database
+  await prisma.session.delete({
     where: { id: sessionId },
-    data: {
-      isRevoked: true,
-      isActive: false,
-      revokedAt: new Date(),
-    },
   });
 
   return { isCurrentSession };
 }
 
 /**
- * Revoke all sessions for a user (soft delete)
- * Marks sessions as revoked in DB and revokes refresh tokens in Redis
+ * Revoke all sessions for a user (hard delete)
+ * Removes sessions from DB and revokes refresh tokens in Redis
  * @param userId - User ID
  * @param currentSessionToken - Current session token to optionally exclude
  * @param includeCurrent - If true, includes current session in revocation (default: false)
@@ -131,10 +126,9 @@ export async function revokeAllUserSessions(
   currentSessionToken: string,
   includeCurrent: boolean = false
 ) {
-  // Build where clause - only revoke sessions that aren't already revoked
+  // Build where clause
   const whereClause: any = {
     userId: userId,
-    isRevoked: false, // Only revoke sessions that aren't already revoked
   };
 
   // Exclude current session if not including it
@@ -150,8 +144,14 @@ export async function revokeAllUserSessions(
     select: {
       id: true,
       refreshToken: true,
+      sessionToken: true,
     },
   });
+
+  // Check if current session will be included
+  const wasCurrentIncluded = sessionsToRevoke.some(
+    (s) => s.sessionToken === currentSessionToken
+  );
 
   // Revoke refresh tokens in Redis
   for (const session of sessionsToRevoke) {
@@ -164,20 +164,161 @@ export async function revokeAllUserSessions(
     }
   }
 
-  // Soft delete sessions - mark as revoked
-  const result = await prisma.session.updateMany({
+  // Hard delete sessions from database
+  const result = await prisma.session.deleteMany({
     where: whereClause,
-    data: {
-      isRevoked: true,
-      isActive: false,
-      revokedAt: new Date(),
-    },
   });
 
   return {
     deletedCount: result.count,
-    wasCurrentIncluded: includeCurrent && result.count > 0,
+    wasCurrentIncluded,
   };
+}
+
+/**
+ * Get detailed session information including device and activity
+ */
+export async function getSessionDetails(sessionId: string, userId: string) {
+  const session = await prisma.session.findUnique({
+    where: { id: sessionId },
+    include: {
+      device: {
+        select: {
+          id: true,
+          deviceName: true,
+          platform: true,
+          ipAddress: true,
+          userAgent: true,
+          isTrusted: true,
+          lastLoginAt: true,
+          createdAt: true,
+        },
+      },
+    },
+  });
+
+  if (!session) {
+    throw new Error("Session not found");
+  }
+
+  if (session.userId !== userId) {
+    throw new Error("Unauthorized to view this session");
+  }
+
+  const isExpired = new Date(session.expiresAt) < new Date();
+  const isActive = session.isActive && !session.isRevoked && !isExpired;
+
+  // Parse user agent for readable device info
+  const deviceInfo = parseUserAgent(session.userAgent || session.device?.userAgent);
+
+  return {
+    id: session.id,
+    // Device info
+    device: {
+      id: session.device?.id || null,
+      name: session.device?.deviceName || deviceInfo.deviceName,
+      platform: session.device?.platform || deviceInfo.platform,
+      browser: deviceInfo.browser,
+      os: deviceInfo.os,
+      isTrusted: session.device?.isTrusted || false,
+    },
+    // Network info
+    network: {
+      ipAddress: session.ipAddress || session.device?.ipAddress || null,
+      location: session.location || null,
+      userAgent: session.userAgent || session.device?.userAgent || null,
+    },
+    // Session state
+    status: {
+      isActive,
+      isRevoked: session.isRevoked,
+      isExpired,
+    },
+    // Timestamps
+    timestamps: {
+      createdAt: session.createdAt,
+      lastActivityAt: session.lastActivityAt,
+      expiresAt: session.expiresAt,
+      revokedAt: session.revokedAt,
+      deviceLastLoginAt: session.device?.lastLoginAt || null,
+    },
+  };
+}
+
+/**
+ * Parse user agent string to extract device info
+ */
+function parseUserAgent(userAgent: string | null | undefined): {
+  deviceName: string;
+  platform: string | null;
+  browser: string | null;
+  os: string | null;
+} {
+  if (!userAgent) {
+    return {
+      deviceName: "Unknown Device",
+      platform: null,
+      browser: null,
+      os: null,
+    };
+  }
+
+  let browser: string | null = null;
+  let os: string | null = null;
+  let platform: string | null = null;
+
+  // Detect browser
+  if (userAgent.includes("Chrome") && !userAgent.includes("Edg")) {
+    browser = "Chrome";
+  } else if (userAgent.includes("Safari") && !userAgent.includes("Chrome")) {
+    browser = "Safari";
+  } else if (userAgent.includes("Firefox")) {
+    browser = "Firefox";
+  } else if (userAgent.includes("Edg")) {
+    browser = "Edge";
+  } else if (userAgent.includes("Opera") || userAgent.includes("OPR")) {
+    browser = "Opera";
+  }
+
+  // Detect OS
+  if (userAgent.includes("Windows")) {
+    os = "Windows";
+    platform = "WEB";
+  } else if (userAgent.includes("Mac OS")) {
+    os = "macOS";
+    platform = "WEB";
+  } else if (userAgent.includes("Linux") && !userAgent.includes("Android")) {
+    os = "Linux";
+    platform = "WEB";
+  } else if (userAgent.includes("Android")) {
+    os = "Android";
+    platform = "ANDROID";
+  } else if (userAgent.includes("iPhone") || userAgent.includes("iPad")) {
+    os = "iOS";
+    platform = "IOS";
+  }
+
+  // Build device name
+  const parts = [browser, os].filter(Boolean);
+  const deviceName = parts.length > 0 ? `${parts.join(" on ")}` : "Unknown Device";
+
+  return { deviceName, platform, browser, os };
+}
+
+/**
+ * Clean up expired sessions for a user (hard delete)
+ */
+export async function cleanupExpiredSessions(userId: string) {
+  const result = await prisma.session.deleteMany({
+    where: {
+      userId,
+      expiresAt: {
+        lt: new Date(),
+      },
+    },
+  });
+
+  return result.count;
 }
 
 /**
@@ -219,15 +360,26 @@ async function getLocationFromIp(ip: string): Promise<string | null> {
 
 /**
  * Get device info from request for session creation
+ * Prefers client-provided location over IP geolocation
  */
 export async function getSessionDeviceInfo(req: Request) {
   const deviceInfo = extractDeviceInfo(req);
-  const location = await getLocationFromIp(deviceInfo.ipAddress || '');
+  
+  // Use client-provided location if available, otherwise try IP geolocation
+  let location = deviceInfo.clientLocation;
+  if (!location) {
+    location = await getLocationFromIp(deviceInfo.ipAddress || '');
+  }
 
   return {
     ipAddress: deviceInfo.ipAddress,
     userAgent: deviceInfo.userAgent,
     location: location,
+    // Include client-provided device info for richer session data
+    deviceName: deviceInfo.clientDeviceName || deviceInfo.clientDeviceModel || deviceInfo.deviceName,
+    platform: deviceInfo.platform,
+    timezone: deviceInfo.clientTimezone,
+    appVersion: deviceInfo.clientAppVersion,
   };
 }
 

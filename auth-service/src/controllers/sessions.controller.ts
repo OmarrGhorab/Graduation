@@ -1,7 +1,7 @@
 import { Request, Response, NextFunction } from "express";
 import prisma from "../libs/prisma";
-import { UnauthorizedError, BadRequestError } from "../utils/errors";
-import { revokeSession, revokeAllUserSessions } from "../utils/sessions";
+import { UnauthorizedError, BadRequestError, NotFoundError } from "../utils/errors";
+import { revokeSession, revokeAllUserSessions, getSessionDetails, cleanupExpiredSessions } from "../utils/sessions";
 import { getAccessTokenFromRequest } from "../utils/cookies";
 import { verifyAccessToken } from "../utils/tokens";
 
@@ -193,3 +193,76 @@ export const revokeAllSessions = async (req: Request, res: Response, next: NextF
     }
 };
 
+
+
+/**
+ * Get detailed information about a specific session
+ * Includes device info, network info, and activity timestamps
+ */
+export const getSessionById = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        const userId = req.user?.id;
+        const { sessionId } = req.params;
+
+        if (!userId) {
+            throw new UnauthorizedError("Authentication required");
+        }
+
+        if (!sessionId) {
+            throw new BadRequestError("Session ID is required");
+        }
+
+        // Get current session token to mark if this is the current session
+        const currentSessionToken = await getCurrentSessionToken(req);
+
+        const sessionDetails = await getSessionDetails(sessionId, userId);
+
+        // Check if this is the current session
+        const session = await prisma.session.findUnique({
+            where: { id: sessionId },
+            select: { sessionToken: true },
+        });
+
+        const isCurrent = session?.sessionToken === currentSessionToken;
+
+        res.json({
+            ...sessionDetails,
+            isCurrent,
+        });
+    } catch (err) {
+        if (err instanceof Error) {
+            if (err.message === "Session not found") {
+                return next(new NotFoundError("Session not found"));
+            }
+            if (err.message === "Unauthorized to view this session") {
+                return next(new UnauthorizedError("Unauthorized to view this session"));
+            }
+        }
+        next(err);
+    }
+};
+
+/**
+ * Clean up expired sessions for the authenticated user
+ * Removes all expired sessions from the database
+ */
+export const cleanupSessions = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        const userId = req.user?.id;
+
+        if (!userId) {
+            throw new UnauthorizedError("Authentication required");
+        }
+
+        const deletedCount = await cleanupExpiredSessions(userId);
+
+        res.json({
+            message: deletedCount > 0
+                ? `Cleaned up ${deletedCount} expired session(s)`
+                : "No expired sessions to clean up",
+            deletedCount,
+        });
+    } catch (err) {
+        next(err);
+    }
+};
