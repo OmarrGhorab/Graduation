@@ -86,7 +86,7 @@ export const updateProfile = async (req: Request, res: Response, next: NextFunct
     }
 
     const userId = req.user.id;
-    const { name, username, password, currentPassword } = req.body;
+    const { name, username, password, currentPassword, bio, goals, interests } = req.body;
 
     // Fetch current user
     const currentUser = await prisma.user.findUnique({
@@ -178,6 +178,31 @@ export const updateProfile = async (req: Request, res: Response, next: NextFunct
       updateData.password = hashedPassword;
     }
 
+    // Update bio if provided
+    if (bio !== undefined) {
+      if (bio.trim().length > 200) {
+        throw new BadRequestError("Bio must be at most 200 characters");
+      }
+      updateData.bio = bio.trim();
+    }
+
+    // Update goals if provided
+    if (goals !== undefined) {
+      if (!Array.isArray(goals)) {
+        throw new BadRequestError("Goals must be an array");
+      }
+      if (goals.length > 3) {
+        throw new BadRequestError("Maximum 3 goals allowed");
+      }
+      updateData.goals = goals;
+    }
+
+    // Update interests if provided
+    if (interests !== undefined && Array.isArray(interests)) {
+      // This will be handled separately after the user update
+      // to properly manage the Interest and UserInterest tables
+    }
+
     // Update user
     const updatedUser = await prisma.user.update({
       where: { id: userId },
@@ -189,12 +214,70 @@ export const updateProfile = async (req: Request, res: Response, next: NextFunct
         email: true,
         profileImg: true,
         lastUsernameChange: true,
+        bio: true,
+        goals: true,
+      },
+    });
+
+    // Handle interests update if provided
+    if (interests !== undefined && Array.isArray(interests)) {
+      // Remove existing interests
+      await prisma.userInterest.deleteMany({
+        where: { userId },
+      });
+
+      // Add new interests
+      for (const interestName of interests) {
+        if (!interestName || typeof interestName !== "string") {
+          continue;
+        }
+
+        // Find or create the interest
+        const interest = await prisma.interest.upsert({
+          where: { name: interestName.trim() },
+          create: { name: interestName.trim() },
+          update: {},
+        });
+
+        // Link user to interest
+        await prisma.userInterest.create({
+          data: {
+            userId,
+            interestId: interest.id,
+          },
+        });
+      }
+    }
+
+    // Fetch updated user with interests
+    const userWithInterests = await prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        username: true,
+        name: true,
+        email: true,
+        profileImg: true,
+        lastUsernameChange: true,
+        bio: true,
+        goals: true,
+        interests: {
+          include: {
+            interest: true,
+          },
+        },
       },
     });
 
     res.status(200).json({
       message: "Profile updated successfully",
-      user: updatedUser,
+      user: {
+        ...userWithInterests,
+        interests: userWithInterests?.interests.map((ui) => ({
+          id: ui.interest.id,
+          name: ui.interest.name,
+        })),
+      },
     });
   } catch (err) {
     next(err);
@@ -262,6 +345,11 @@ export const getProfile = async (req: Request, res: Response, next: NextFunction
         newsletterEnabled: true,
         lastUsernameChange: true,
         createdAt: true,
+        interests: {
+          include: {
+            interest: true,
+          },
+        },
       },
     });
 
@@ -281,7 +369,13 @@ export const getProfile = async (req: Request, res: Response, next: NextFunction
     }
 
     res.status(200).json({
-      user,
+      user: {
+        ...user,
+        interests: user.interests.map((ui) => ({
+          id: ui.interest.id,
+          name: ui.interest.name,
+        })),
+      },
       canChangeUsername,
       nextUsernameChangeDate,
     });

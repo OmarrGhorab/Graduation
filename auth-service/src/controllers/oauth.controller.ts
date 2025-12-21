@@ -61,7 +61,18 @@ export const googleMobileAuth = async (req: Request, res: Response, next: NextFu
         // Check if user exists by email
         let user = await prisma.user.findUnique({
             where: { email },
-            include: { providers: true },
+            select: {
+                id: true,
+                name: true,
+                username: true,
+                email: true,
+                profileImg: true,
+                role: true,
+                verified: true,
+                onboardingCompleted: true,
+                twoFactorEnabled: true,
+                providers: true,
+            },
         });
 
         // If user doesn't exist, create new user
@@ -235,6 +246,7 @@ export const googleMobileAuth = async (req: Request, res: Response, next: NextFu
                 role: user.role,
                 verified: user.verified,
                 onboardingCompleted: user.onboardingCompleted,
+                twoFactorEnabled: user.twoFactorEnabled,
             },
             requiresOnboarding: !user.onboardingCompleted,
         });

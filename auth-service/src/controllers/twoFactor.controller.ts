@@ -387,6 +387,8 @@ export const verify2FALogin = async (req: Request, res: Response, next: NextFunc
 
     res.status(200).json({
       message: "2FA verification successful",
+      accessToken,
+      refreshToken,
       user: {
         id: fullUser.id,
         name: fullUser.name,
@@ -396,6 +398,7 @@ export const verify2FALogin = async (req: Request, res: Response, next: NextFunc
         onboardingCompleted: fullUser.onboardingCompleted,
         role: fullUser.role,
         profileImg: fullUser.profileImg,
+        twoFactorEnabled: true,
       },
       requiresOnboarding: !fullUser.onboardingCompleted,
     });

@@ -445,6 +445,7 @@ export const loginUser = async (req: Request, res: Response, next: NextFunction)
                 onboardingCompleted: user.onboardingCompleted,
                 role: user.role,
                 profileImg: user.profileImg,
+                twoFactorEnabled: user.twoFactorEnabled,
             },
             accessToken,
             refreshToken,
@@ -585,6 +586,7 @@ export const refreshToken = async (req: Request, res: Response, next: NextFuncti
                 profileImg: true,
                 isActive: true,
                 deletedAt: true,
+                twoFactorEnabled: true,
             },
         });
 
@@ -654,6 +656,7 @@ export const refreshToken = async (req: Request, res: Response, next: NextFuncti
                 onboardingCompleted: user.onboardingCompleted,
                 role: user.role,
                 profileImg: user.profileImg,
+                twoFactorEnabled: user.twoFactorEnabled,
             },
             accessToken,
             refreshToken: newRefreshToken,
