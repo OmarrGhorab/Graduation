@@ -211,7 +211,7 @@ export async function fetchLinkedAccounts(userId: string, userType: UserRole) {
 export async function validateParentUser(parentId: string) {
   const parent = await prisma.user.findUnique({
     where: { id: parentId },
-    select: { id: true, role: true, username: true, name: true },
+    select: { id: true, role: true, username: true, name: true, profileImg: true },
   });
 
   if (!parent || parent.role !== UserRole.PARENT) {

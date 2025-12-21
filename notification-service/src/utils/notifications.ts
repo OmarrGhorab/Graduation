@@ -84,6 +84,9 @@ async function sendFcmNotification(
 
     const title = data.title || getNotificationTitle(data.type);
     const body = data.body || getNotificationBody(data.type, data);
+    
+    // Extract image URL if available (for profile images from child or parent)
+    const imageUrl = data.child?.profileImg || data.parent?.profileImg || data.profileImg || data.imageUrl || null;
 
     // Prepare data payload (all values must be strings)
     const dataPayload: Record<string, string> = {
@@ -105,6 +108,7 @@ async function sendFcmNotification(
 
     const allTokens = [...iosTokens, ...androidTokens, ...unknownTokens];
     const promises: Promise<admin.messaging.BatchResponse>[] = [];
+    const tokenGroups: string[][] = []; // Track which token groups were sent
 
     // Send to iOS devices with APNS-specific configuration
     if (iosTokens.length > 0) {
@@ -112,6 +116,7 @@ async function sendFcmNotification(
         notification: {
           title,
           body,
+          ...(imageUrl && { imageUrl }), // Add image if available
         },
         data: dataPayload,
         tokens: iosTokens,
@@ -126,9 +131,15 @@ async function sendFcmNotification(
           headers: {
             "apns-priority": "10",
           },
+          ...(imageUrl && {
+            fcmOptions: {
+              imageUrl,
+            },
+          }),
         },
       };
       promises.push(messaging.sendEachForMulticast(iosNotification));
+      tokenGroups.push(iosTokens);
     }
 
     // Send to Android devices with Android-specific configuration
@@ -137,6 +148,7 @@ async function sendFcmNotification(
         notification: {
           title,
           body,
+          ...(imageUrl && { imageUrl }), // Add image if available
         },
         data: {
           ...dataPayload,
@@ -149,10 +161,12 @@ async function sendFcmNotification(
             channelId: "default",
             sound: "default",
             priority: "high" as const,
+            ...(imageUrl && { imageUrl }), // Android-specific image
           },
         },
       };
       promises.push(messaging.sendEachForMulticast(androidNotification));
+      tokenGroups.push(androidTokens);
     }
 
     // Send to unknown platform devices (fallback)
@@ -161,11 +175,13 @@ async function sendFcmNotification(
         notification: {
           title,
           body,
+          ...(imageUrl && { imageUrl }), // Add image if available
         },
         data: dataPayload,
         tokens: unknownTokens,
       };
       promises.push(messaging.sendEachForMulticast(unknownNotification));
+      tokenGroups.push(unknownTokens);
     }
 
     // Send all notifications in parallel
@@ -180,17 +196,19 @@ async function sendFcmNotification(
       totalSuccess += response.successCount;
       totalFailure += response.failureCount;
 
-      const tokenGroup = responseIdx === 0 ? iosTokens : responseIdx === 1 ? androidTokens : unknownTokens;
+      const tokenGroup = tokenGroups[responseIdx] || [];
 
       response.responses.forEach((resp, idx) => {
         if (!resp.success) {
           const token = tokenGroup[idx];
-          invalidTokens.push(token);
-          console.error(
-            `[FCM] Failed to send notification to token ${token.substring(0, 20)}...:`,
-            resp.error?.code || "Unknown error",
-            resp.error?.message || ""
-          );
+          if (token) {
+            invalidTokens.push(token);
+            console.error(
+              `[FCM] Failed to send notification to token ${token.substring(0, 20)}...:`,
+              resp.error?.code || "Unknown error",
+              resp.error?.message || ""
+            );
+          }
         }
       });
     });
