@@ -4,6 +4,7 @@ import { authenticateInternalService } from '../middleware/internal-auth';
 import {
   getNotifications,
   markNotificationsRead,
+  deleteNotification,
   publishNotificationEndpoint,
   registerFcmTokenEndpoint,
   unregisterFcmTokenEndpoint,
@@ -24,5 +25,8 @@ router.get('/', authenticate, getNotifications);
 
 // Mark notifications as read (requires user authentication)
 router.patch('/read', authenticate, markNotificationsRead);
+
+// Delete a specific notification (requires user authentication)
+router.delete('/:id', authenticate, deleteNotification);
 
 export default router;

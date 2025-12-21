@@ -33,6 +33,7 @@ model User {
   isActive                 Boolean         @default(true) // Account active status
   deletedAt                DateTime? // Soft delete timestamp
   lastLoginAt              DateTime?
+  lastUsernameChange       DateTime? // Track when username was last changed
   createdAt                DateTime        @default(now())
   updatedAt                DateTime        @updatedAt
 

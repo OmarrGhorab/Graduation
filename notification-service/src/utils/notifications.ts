@@ -246,6 +246,8 @@ function getNotificationTitle(type: string): string {
     parent_link_request: "New Parent Link Request",
     parent_link_accepted: "Parent Link Accepted",
     parent_link_declined: "Parent Link Declined",
+    parent_link_request_accepted: "Link Request Accepted",
+    parent_link_request_declined: "Link Request Declined",
     unlink_request: "Unlink Request",
     unlink_request_accepted: "Unlink Request Accepted",
     unlink_request_declined: "Unlink Request Declined",
@@ -263,11 +265,13 @@ function getNotificationBody(
 ): string {
   switch (type) {
     case "parent_link_request":
-      return `${data.childName || "A child"} wants to link with you`;
+      return `${data.childName || data.child?.name || "A child"} wants to link with you`;
     case "parent_link_accepted":
-      return `${data.parentName || "A parent"} accepted your link request`;
+    case "parent_link_request_accepted":
+      return `${data.parentName || data.parent?.name || "A parent"} accepted your link request`;
     case "parent_link_declined":
-      return `${data.parentName || "A parent"} declined your link request`;
+    case "parent_link_request_declined":
+      return `${data.parentName || data.parent?.name || "A parent"} declined your link request`;
     case "unlink_request":
       return `${data.requesterName || "Someone"} wants to unlink from you`;
     case "unlink_request_accepted":

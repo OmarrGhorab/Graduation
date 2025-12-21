@@ -212,6 +212,46 @@ export const unregisterFcmTokenEndpoint = async (
 };
 
 /**
+ * Delete a specific notification
+ */
+export const deleteNotification = async (
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    if (!req.user) {
+      throw new UnauthorizedError("User not authenticated");
+    }
+
+    const userId = req.user.id;
+    const { id } = req.params;
+
+    if (!id) {
+      throw new BadRequestError("Notification ID is required");
+    }
+
+    // Delete only if notification belongs to the user
+    const result = await prisma.notification.deleteMany({
+      where: {
+        id,
+        userId,
+      },
+    });
+
+    if (result.count === 0) {
+      throw new BadRequestError("Notification not found or already deleted");
+    }
+
+    res.status(200).json({
+      message: "Notification deleted successfully",
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
  * Publish notification endpoint for other services to call
  * This is the main API that other microservices will use to send notifications
  */
