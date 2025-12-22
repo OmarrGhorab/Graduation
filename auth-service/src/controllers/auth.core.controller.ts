@@ -468,7 +468,7 @@ export const logoutUser = async (req: Request, res: Response, next: NextFunction
 
         let sessionTokenJti: string | null = null;
 
-        // Get access token JTI to revoke session
+        // Get access token JTI to find and delete session
         if (accessToken) {
             try {
                 const payload = await verifyAccessToken(accessToken);
@@ -478,14 +478,13 @@ export const logoutUser = async (req: Request, res: Response, next: NextFunction
             }
         }
 
-        // Revoke session in database if access token is valid
+        // Delete session from database if access token is valid
         if (sessionTokenJti) {
             try {
-                // Find session to get refresh token before revoking
+                // Find session to get refresh token before deleting
                 const session = await prisma.session.findFirst({
                     where: {
                         sessionToken: sessionTokenJti,
-                        isRevoked: false,
                     },
                     select: {
                         id: true,
@@ -503,18 +502,13 @@ export const logoutUser = async (req: Request, res: Response, next: NextFunction
                         }
                     }
 
-                    // Revoke session in database
-                    await prisma.session.update({
+                    // Hard delete session from database
+                    await prisma.session.delete({
                         where: { id: session.id },
-                        data: {
-                            isRevoked: true,
-                            isActive: false,
-                            revokedAt: new Date(),
-                        },
                     });
                 }
             } catch {
-                // ignore errors when revoking session during logout
+                // ignore errors when deleting session during logout
             }
         }
 
@@ -523,6 +517,13 @@ export const logoutUser = async (req: Request, res: Response, next: NextFunction
             try {
                 const payload = await verifyRefreshToken(refreshToken);
                 await revokeRefreshTokenByJti(payload.jti);
+                
+                // Also try to delete session by refresh token JTI
+                await prisma.session.deleteMany({
+                    where: {
+                        refreshToken: payload.jti,
+                    },
+                });
             } catch {
                 // ignore errors when revoking token during logout
             }

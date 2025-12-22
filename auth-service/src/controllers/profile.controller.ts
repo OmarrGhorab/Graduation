@@ -383,3 +383,68 @@ export const getProfile = async (req: Request, res: Response, next: NextFunction
     next(err);
   }
 };
+
+
+/**
+ * Check if username is available
+ * Public endpoint - no authentication required
+ */
+export const checkUsernameAvailability = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { username } = req.query;
+
+    if (!username || typeof username !== "string") {
+      throw new BadRequestError("Username is required");
+    }
+
+    const normalizedUsername = username.trim().toLowerCase();
+
+    if (normalizedUsername.length < 3) {
+      return res.status(400).json({
+        available: false,
+        message: "Username must be at least 3 characters long",
+      });
+    }
+
+    if (normalizedUsername.length > 30) {
+      return res.status(400).json({
+        available: false,
+        message: "Username must be at most 30 characters long",
+      });
+    }
+
+    // Check if username contains only valid characters (alphanumeric, underscore, hyphen)
+    const validUsernameRegex = /^[a-z0-9_-]+$/;
+    if (!validUsernameRegex.test(normalizedUsername)) {
+      return res.status(400).json({
+        available: false,
+        message: "Username can only contain letters, numbers, underscores, and hyphens",
+      });
+    }
+
+    // Check if username exists
+    const existingUser = await prisma.user.findUnique({
+      where: { username: normalizedUsername },
+      select: { id: true },
+    });
+
+    if (existingUser) {
+      // Generate suggestions
+      const suggestions = await generateUsernameSuggestions(normalizedUsername);
+      
+      return res.status(200).json({
+        available: false,
+        message: "Username is already taken",
+        suggestions: suggestions.length > 0 ? suggestions : undefined,
+      });
+    }
+
+    res.status(200).json({
+      available: true,
+      message: "Username is available",
+      username: normalizedUsername,
+    });
+  } catch (err) {
+    next(err);
+  }
+};

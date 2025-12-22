@@ -4,9 +4,13 @@ import {
   getProfile,
   updateProfile,
   uploadProfileImageEndpoint,
+  checkUsernameAvailability,
 } from '../controllers/profile.controller';
 
 const router = express.Router();
+
+// Check username availability (public endpoint - no auth required)
+router.get('/check-username', checkUsernameAvailability);
 
 // Get user profile
 router.get('/', authenticate, getProfile);
