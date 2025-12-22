@@ -5,6 +5,8 @@ import {
   updateProfile,
   uploadProfileImageEndpoint,
   checkUsernameAvailability,
+  updatePreferences,
+  getPreferences,
 } from '../controllers/profile.controller';
 
 const router = express.Router();
@@ -20,5 +22,11 @@ router.patch('/', authenticate, updateProfile);
 
 // Upload/update profile image
 router.post('/image', authenticate, uploadProfileImageEndpoint);
+
+// Get user preferences
+router.get('/preferences', authenticate, getPreferences);
+
+// Update user preferences (theme, language, notifications, newsletter)
+router.patch('/preferences', authenticate, updatePreferences);
 
 export default router;

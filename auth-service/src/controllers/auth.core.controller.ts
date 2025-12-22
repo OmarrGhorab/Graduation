@@ -701,6 +701,14 @@ export const getMyProfile = async (req: Request, res: Response, next: NextFuncti
                 bio: true,
                 goals: true,
                 newsletterEnabled: true,
+                // Include user preferences
+                preferences: {
+                    select: {
+                        language: true,
+                        themePreference: true,
+                        notifications: true
+                    },
+                },
                 // Explicitly exclude sensitive fields
                 password: false,
                 deletedAt: false,

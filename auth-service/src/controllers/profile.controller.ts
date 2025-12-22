@@ -350,6 +350,13 @@ export const getProfile = async (req: Request, res: Response, next: NextFunction
             interest: true,
           },
         },
+        preferences: {
+          select: {
+            language: true,
+            themePreference: true,
+            notifications: true,
+          },
+        },
       },
     });
 
@@ -443,6 +450,139 @@ export const checkUsernameAvailability = async (req: Request, res: Response, nex
       available: true,
       message: "Username is available",
       username: normalizedUsername,
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
+ * Update user preferences (theme, language, notifications, newsletter)
+ */
+export const updatePreferences = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    if (!req.user) {
+      throw new BadRequestError("User not authenticated");
+    }
+
+    const userId = req.user.id;
+    const { language, themePreference, notifications, newsletterEnabled } = req.body;
+
+    const updateData: any = {};
+    const preferenceUpdateData: any = {};
+
+    // Validate and update language
+    if (language !== undefined) {
+      const validLanguages = ["en", "ar", "es", "fr", "de"];
+      if (!validLanguages.includes(language)) {
+        throw new BadRequestError(`Invalid language. Must be one of: ${validLanguages.join(", ")}`);
+      }
+      preferenceUpdateData.language = language;
+    }
+
+    // Validate and update theme
+    if (themePreference !== undefined) {
+      const validThemes = ["light", "dark", "system"];
+      if (!validThemes.includes(themePreference)) {
+        throw new BadRequestError(`Invalid theme. Must be one of: ${validThemes.join(", ")}`);
+      }
+      preferenceUpdateData.themePreference = themePreference;
+    }
+
+    // Update notifications preference
+    if (notifications !== undefined) {
+      if (typeof notifications !== "boolean") {
+        throw new BadRequestError("Notifications must be a boolean value");
+      }
+      preferenceUpdateData.notifications = notifications;
+    }
+
+    // Update newsletter preference (stored in User table)
+    if (newsletterEnabled !== undefined) {
+      if (typeof newsletterEnabled !== "boolean") {
+        throw new BadRequestError("Newsletter enabled must be a boolean value");
+      }
+      updateData.newsletterEnabled = newsletterEnabled;
+    }
+
+    // Update user preferences and newsletter setting in a transaction
+    const result = await prisma.$transaction(async (tx) => {
+      // Update or create user preferences if there are preference changes
+      let preferences = null;
+      if (Object.keys(preferenceUpdateData).length > 0) {
+        preferences = await tx.userPreference.upsert({
+          where: { userId },
+          create: {
+            userId,
+            language: preferenceUpdateData.language || "en",
+            themePreference: preferenceUpdateData.themePreference || "light",
+            notifications: preferenceUpdateData.notifications !== undefined ? preferenceUpdateData.notifications : true,
+          },
+          update: preferenceUpdateData,
+        });
+      }
+
+      // Update user newsletter setting if provided
+      let user = null;
+      if (Object.keys(updateData).length > 0) {
+        user = await tx.user.update({
+          where: { id: userId },
+          data: updateData,
+          select: {
+            id: true,
+            newsletterEnabled: true,
+          },
+        });
+      }
+
+      // Fetch complete preferences
+      if (!preferences) {
+        preferences = await tx.userPreference.findUnique({
+          where: { userId },
+        });
+      }
+
+      return { preferences, user };
+    });
+
+    res.status(200).json({
+      message: "Preferences updated successfully",
+      preferences: result.preferences,
+      newsletterEnabled: result.user?.newsletterEnabled,
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
+ * Get user preferences
+ */
+export const getPreferences = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    if (!req.user) {
+      throw new BadRequestError("User not authenticated");
+    }
+
+    const userId = req.user.id;
+
+    const [preferences, user] = await Promise.all([
+      prisma.userPreference.findUnique({
+        where: { userId },
+      }),
+      prisma.user.findUnique({
+        where: { id: userId },
+        select: { newsletterEnabled: true },
+      }),
+    ]);
+
+    res.status(200).json({
+      preferences: preferences || {
+        language: "en",
+        themePreference: "light",
+        notifications: true,
+      },
+      newsletterEnabled: user?.newsletterEnabled || false,
     });
   } catch (err) {
     next(err);
