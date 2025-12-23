@@ -366,6 +366,7 @@ export const getProfile = async (req: Request, res: Response, next: NextFunction
         bio: true,
         goals: true,
         newsletterEnabled: true,
+        onboardingCompleted: true,
         lastUsernameChange: true,
         createdAt: true,
         password: true, // Need to check if password exists
