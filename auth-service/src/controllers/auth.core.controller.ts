@@ -8,7 +8,7 @@ import { aj } from "../libs/arcjet";
 import { generateUsernameSuggestions } from "../utils/username";
 import { createAndStoreOtp } from "../utils/otp";
 import { extractDeviceInfo, extractDeviceName } from "../utils/device";
-import { createSession, getSessionDeviceInfo } from "../utils/sessions";
+import { createSession, getSessionDeviceInfo, revokeSession } from "../utils/sessions";
 import { sendVerificationOTP, sendDeviceVerificationOTP } from "../utils/email";
 import { getUserLanguage } from "../utils/userLanguage";
 
@@ -462,75 +462,60 @@ export const loginUser = async (req: Request, res: Response, next: NextFunction)
 
 export const logoutUser = async (req: Request, res: Response, next: NextFunction) => {
     try {
-        // Extract tokens from request
-        const refreshToken = getRefreshTokenFromRequest(req);
-        const accessToken = getAccessTokenFromRequest(req);
-
-        let sessionTokenJti: string | null = null;
-
-        // Get access token JTI to find and delete session
-        if (accessToken) {
-            try {
-                const payload = await verifyAccessToken(accessToken);
-                sessionTokenJti = payload.jti;
-            } catch {
-                // ignore errors when verifying token during logout
-            }
+        if (!req.user) {
+            throw new UnauthorizedError("User not authenticated");
         }
 
-        // Delete session from database if access token is valid
-        if (sessionTokenJti) {
-            try {
-                // Find session to get refresh token before deleting
-                const session = await prisma.session.findFirst({
-                    where: {
-                        sessionToken: sessionTokenJti,
-                    },
-                    select: {
-                        id: true,
-                        refreshToken: true,
-                    },
-                });
+        const userId = req.user.id;
+        const sessionTokenJti = req.user.jti;
 
-                if (session) {
-                    // Revoke refresh token in Redis if it exists
-                    if (session.refreshToken) {
-                        try {
-                            await revokeRefreshTokenByJti(session.refreshToken);
-                        } catch {
-                            // ignore errors when revoking token during logout
-                        }
-                    }
+        // Find the session by sessionToken JTI
+        const session = await prisma.session.findFirst({
+            where: {
+                userId: userId,
+                sessionToken: sessionTokenJti,
+            },
+            select: {
+                id: true,
+                sessionToken: true,
+                refreshToken: true,
+            },
+        });
 
-                    // Hard delete session from database
-                    await prisma.session.delete({
-                        where: { id: session.id },
-                    });
+        if (!session) {
+            // Session not found, but still return success (already logged out)
+            return res.json({ 
+                message: "Logged out successfully",
+                sessionsDeleted: 0,
+                debug: {
+                    userId,
+                    sessionTokenJti,
+                    sessionFound: false
                 }
-            } catch {
-                // ignore errors when deleting session during logout
-            }
+            });
         }
 
-        // Also revoke refresh token from request if provided (fallback)
-        if (refreshToken) {
-            try {
-                const payload = await verifyRefreshToken(refreshToken);
-                await revokeRefreshTokenByJti(payload.jti);
-                
-                // Also try to delete session by refresh token JTI
-                await prisma.session.deleteMany({
-                    where: {
-                        refreshToken: payload.jti,
-                    },
-                });
-            } catch {
-                // ignore errors when revoking token during logout
-            }
-        }
+        // Use the working revokeSession utility function
+        await revokeSession(session.id, userId, sessionTokenJti);
 
-        res.json({ message: "Logged out" });
+        res.json({ 
+            message: "Logged out successfully",
+            sessionsDeleted: 1,
+            debug: {
+                userId,
+                sessionId: session.id,
+                sessionFound: true
+            }
+        });
     } catch (err) {
+        // Return error details in response for debugging
+        if (err instanceof Error) {
+            return res.status(500).json({
+                error: "Logout failed",
+                message: err.message,
+                stack: process.env.NODE_ENV === "development" ? err.stack : undefined
+            });
+        }
         next(err);
     }
 }

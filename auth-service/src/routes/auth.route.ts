@@ -29,7 +29,7 @@ const router = Router();
 // Auth routes
 router.post("/register", registerUser);
 router.post("/login", loginUser);
-router.post("/logout", logoutUser);
+router.post("/logout", authenticate, logoutUser);
 router.post("/refresh", refreshToken);
 
 // Profile
