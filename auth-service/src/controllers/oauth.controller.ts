@@ -72,8 +72,13 @@ export const googleMobileAuth = async (req: Request, res: Response, next: NextFu
                 onboardingCompleted: true,
                 twoFactorEnabled: true,
                 providers: true,
+                isActive: true,
+                deletedAt: true,
             },
         });
+
+        // Track if account was reactivated
+        let wasReactivated = false;
 
         // If user doesn't exist, create new user
         if (!user) {
@@ -102,6 +107,22 @@ export const googleMobileAuth = async (req: Request, res: Response, next: NextFu
                 include: { providers: true },
             });
         } else {
+            // Check if account is deleted
+            if (user.deletedAt) {
+                throw new BadRequestError("Account has been deleted");
+            }
+
+            // If account is deactivated, reactivate it automatically
+            if (!user.isActive) {
+                await prisma.user.update({
+                    where: { id: user.id },
+                    data: { isActive: true },
+                });
+                wasReactivated = true;
+                // Update local user state
+                user.isActive = true;
+            }
+
             // User exists - check if Google provider is linked
             const googleProvider = user.providers.find((p) => p.provider === "GOOGLE");
 
@@ -234,6 +255,13 @@ export const googleMobileAuth = async (req: Request, res: Response, next: NextFu
             data: { lastLoginAt: new Date() },
         });
 
+        // Check if user has a password set (OAuth-only users won't have one)
+        const userWithPassword = await prisma.user.findUnique({
+            where: { id: user.id },
+            select: { password: true },
+        });
+        const hasPassword = !!userWithPassword?.password;
+
         // Return JSON response for mobile apps
         res.json({
             success: true,
@@ -249,8 +277,13 @@ export const googleMobileAuth = async (req: Request, res: Response, next: NextFu
                 verified: user.verified,
                 onboardingCompleted: user.onboardingCompleted,
                 twoFactorEnabled: user.twoFactorEnabled,
+                hasPassword: hasPassword,
             },
             requiresOnboarding: !user.onboardingCompleted,
+            accountReactivated: wasReactivated,
+            message: wasReactivated
+                ? "Account reactivated successfully. Welcome back!"
+                : undefined,
         });
     } catch (err) {
         next(err);

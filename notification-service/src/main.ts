@@ -3,6 +3,7 @@ import cors from "cors";
 import dotenv from "dotenv";
 import notificationsRouter from "./routes/notifications.route";
 import { errorHandler } from "./middleware/errorHandler";
+import prisma from "./libs/prisma";
 
 dotenv.config();
 
@@ -32,6 +33,32 @@ app.use(errorHandler);
 
 const PORT = process.env.PORT || 6003;
 
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
     console.log(`notification service is running on port ${PORT}`);
 });
+
+// Graceful shutdown
+const gracefulShutdown = async (signal: string) => {
+    console.log(`\n${signal} received. Starting graceful shutdown...`);
+    
+    // Stop accepting new connections
+    server.close(async () => {
+        console.log('HTTP server closed');
+        
+        // Disconnect Prisma
+        await prisma.$disconnect();
+        console.log('Database connection closed');
+        
+        process.exit(0);
+    });
+    
+    // Force shutdown after 10 seconds
+    setTimeout(() => {
+        console.error('Forced shutdown after timeout');
+        process.exit(1);
+    }, 10000);
+};
+
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+

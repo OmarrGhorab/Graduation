@@ -63,12 +63,20 @@ export const uploadProfileImageEndpoint = async (req: Request, res: Response, ne
         name: true,
         email: true,
         profileImg: true,
+        password: true, // Need to check if password exists
       },
     });
 
+    // Add hasPassword field and remove the actual password from response
+    const hasPassword = !!updatedUser.password;
+    const { password, ...userWithoutPassword } = updatedUser;
+
     res.status(200).json({
       message: "Profile image updated successfully",
-      user: updatedUser,
+      user: {
+        ...userWithoutPassword,
+        hasPassword,
+      },
     });
   } catch (err) {
     next(err);
@@ -153,29 +161,38 @@ export const updateProfile = async (req: Request, res: Response, next: NextFunct
 
     // Update password if provided
     if (password !== undefined && password.trim() !== "") {
-      if (!currentPassword) {
-        throw new BadRequestError("Current password is required to change password");
-      }
-
       // Check if user has a password (OAuth users don't have passwords)
       if (!currentUser.password) {
-        throw new BadRequestError("Cannot change password for OAuth accounts. Please set a password first.");
-      }
+        // OAuth user setting password for the first time - no current password needed
+        // Validate new password
+        if (password.length < 6) {
+          throw new BadRequestError("Password must be at least 6 characters long");
+        }
 
-      // Verify current password
-      const isPasswordValid = await bcrypt.compare(currentPassword, currentUser.password);
-      if (!isPasswordValid) {
-        throw new BadRequestError("Current password is incorrect");
-      }
+        // Hash new password
+        const hashedPassword = await bcrypt.hash(password, 10);
+        updateData.password = hashedPassword;
+      } else {
+        // User already has a password - require current password to change it
+        if (!currentPassword) {
+          throw new BadRequestError("Current password is required to change password");
+        }
 
-      // Validate new password
-      if (password.length < 6) {
-        throw new BadRequestError("Password must be at least 6 characters long");
-      }
+        // Verify current password
+        const isPasswordValid = await bcrypt.compare(currentPassword, currentUser.password);
+        if (!isPasswordValid) {
+          throw new BadRequestError("Current password is incorrect");
+        }
 
-      // Hash new password
-      const hashedPassword = await bcrypt.hash(password, 10);
-      updateData.password = hashedPassword;
+        // Validate new password
+        if (password.length < 6) {
+          throw new BadRequestError("Password must be at least 6 characters long");
+        }
+
+        // Hash new password
+        const hashedPassword = await bcrypt.hash(password, 10);
+        updateData.password = hashedPassword;
+      }
     }
 
     // Update bio if provided
@@ -261,6 +278,7 @@ export const updateProfile = async (req: Request, res: Response, next: NextFunct
         lastUsernameChange: true,
         bio: true,
         goals: true,
+        password: true, // Need to check if password exists
         interests: {
           include: {
             interest: true,
@@ -269,10 +287,15 @@ export const updateProfile = async (req: Request, res: Response, next: NextFunct
       },
     });
 
+    // Add hasPassword field and remove the actual password from response
+    const hasPassword = !!userWithInterests?.password;
+    const { password: _, ...userWithoutPassword } = userWithInterests || {};
+
     res.status(200).json({
       message: "Profile updated successfully",
       user: {
-        ...userWithInterests,
+        ...userWithoutPassword,
+        hasPassword,
         interests: userWithInterests?.interests.map((ui) => ({
           id: ui.interest.id,
           name: ui.interest.name,
@@ -345,6 +368,7 @@ export const getProfile = async (req: Request, res: Response, next: NextFunction
         newsletterEnabled: true,
         lastUsernameChange: true,
         createdAt: true,
+        password: true, // Need to check if password exists
         interests: {
           include: {
             interest: true,
@@ -375,10 +399,15 @@ export const getProfile = async (req: Request, res: Response, next: NextFunction
       nextUsernameChangeDate.setDate(nextUsernameChangeDate.getDate() + 14);
     }
 
+    // Add hasPassword field and remove the actual password from response
+    const hasPassword = !!user.password;
+    const { password, ...userWithoutPassword } = user;
+
     res.status(200).json({
       user: {
-        ...user,
-        interests: user.interests.map((ui) => ({
+        ...userWithoutPassword,
+        hasPassword,
+        interests: userWithoutPassword.interests.map((ui) => ({
           id: ui.interest.id,
           name: ui.interest.name,
         })),
