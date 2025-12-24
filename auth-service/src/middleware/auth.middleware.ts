@@ -4,6 +4,8 @@ import { UnauthorizedError } from "../utils/errors";
 import { getAccessTokenFromRequest } from "../utils/cookies";
 import { prisma } from "../libs/prisma";
 import { updateSessionActivity } from "../utils/sessions";
+import { getDeviceLocationFromRequest, hasValidLocation } from "./deviceInfo.middleware";
+import { updateSessionLocation } from "../services/location.service";
 
 /**
  * Authentication middleware to verify access token and attach user info to request
@@ -90,6 +92,14 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
       // Log error but don't block request
       console.error("Failed to update session activity:", err);
     });
+
+    // Update session location if valid location headers present (non-blocking)
+    const deviceLocation = getDeviceLocationFromRequest(req);
+    if (hasValidLocation(deviceLocation)) {
+      updateSessionLocation(payload.jti, deviceLocation).catch((err) => {
+        console.error("Failed to update session location:", err);
+      });
+    }
 
     next();
   } catch (err) {

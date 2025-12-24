@@ -13,11 +13,20 @@ export interface DeviceInfo {
   userAgent: string | null;
 }
 
+export interface DeviceLocationData {
+  latitude: number | null;
+  longitude: number | null;
+  accuracy: number | null;
+  address: string | null;
+  timezone: string | null;
+}
+
 // Extend Express Request type
 declare global {
   namespace Express {
     interface Request {
       deviceInfo?: DeviceInfo;
+      deviceLocation?: DeviceLocationData;
     }
   }
 }
@@ -94,6 +103,29 @@ function getHeader(req: Request, name: string): string | null {
 }
 
 /**
+ * Parse float from header value, returns null if invalid
+ */
+function parseFloatHeader(req: Request, name: string): number | null {
+  const value = getHeader(req, name);
+  if (!value) return null;
+  const parsed = parseFloat(value);
+  return isNaN(parsed) ? null : parsed;
+}
+
+/**
+ * Extract GPS location data from request headers
+ */
+function extractLocationData(req: Request): DeviceLocationData {
+  return {
+    latitude: parseFloatHeader(req, "x-device-latitude"),
+    longitude: parseFloatHeader(req, "x-device-longitude"),
+    accuracy: parseFloatHeader(req, "x-device-location-accuracy"),
+    address: getHeader(req, "x-device-location"),
+    timezone: getHeader(req, "x-device-timezone"),
+  };
+}
+
+/**
  * Parse platform from header value
  */
 function parsePlatform(platformHeader: string | null, userAgent: string | null): Platform {
@@ -120,7 +152,7 @@ function parsePlatform(platformHeader: string | null, userAgent: string | null):
 
 /**
  * Middleware to extract device information from request headers
- * Attaches deviceInfo object to req for use in controllers
+ * Attaches deviceInfo and deviceLocation objects to req for use in controllers
  */
 export const extractDeviceInfo = (req: Request, res: Response, next: NextFunction) => {
   const userAgent = req.headers["user-agent"] || null;
@@ -137,6 +169,9 @@ export const extractDeviceInfo = (req: Request, res: Response, next: NextFunctio
     ipAddress: getClientIp(req),
     userAgent,
   };
+
+  // Extract GPS location data
+  req.deviceLocation = extractLocationData(req);
 
   next();
 };
@@ -163,4 +198,21 @@ export function getDeviceInfoFromRequest(req: Request): DeviceInfo {
     ipAddress: getClientIp(req),
     userAgent,
   };
+}
+
+/**
+ * Helper function to get device location from request (for use outside middleware)
+ */
+export function getDeviceLocationFromRequest(req: Request): DeviceLocationData {
+  if (req.deviceLocation) {
+    return req.deviceLocation;
+  }
+  return extractLocationData(req);
+}
+
+/**
+ * Check if location data is valid (has both lat and lng)
+ */
+export function hasValidLocation(location: DeviceLocationData): boolean {
+  return location.latitude !== null && location.longitude !== null;
 }

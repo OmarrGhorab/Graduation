@@ -50,6 +50,7 @@ model User {
   receivedUnlinkRequests UnlinkRequest[]     @relation("ReceivedUnlinkRequests")
   parentLinks            ParentChildLink[]   @relation("ChildLinks")
   childLinks             ParentChildLink[]   @relation("ParentLinks")
+  locationHistory        LocationHistory[]
 
   @@index([username])
   @@index([role])
@@ -187,6 +188,13 @@ model Session {
   userAgent String? // Current user agent from latest request
   location  String? // Geographic location (city/country)
 
+  // GPS Location tracking (from mobile device headers)
+  lastLatitude          Float?    // GPS latitude coordinate
+  lastLongitude         Float?    // GPS longitude coordinate
+  lastLocationAccuracy  Float?    // Accuracy in meters (lower = more precise)
+  lastLocationAddress   String?   // Full reverse-geocoded address
+  lastLocationTimestamp DateTime? // When location was last updated
+
   // Session state
   isActive  Boolean @default(true)
   isRevoked Boolean @default(false)
@@ -206,6 +214,22 @@ model Session {
   @@index([refreshToken])
   @@index([isActive, expiresAt]) // For finding active, non-expired sessions
   @@index([userId, isActive]) // For finding user's active sessions
+}
+
+// Location history for child tracking feature
+model LocationHistory {
+  id        String   @id @default(uuid())
+  userId    String
+  latitude  Float
+  longitude Float
+  accuracy  Float?
+  address   String?
+  timestamp DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([userId, timestamp])
 }
 
 enum UserRole {
