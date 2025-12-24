@@ -1,5 +1,6 @@
 export { errorHandler } from "./errorHandler";
 export { authenticate, requireRole } from "./auth.middleware";
+export { authenticateInternalService } from "./internal-auth.middleware";
 export { 
   extractDeviceInfo, 
   getDeviceInfoFromRequest, 

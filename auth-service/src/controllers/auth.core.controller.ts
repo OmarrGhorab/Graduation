@@ -76,6 +76,7 @@ export const registerUser = async (req: Request, res: Response, next: NextFuncti
                 deviceName: deviceName,
                 platform: sessionDeviceInfo.platform as any,
                 ipAddress: sessionDeviceInfo.ipAddress,
+                userAgent: sessionDeviceInfo.userAgent,
                 isTrusted: true, // New registrations are trusted by default
                 lastLoginAt: new Date(),
             },
@@ -477,8 +478,6 @@ export const logoutUser = async (req: Request, res: Response, next: NextFunction
             },
             select: {
                 id: true,
-                sessionToken: true,
-                refreshToken: true,
             },
         });
 
@@ -486,12 +485,6 @@ export const logoutUser = async (req: Request, res: Response, next: NextFunction
             // Session not found, but still return success (already logged out)
             return res.json({ 
                 message: "Logged out successfully",
-                sessionsDeleted: 0,
-                debug: {
-                    userId,
-                    sessionTokenJti,
-                    sessionFound: false
-                }
             });
         }
 
@@ -500,22 +493,8 @@ export const logoutUser = async (req: Request, res: Response, next: NextFunction
 
         res.json({ 
             message: "Logged out successfully",
-            sessionsDeleted: 1,
-            debug: {
-                userId,
-                sessionId: session.id,
-                sessionFound: true
-            }
         });
     } catch (err) {
-        // Return error details in response for debugging
-        if (err instanceof Error) {
-            return res.status(500).json({
-                error: "Logout failed",
-                message: err.message,
-                stack: process.env.NODE_ENV === "development" ? err.stack : undefined
-            });
-        }
         next(err);
     }
 }

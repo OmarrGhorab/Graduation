@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
-import { UnauthorizedError, BadRequestError, NotFoundError } from '../utils/errors';
+import { UnauthorizedError, BadRequestError, NotFoundError, ForbiddenError } from '../utils/errors';
 
 export const errorHandler = (
   err: Error,
@@ -12,6 +12,14 @@ export const errorHandler = (
   if (err instanceof UnauthorizedError) {
     res.status(401).json({
       error: 'Unauthorized',
+      message: err.message
+    });
+    return;
+  }
+
+  if (err instanceof ForbiddenError) {
+    res.status(403).json({
+      error: 'Forbidden',
       message: err.message
     });
     return;

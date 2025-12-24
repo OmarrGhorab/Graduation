@@ -1,208 +1,431 @@
 import { Request, Response, NextFunction } from "express";
-import { getDeviceLocationFromRequest, hasValidLocation } from "../middleware/deviceInfo.middleware";
-import { 
-  updateSessionLocation, 
-  recordLocationHistory, 
-  getLatestLocation,
-  getLocationHistory,
-  getChildrenLocations 
-} from "../services/location.service";
-import { BadRequestError, UnauthorizedError, ForbiddenError } from "../utils/errors";
 import prisma from "../libs/prisma";
+import { BadRequestError, NotFoundError, UnauthorizedError, ForbiddenError } from "../utils/errors";
 
 /**
- * POST /location/update
- * Update current session location and optionally record to history
+ * Update current user's location
+ * POST /api/v1/location/update
  */
-export async function updateLocation(req: Request, res: Response, next: NextFunction) {
+export const updateLocation = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
   try {
-    const userId = req.user?.id;
-    const sessionToken = req.user?.jti;
-
-    if (!userId || !sessionToken) {
-      throw new UnauthorizedError("Authentication required");
+    if (!req.user) {
+      throw new UnauthorizedError("User not authenticated");
     }
 
-    const location = getDeviceLocationFromRequest(req);
+    const userId = req.user.id;
+    const { latitude, longitude, accuracy, address } = req.body;
 
-    if (!hasValidLocation(location)) {
-      throw new BadRequestError("Valid location data required (latitude and longitude)");
+    if (latitude === undefined || longitude === undefined) {
+      throw new BadRequestError("Latitude and longitude are required");
     }
 
-    // Update session location
-    await updateSessionLocation(sessionToken, location);
-
-    // Optionally record to history (for child tracking)
-    const recordHistory = req.body?.recordHistory === true;
-    if (recordHistory) {
-      await recordLocationHistory(userId, location);
+    if (typeof latitude !== "number" || typeof longitude !== "number") {
+      throw new BadRequestError("Latitude and longitude must be numbers");
     }
 
-    res.json({
-      success: true,
-      message: "Location updated",
+    // Validate coordinate ranges
+    if (latitude < -90 || latitude > 90) {
+      throw new BadRequestError("Latitude must be between -90 and 90");
+    }
+    if (longitude < -180 || longitude > 180) {
+      throw new BadRequestError("Longitude must be between -180 and 180");
+    }
+
+    const location = await prisma.locationHistory.create({
       data: {
+        userId,
+        latitude,
+        longitude,
+        accuracy: accuracy || null,
+        address: address || null,
+      },
+    });
+
+    res.status(201).json({
+      success: true,
+      message: "Location updated successfully",
+      location: {
+        id: location.id,
         latitude: location.latitude,
         longitude: location.longitude,
         accuracy: location.accuracy,
-        timestamp: new Date().toISOString(),
+        address: location.address,
+        timestamp: location.timestamp,
       },
     });
-  } catch (error) {
-    next(error);
+  } catch (err) {
+    next(err);
   }
-}
+};
 
 /**
- * GET /location/me
  * Get current user's latest location
+ * GET /api/v1/location/me
  */
-export async function getMyLocation(req: Request, res: Response, next: NextFunction) {
+export const getMyLocation = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
   try {
-    const userId = req.user?.id;
-
-    if (!userId) {
-      throw new UnauthorizedError("Authentication required");
+    if (!req.user) {
+      throw new UnauthorizedError("User not authenticated");
     }
 
-    const location = await getLatestLocation(userId);
+    const userId = req.user.id;
 
-    res.json({
-      success: true,
-      data: location,
+    const location = await prisma.locationHistory.findFirst({
+      where: { userId },
+      orderBy: { timestamp: "desc" },
     });
-  } catch (error) {
-    next(error);
+
+    if (!location) {
+      return res.status(200).json({
+        location: null,
+        message: "No location data available",
+      });
+    }
+
+    res.status(200).json({
+      location: {
+        id: location.id,
+        latitude: location.latitude,
+        longitude: location.longitude,
+        accuracy: location.accuracy,
+        address: location.address,
+        timestamp: location.timestamp,
+      },
+    });
+  } catch (err) {
+    next(err);
   }
-}
+};
 
 /**
- * GET /location/history
  * Get current user's location history
+ * GET /api/v1/location/history
  */
-export async function getMyLocationHistory(req: Request, res: Response, next: NextFunction) {
+export const getMyLocationHistory = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
   try {
-    const userId = req.user?.id;
-
-    if (!userId) {
-      throw new UnauthorizedError("Authentication required");
+    if (!req.user) {
+      throw new UnauthorizedError("User not authenticated");
     }
 
-    const limit = Math.min(parseInt(req.query.limit as string) || 100, 500);
-    const since = req.query.since ? new Date(req.query.since as string) : undefined;
+    const userId = req.user.id;
+    const { page = "1", limit = "20", from, to } = req.query;
 
-    const history = await getLocationHistory(userId, limit, since);
+    const pageNum = parseInt(page as string, 10);
+    const limitNum = parseInt(limit as string, 10);
 
-    res.json({
-      success: true,
-      data: history,
-      count: history.length,
-    });
-  } catch (error) {
-    next(error);
-  }
-}
-
-/**
- * GET /location/child/:childId
- * Get a linked child's latest location (parent only)
- */
-export async function getChildLocation(req: Request, res: Response, next: NextFunction) {
-  try {
-    const parentId = req.user?.id;
-    const { childId } = req.params;
-
-    if (!parentId) {
-      throw new UnauthorizedError("Authentication required");
+    if (pageNum < 1 || limitNum < 1 || limitNum > 100) {
+      throw new BadRequestError("Invalid pagination parameters");
     }
 
-    // Verify parent-child link exists
-    const link = await prisma.parentChildLink.findUnique({
-      where: {
-        parentId_childId: {
-          parentId,
-          childId,
-        },
+    const skip = (pageNum - 1) * limitNum;
+
+    // Build date filter
+    const dateFilter: any = {};
+    if (from) {
+      dateFilter.gte = new Date(from as string);
+    }
+    if (to) {
+      dateFilter.lte = new Date(to as string);
+    }
+
+    const whereClause: any = { userId };
+    if (Object.keys(dateFilter).length > 0) {
+      whereClause.timestamp = dateFilter;
+    }
+
+    const [locations, total] = await Promise.all([
+      prisma.locationHistory.findMany({
+        where: whereClause,
+        orderBy: { timestamp: "desc" },
+        skip,
+        take: limitNum,
+      }),
+      prisma.locationHistory.count({ where: whereClause }),
+    ]);
+
+    const totalPages = Math.ceil(total / limitNum);
+
+    res.status(200).json({
+      data: locations.map((loc) => ({
+        id: loc.id,
+        latitude: loc.latitude,
+        longitude: loc.longitude,
+        accuracy: loc.accuracy,
+        address: loc.address,
+        timestamp: loc.timestamp,
+      })),
+      pagination: {
+        page: pageNum,
+        limit: limitNum,
+        total,
+        totalPages,
+        hasNext: pageNum < totalPages,
+        hasPrevious: pageNum > 1,
       },
     });
-
-    if (!link) {
-      throw new ForbiddenError("You are not linked to this child");
-    }
-
-    const location = await getLatestLocation(childId);
-
-    res.json({
-      success: true,
-      data: location,
-    });
-  } catch (error) {
-    next(error);
+  } catch (err) {
+    next(err);
   }
-}
+};
+
 
 /**
- * GET /location/child/:childId/history
- * Get a linked child's location history (parent only)
- */
-export async function getChildLocationHistory(req: Request, res: Response, next: NextFunction) {
-  try {
-    const parentId = req.user?.id;
-    const { childId } = req.params;
-
-    if (!parentId) {
-      throw new UnauthorizedError("Authentication required");
-    }
-
-    // Verify parent-child link exists
-    const link = await prisma.parentChildLink.findUnique({
-      where: {
-        parentId_childId: {
-          parentId,
-          childId,
-        },
-      },
-    });
-
-    if (!link) {
-      throw new ForbiddenError("You are not linked to this child");
-    }
-
-    const limit = Math.min(parseInt(req.query.limit as string) || 100, 500);
-    const since = req.query.since ? new Date(req.query.since as string) : undefined;
-
-    const history = await getLocationHistory(childId, limit, since);
-
-    res.json({
-      success: true,
-      data: history,
-      count: history.length,
-    });
-  } catch (error) {
-    next(error);
-  }
-}
-
-/**
- * GET /location/children
  * Get all linked children's latest locations (parent only)
+ * GET /api/v1/location/children
  */
-export async function getAllChildrenLocations(req: Request, res: Response, next: NextFunction) {
+export const getChildrenLocations = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
   try {
-    const parentId = req.user?.id;
-
-    if (!parentId) {
-      throw new UnauthorizedError("Authentication required");
+    if (!req.user) {
+      throw new UnauthorizedError("User not authenticated");
     }
 
-    const children = await getChildrenLocations(parentId);
+    const parentId = req.user.id;
 
-    res.json({
-      success: true,
-      data: children,
-      count: children.length,
+    // Verify user is a parent
+    if (req.user.role !== "PARENT") {
+      throw new ForbiddenError("Only parents can access children's locations");
+    }
+
+    // Get all linked children
+    const links = await prisma.parentChildLink.findMany({
+      where: { parentId },
+      include: {
+        child: {
+          select: {
+            id: true,
+            name: true,
+            username: true,
+            profileImg: true,
+          },
+        },
+      },
     });
-  } catch (error) {
-    next(error);
+
+    if (links.length === 0) {
+      return res.status(200).json({
+        children: [],
+        message: "No linked children found",
+      });
+    }
+
+    // Get latest location for each child
+    const childrenWithLocations = await Promise.all(
+      links.map(async (link) => {
+        const latestLocation = await prisma.locationHistory.findFirst({
+          where: { userId: link.childId },
+          orderBy: { timestamp: "desc" },
+        });
+
+        return {
+          child: link.child,
+          location: latestLocation
+            ? {
+                id: latestLocation.id,
+                latitude: latestLocation.latitude,
+                longitude: latestLocation.longitude,
+                accuracy: latestLocation.accuracy,
+                address: latestLocation.address,
+                timestamp: latestLocation.timestamp,
+              }
+            : null,
+        };
+      })
+    );
+
+    res.status(200).json({
+      children: childrenWithLocations,
+    });
+  } catch (err) {
+    next(err);
   }
-}
+};
+
+/**
+ * Get specific child's latest location (parent only)
+ * GET /api/v1/location/child/:childId
+ */
+export const getChildLocation = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    if (!req.user) {
+      throw new UnauthorizedError("User not authenticated");
+    }
+
+    const parentId = req.user.id;
+    const { childId } = req.params;
+
+    if (!childId) {
+      throw new BadRequestError("Child ID is required");
+    }
+
+    // Verify user is a parent
+    if (req.user.role !== "PARENT") {
+      throw new ForbiddenError("Only parents can access children's locations");
+    }
+
+    // Verify parent-child link exists
+    const link = await prisma.parentChildLink.findFirst({
+      where: { parentId, childId },
+      include: {
+        child: {
+          select: {
+            id: true,
+            name: true,
+            username: true,
+            profileImg: true,
+          },
+        },
+      },
+    });
+
+    if (!link) {
+      throw new ForbiddenError("You are not linked to this child");
+    }
+
+    // Get latest location
+    const location = await prisma.locationHistory.findFirst({
+      where: { userId: childId },
+      orderBy: { timestamp: "desc" },
+    });
+
+    res.status(200).json({
+      child: link.child,
+      location: location
+        ? {
+            id: location.id,
+            latitude: location.latitude,
+            longitude: location.longitude,
+            accuracy: location.accuracy,
+            address: location.address,
+            timestamp: location.timestamp,
+          }
+        : null,
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
+ * Get specific child's location history (parent only)
+ * GET /api/v1/location/child/:childId/history
+ */
+export const getChildLocationHistory = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    if (!req.user) {
+      throw new UnauthorizedError("User not authenticated");
+    }
+
+    const parentId = req.user.id;
+    const { childId } = req.params;
+    const { page = "1", limit = "20", from, to } = req.query;
+
+    if (!childId) {
+      throw new BadRequestError("Child ID is required");
+    }
+
+    // Verify user is a parent
+    if (req.user.role !== "PARENT") {
+      throw new ForbiddenError("Only parents can access children's locations");
+    }
+
+    // Verify parent-child link exists
+    const link = await prisma.parentChildLink.findFirst({
+      where: { parentId, childId },
+      include: {
+        child: {
+          select: {
+            id: true,
+            name: true,
+            username: true,
+            profileImg: true,
+          },
+        },
+      },
+    });
+
+    if (!link) {
+      throw new ForbiddenError("You are not linked to this child");
+    }
+
+    const pageNum = parseInt(page as string, 10);
+    const limitNum = parseInt(limit as string, 10);
+
+    if (pageNum < 1 || limitNum < 1 || limitNum > 100) {
+      throw new BadRequestError("Invalid pagination parameters");
+    }
+
+    const skip = (pageNum - 1) * limitNum;
+
+    // Build date filter
+    const dateFilter: any = {};
+    if (from) {
+      dateFilter.gte = new Date(from as string);
+    }
+    if (to) {
+      dateFilter.lte = new Date(to as string);
+    }
+
+    const whereClause: any = { userId: childId };
+    if (Object.keys(dateFilter).length > 0) {
+      whereClause.timestamp = dateFilter;
+    }
+
+    const [locations, total] = await Promise.all([
+      prisma.locationHistory.findMany({
+        where: whereClause,
+        orderBy: { timestamp: "desc" },
+        skip,
+        take: limitNum,
+      }),
+      prisma.locationHistory.count({ where: whereClause }),
+    ]);
+
+    const totalPages = Math.ceil(total / limitNum);
+
+    res.status(200).json({
+      child: link.child,
+      data: locations.map((loc) => ({
+        id: loc.id,
+        latitude: loc.latitude,
+        longitude: loc.longitude,
+        accuracy: loc.accuracy,
+        address: loc.address,
+        timestamp: loc.timestamp,
+      })),
+      pagination: {
+        page: pageNum,
+        limit: limitNum,
+        total,
+        totalPages,
+        hasNext: pageNum < totalPages,
+        hasPrevious: pageNum > 1,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+};

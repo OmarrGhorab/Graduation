@@ -77,7 +77,6 @@ model UserDevice {
   userAgent         String?
   platform          Platform?
   isTrusted         Boolean   @default(false)
-  pushToken         String? // for notifications
   lastLoginAt       DateTime?
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt

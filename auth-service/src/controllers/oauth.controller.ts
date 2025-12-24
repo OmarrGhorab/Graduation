@@ -210,11 +210,13 @@ export const googleMobileAuth = async (req: Request, res: Response, next: NextFu
         
         if (existingDevice) {
             deviceId = existingDevice.id;
-            // Update device last login and name if provided
+            // Update device last login and info
             await prisma.userDevice.update({
                 where: { id: existingDevice.id },
                 data: {
                     lastLoginAt: new Date(),
+                    ipAddress: sessionDeviceInfo.ipAddress,
+                    userAgent: sessionDeviceInfo.userAgent,
                     ...(sessionDeviceInfo.deviceName && { deviceName: sessionDeviceInfo.deviceName }),
                     ...(sessionDeviceInfo.platform && { platform: sessionDeviceInfo.platform as any }),
                 },
@@ -229,6 +231,7 @@ export const googleMobileAuth = async (req: Request, res: Response, next: NextFu
                     deviceName: deviceName,
                     platform: sessionDeviceInfo.platform as any || deviceInfo.platform,
                     ipAddress: sessionDeviceInfo.ipAddress,
+                    userAgent: sessionDeviceInfo.userAgent,
                     isTrusted: true, // Google OAuth users are trusted by default
                     lastLoginAt: new Date(),
                 },

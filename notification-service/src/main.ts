@@ -2,6 +2,7 @@ import express, { Request, Response } from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import notificationsRouter from "./routes/notifications.route";
+import locationRouter from "./routes/location.route";
 import { errorHandler } from "./middleware/errorHandler";
 import prisma from "./libs/prisma";
 
@@ -27,6 +28,7 @@ app.get("/", async (req: Request, res: Response) => {
 });
 
 app.use("/api/v1/notifications", notificationsRouter);
+app.use("/api/v1/location", locationRouter);
 
 // Error handler last
 app.use(errorHandler);

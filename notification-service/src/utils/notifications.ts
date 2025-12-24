@@ -4,6 +4,52 @@ import admin from "../libs/firebase";
 import { getUserFcmTokens, getUserFcmTokensWithPlatform } from "./fcm-tokens";
 
 /**
+ * Send a silent push notification to a specific device
+ * Used for background data sync like location requests
+ */
+export async function sendSilentPushNotification(
+  token: string,
+  platform: string | null,
+  data: Record<string, string>
+): Promise<void> {
+  if (!messaging) {
+    console.warn("[FCM] FCM not available, skipping silent push notification");
+    throw new Error("Push notifications are not configured");
+  }
+
+  try {
+    const message: admin.messaging.Message = {
+      token,
+      data,
+      // Android configuration for silent/data-only notification
+      android: {
+        priority: "high",
+        // No notification field = silent/data-only message
+      },
+      // iOS configuration for silent notification
+      apns: {
+        payload: {
+          aps: {
+            "content-available": 1, // Silent notification flag
+            // No alert, sound, or badge = silent
+          },
+        },
+        headers: {
+          "apns-priority": "10", // High priority for immediate delivery
+          "apns-push-type": "background", // Background push type
+        },
+      },
+    };
+
+    const response = await messaging.send(message);
+    console.log(`[FCM] Silent push notification sent successfully: ${response}`);
+  } catch (error) {
+    console.error("[FCM] Error sending silent push notification:", error);
+    throw error;
+  }
+}
+
+/**
  * Publish a notification to a user via FCM push notification and save to database
  */
 export async function publishNotification(

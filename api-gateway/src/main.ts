@@ -99,7 +99,12 @@ app.use("/api/v1/notifications", proxy("http://localhost:6003", {
     proxyReqPathResolver: (req) => req.originalUrl
 }));
 
-// Auth service proxy (everything else)
+// Location request endpoint goes to notification service (for silent push)
+app.use("/api/v1/location/request", proxy("http://localhost:6003", {
+    proxyReqPathResolver: (req) => req.originalUrl
+}));
+
+// Auth service proxy (everything else including /api/v1/location/*)
 app.use("/", proxy("http://localhost:6001"));
 
 const PORT = process.env.PORT || 3000;

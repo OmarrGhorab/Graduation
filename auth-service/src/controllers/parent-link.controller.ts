@@ -21,6 +21,39 @@ import {
 } from "../services/parentLink.service";
 
 /**
+ * Verify if a parent-child link exists (internal service endpoint)
+ */
+export const verifyParentChildLink = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const { parentId, childId } = req.query;
+
+    if (!parentId || !childId) {
+      throw new BadRequestError("parentId and childId are required");
+    }
+
+    const link = await prisma.parentChildLink.findFirst({
+      where: {
+        parentId: parentId as string,
+        childId: childId as string,
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    res.status(200).json({
+      linked: !!link,
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
  * Search for parents by username or email (paginated)
  * Only returns users with PARENT role
  */
