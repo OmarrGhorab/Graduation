@@ -49,6 +49,54 @@ export async function publishNotification(
 }
 
 /**
+ * Update existing notifications via the notification service API
+ * Used to update notification status when a request is accepted/declined
+ */
+export async function updateNotifications(
+  userId: string,
+  type: string,
+  matchCriteria: Record<string, any>,
+  updates: {
+    newType?: string;
+    dataUpdates?: Record<string, any>;
+  }
+): Promise<void> {
+  const startTime = Date.now();
+  try {
+    if (!process.env.INTERNAL_SERVICE_SECRET) {
+      console.warn(`[Notification Client] INTERNAL_SERVICE_SECRET not configured`);
+    }
+
+    const response = await fetch(`${NOTIFICATION_SERVICE_URL}/api/v1/notifications/update`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(process.env.INTERNAL_SERVICE_SECRET && {
+          'x-internal-secret': process.env.INTERNAL_SERVICE_SECRET,
+        }),
+      },
+      body: JSON.stringify({
+        userId,
+        type,
+        matchCriteria,
+        ...updates,
+      }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => response.statusText);
+      throw new Error(`Failed to update notifications: ${response.status} ${errorText}`);
+    }
+
+    const duration = Date.now() - startTime;
+    console.log(`[Notification Client] Updated notifications for user ${userId}, type: ${type}, duration: ${duration}ms`);
+  } catch (error) {
+    const duration = Date.now() - startTime;
+    console.error(`[Notification Client] Error updating notifications for user ${userId}:`, error);
+  }
+}
+
+/**
  * Get notification channel name for a user (kept for compatibility)
  * Note: This is no longer used for direct Redis access but kept for reference
  */

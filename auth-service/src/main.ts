@@ -8,6 +8,7 @@ import onboardingRouter from "./routes/onboarding.route";
 import parentLinkRouter from "./routes/parent-link.route";
 import profileRouter from "./routes/profile.route";
 import locationRouter from "./routes/location.route";
+import internalRouter from "./routes/internal.route";
 import { errorHandler } from "./middleware/errorHandler";
 import { extractDeviceInfo } from "./middleware/deviceInfo.middleware";
 
@@ -54,6 +55,7 @@ app.use("/api/v1/onboarding", onboardingRouter);
 app.use("/api/v1/parent-link", parentLinkRouter);
 app.use("/api/v1/profile", profileRouter);
 app.use("/api/v1/location", locationRouter);
+app.use("/api/v1/internal", internalRouter);
 // Error handler last
 app.use(errorHandler);
 
