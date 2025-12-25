@@ -64,7 +64,7 @@ export const deactivateAccount = async (req: Request, res: Response, next: NextF
 
 /**
  * Delete user account (soft delete)
- * Requires password confirmation for security
+ * Requires password confirmation for security (unless OAuth-only account)
  */
 export const deleteAccount = async (req: Request, res: Response, next: NextFunction) => {
     try {
@@ -73,10 +73,6 @@ export const deleteAccount = async (req: Request, res: Response, next: NextFunct
 
         if (!userId) {
             throw new UnauthorizedError("Authentication required");
-        }
-
-        if (!password) {
-            throw new BadRequestError("Password confirmation is required");
         }
 
         // Get user with password to verify
@@ -100,15 +96,18 @@ export const deleteAccount = async (req: Request, res: Response, next: NextFunct
             });
         }
 
-        // Verify password
-        if (!user.password) {
-            throw new BadRequestError("Password verification not available for this account");
-        }
+        // If user has a password, require password confirmation
+        if (user.password) {
+            if (!password) {
+                throw new BadRequestError("Password confirmation is required");
+            }
 
-        const passwordValid = await bcrypt.compare(password, user.password);
-        if (!passwordValid) {
-            throw new UnauthorizedError("Invalid password");
+            const passwordValid = await bcrypt.compare(password, user.password);
+            if (!passwordValid) {
+                throw new UnauthorizedError("Invalid password");
+            }
         }
+        // If user has no password (OAuth-only account), allow deletion without password
 
         // Revoke all refresh tokens
         await revokeAllUserRefreshTokens(userId);
