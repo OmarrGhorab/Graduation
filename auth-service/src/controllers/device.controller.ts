@@ -125,6 +125,7 @@ export const verifyDevice = async (req: Request, res: Response, next: NextFuncti
                 message: "Device verified successfully. 2FA verification required.",
                 deviceVerified: true,
                 requires2FA: true,
+                accessToken: tempAccessToken,
                 emailOrUsername: emailOrUsername,
             });
         }
@@ -169,7 +170,10 @@ export const verifyDevice = async (req: Request, res: Response, next: NextFuncti
                 onboardingCompleted: user.onboardingCompleted,
                 role: user.role,
                 profileImg: user.profileImg,
+                twoFactorEnabled: user.twoFactorEnabled,
             },
+            accessToken,
+            refreshToken,
             requiresOnboarding: !user.onboardingCompleted,
         });
     } catch (err) {
