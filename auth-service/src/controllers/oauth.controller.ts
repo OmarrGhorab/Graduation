@@ -5,6 +5,9 @@ import { signAccessToken, signAndStoreRefreshToken } from "../utils/tokens";
 import { generateUniqueUsername } from "../utils/username";
 import { extractDeviceInfo, extractDeviceName } from "../utils/device";
 import { createSession, getSessionDeviceInfo } from "../utils/sessions";
+import { createAndStoreOtp } from "../utils/otp";
+import { sendDeviceVerificationOTP } from "../utils/email";
+import { getUserLanguage } from "../utils/userLanguage";
 import { OAuth2Client } from "google-auth-library";
 import dotenv from "dotenv";
 
@@ -183,23 +186,13 @@ export const googleMobileAuth = async (req: Request, res: Response, next: NextFu
             });
         }
 
-        // Issue tokens
-        const { token: accessToken, jti: accessJti } = signAccessToken({ id: user.id, role: user.role });
-        const { token: refreshToken, jti: refreshJti } = await signAndStoreRefreshToken(user.id);
-        
-        // Create session record in database
-        const sessionDeviceInfo = await getSessionDeviceInfo(req);
-        const expiresAt = new Date();
-        expiresAt.setSeconds(expiresAt.getSeconds() + parseInt(process.env.ACCESS_TOKEN_TTL_SEC || "900", 10));
-        const refreshExpiresAt = new Date();
-        refreshExpiresAt.setSeconds(refreshExpiresAt.getSeconds() + parseInt(process.env.REFRESH_TOKEN_TTL_SEC || "2592000", 10));
-        
-        // Extract device info and find or create device
+        // Extract device info
         const deviceInfo = extractDeviceInfo(req);
-        let deviceId: string | null = null;
+        const sessionDeviceInfo = await getSessionDeviceInfo(req);
+        const deviceName = sessionDeviceInfo.deviceName || extractDeviceName(deviceInfo.userAgent);
         
         // Try to find existing device
-        const existingDevice = await prisma.userDevice.findUnique({
+        let existingDevice = await prisma.userDevice.findUnique({
             where: {
                 userId_deviceFingerprint: {
                     userId: user.id,
@@ -207,37 +200,153 @@ export const googleMobileAuth = async (req: Request, res: Response, next: NextFu
                 },
             },
         });
-        
-        if (existingDevice) {
-            deviceId = existingDevice.id;
-            // Update device last login and info
-            await prisma.userDevice.update({
+
+        // Handle device tracking and blocking for new devices
+        if (!existingDevice) {
+            // New device - check device limit
+            const userDevices = await prisma.userDevice.findMany({
+                where: { userId: user.id },
+                orderBy: { lastLoginAt: "desc" },
+            });
+
+            // If user has 2 or more devices, block account and require verification
+            if (userDevices.length >= 2) {
+                // Block account and store pending device fingerprint
+                await prisma.user.update({
+                    where: { id: user.id },
+                    data: {
+                        deviceBlocked: true,
+                        pendingDeviceFingerprint: deviceInfo.fingerprint,
+                    },
+                });
+
+                // Create new device (not trusted)
+                existingDevice = await prisma.userDevice.create({
+                    data: {
+                        userId: user.id,
+                        deviceFingerprint: deviceInfo.fingerprint,
+                        deviceName: deviceName,
+                        userAgent: deviceInfo.userAgent,
+                        ipAddress: sessionDeviceInfo.ipAddress,
+                        platform: sessionDeviceInfo.platform as any || deviceInfo.platform,
+                        lastLoginAt: null,
+                        isTrusted: false,
+                    },
+                });
+
+                // Create device verification OTP
+                const otp = await createAndStoreOtp(`device:${user.id}:${deviceInfo.fingerprint}`);
+                const userLanguage = await getUserLanguage(user.id);
+                sendDeviceVerificationOTP(user.email, otp, user.name, userLanguage).catch(console.error);
+
+                return res.status(403).json({
+                    success: false,
+                    error: "New device detected",
+                    message: wasReactivated
+                        ? "Account reactivated. A new device has been detected. Your account has been blocked until device verification is completed. Please check your email for verification code."
+                        : "A new device has been detected. Your account has been blocked until device verification is completed. Please check your email for verification code.",
+                    deviceBlocked: true,
+                    requiresDeviceVerification: true,
+                    deviceFingerprint: deviceInfo.fingerprint,
+                    emailOrUsername: user.email,
+                    accountReactivated: wasReactivated,
+                    otp: process.env.NODE_ENV === "production" ? undefined : otp,
+                });
+            }
+
+            // User has less than 2 devices, create new device (trusted)
+            existingDevice = await prisma.userDevice.create({
+                data: {
+                    userId: user.id,
+                    deviceFingerprint: deviceInfo.fingerprint,
+                    deviceName: deviceName,
+                    userAgent: deviceInfo.userAgent,
+                    ipAddress: sessionDeviceInfo.ipAddress,
+                    platform: sessionDeviceInfo.platform as any || deviceInfo.platform,
+                    lastLoginAt: new Date(),
+                    isTrusted: true,
+                },
+            });
+        } else {
+            // Device exists, update last login and info
+            existingDevice = await prisma.userDevice.update({
                 where: { id: existingDevice.id },
                 data: {
                     lastLoginAt: new Date(),
                     ipAddress: sessionDeviceInfo.ipAddress,
                     userAgent: sessionDeviceInfo.userAgent,
-                    ...(sessionDeviceInfo.deviceName && { deviceName: sessionDeviceInfo.deviceName }),
-                    ...(sessionDeviceInfo.platform && { platform: sessionDeviceInfo.platform as any }),
-                },
-            });
-        } else {
-            // Create new device - use device name from headers if available
-            const deviceName = sessionDeviceInfo.deviceName || extractDeviceName(deviceInfo.userAgent);
-            const newDevice = await prisma.userDevice.create({
-                data: {
-                    userId: user.id,
-                    deviceFingerprint: deviceInfo.fingerprint,
-                    deviceName: deviceName,
                     platform: sessionDeviceInfo.platform as any || deviceInfo.platform,
-                    ipAddress: sessionDeviceInfo.ipAddress,
-                    userAgent: sessionDeviceInfo.userAgent,
-                    isTrusted: true, // Google OAuth users are trusted by default
-                    lastLoginAt: new Date(),
                 },
             });
-            deviceId = newDevice.id;
+
+            // If account is blocked for this device and device is not trusted, require verification
+            const currentUser = await prisma.user.findUnique({
+                where: { id: user.id },
+                select: { deviceBlocked: true, pendingDeviceFingerprint: true },
+            });
+
+            if (currentUser?.deviceBlocked && currentUser.pendingDeviceFingerprint === deviceInfo.fingerprint && !existingDevice.isTrusted) {
+                const otp = await createAndStoreOtp(`device:${user.id}:${deviceInfo.fingerprint}`);
+                const userLanguage = await getUserLanguage(user.id);
+                sendDeviceVerificationOTP(user.email, otp, user.name, userLanguage).catch(console.error);
+
+                return res.status(403).json({
+                    success: false,
+                    error: "Device verification required",
+                    message: wasReactivated
+                        ? "Account reactivated. This device needs to be verified. Please check your email for verification code."
+                        : "This device needs to be verified. Please check your email for verification code.",
+                    deviceBlocked: true,
+                    requiresDeviceVerification: true,
+                    deviceFingerprint: deviceInfo.fingerprint,
+                    emailOrUsername: user.email,
+                    accountReactivated: wasReactivated,
+                    otp: process.env.NODE_ENV === "production" ? undefined : otp,
+                });
+            }
+
+            // If account is blocked but this device is trusted, unblock account
+            if (currentUser?.deviceBlocked && existingDevice.isTrusted) {
+                await prisma.user.update({
+                    where: { id: user.id },
+                    data: {
+                        deviceBlocked: false,
+                        pendingDeviceFingerprint: null,
+                    },
+                });
+            }
         }
+
+        // If account is blocked and this is not the pending device, block login
+        const finalUserState = await prisma.user.findUnique({
+            where: { id: user.id },
+            select: { deviceBlocked: true, pendingDeviceFingerprint: true },
+        });
+
+        if (finalUserState?.deviceBlocked && finalUserState.pendingDeviceFingerprint !== deviceInfo.fingerprint) {
+            return res.status(403).json({
+                success: false,
+                error: "Account blocked",
+                message: wasReactivated
+                    ? "Account reactivated. Your account has been blocked due to a new device login. Please verify the pending device first."
+                    : "Your account has been blocked due to a new device login. Please verify the pending device first.",
+                deviceBlocked: true,
+                requiresDeviceVerification: true,
+                accountReactivated: wasReactivated,
+            });
+        }
+
+        // Issue tokens
+        const { token: accessToken, jti: accessJti } = signAccessToken({ id: user.id, role: user.role });
+        const { token: refreshToken, jti: refreshJti } = await signAndStoreRefreshToken(user.id);
+        
+        // Create session record in database
+        const expiresAt = new Date();
+        expiresAt.setSeconds(expiresAt.getSeconds() + parseInt(process.env.ACCESS_TOKEN_TTL_SEC || "900", 10));
+        const refreshExpiresAt = new Date();
+        refreshExpiresAt.setSeconds(refreshExpiresAt.getSeconds() + parseInt(process.env.REFRESH_TOKEN_TTL_SEC || "2592000", 10));
+        
+        const deviceId = existingDevice.id;
         
         // Create session
         await createSession({
