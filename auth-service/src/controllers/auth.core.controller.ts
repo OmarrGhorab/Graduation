@@ -162,31 +162,26 @@ export const loginUser = async (req: Request, res: Response, next: NextFunction)
         const ok = await bcrypt.compare(password, user.password);
         if (!ok) throw new UnauthorizedError("Invalid credentials");
 
-        // Track if account was reactivated during login
-        let wasReactivated = false;
-
-        // If account is deactivated but password is correct, reactivate it automatically
+        // Check if account is deactivated - require confirmation to reactivate
         if (!user.isActive) {
-            await prisma.user.update({
-                where: { id: user.id },
-                data: { isActive: true },
+            // Issue temporary token for reactivation confirmation (short-lived)
+            const { token: tempToken } = signAccessToken({ 
+                id: user.id, 
+                role: user.role
             });
-            wasReactivated = true;
-            // Update user object for rest of login flow
-            user.isActive = true;
+
+            return res.status(403).json({
+                error: "Account deactivated",
+                message: "Your account is deactivated. Would you like to reactivate it?",
+                accountDeactivated: true,
+                requiresReactivation: true,
+                tempToken: tempToken,
+            });
         }
 
         //  Unverified users: block login
         if (!user.verified) {
-            return res.status(403).json({
-                error: "Account not verified",
-                message: wasReactivated
-                    ? "Account reactivated. Please verify your account before logging in. Check your email for the verification OTP."
-                    : "Please verify your account before logging in. Check your email for the verification OTP.",
-                verified: false,
-                requiresVerification: true,
-                accountReactivated: wasReactivated,
-            });
+            throw new UnauthorizedError("Please verify your email before logging in");
         }
 
         // Extract device information
@@ -247,13 +242,10 @@ export const loginUser = async (req: Request, res: Response, next: NextFunction)
 
                 return res.status(403).json({
                     error: "New device detected",
-                    message: wasReactivated
-                        ? "Account reactivated. A new device has been detected. Your account has been blocked until device verification is completed. Please check your email for verification code."
-                        : "A new device has been detected. Your account has been blocked until device verification is completed. Please check your email for verification code.",
+                    message: "A new device has been detected. Your account has been blocked until device verification is completed. Please check your email for verification code.",
                     deviceBlocked: true,
                     requiresDeviceVerification: true,
                     deviceFingerprint: deviceInfo.fingerprint,
-                    accountReactivated: wasReactivated,
                     // Expose OTP in non-production for testing
                     otp: process.env.NODE_ENV === "production" ? undefined : otp,
                 });
@@ -291,13 +283,10 @@ export const loginUser = async (req: Request, res: Response, next: NextFunction)
                 const otp = await createAndStoreOtp(`device:${user.id}:${deviceInfo.fingerprint}`);
                 return res.status(403).json({
                     error: "Device verification required",
-                    message: wasReactivated
-                        ? "Account reactivated. This device needs to be verified. Please check your email for verification code."
-                        : "This device needs to be verified. Please check your email for verification code.",
+                    message: "This device needs to be verified. Please check your email for verification code.",
                     deviceBlocked: true,
                     requiresDeviceVerification: true,
                     deviceFingerprint: deviceInfo.fingerprint,
-                    accountReactivated: wasReactivated,
                     otp: process.env.NODE_ENV === "production" ? undefined : otp,
                 });
             }
@@ -321,12 +310,9 @@ export const loginUser = async (req: Request, res: Response, next: NextFunction)
         if (user.deviceBlocked && user.pendingDeviceFingerprint !== deviceInfo.fingerprint) {
             return res.status(403).json({
                 error: "Account blocked",
-                message: wasReactivated
-                    ? "Account reactivated. Your account has been blocked due to a new device login. Please verify the pending device first."
-                    : "Your account has been blocked due to a new device login. Please verify the pending device first.",
+                message: "Your account has been blocked due to a new device login. Please verify the pending device first.",
                 deviceBlocked: true,
                 requiresDeviceVerification: true,
-                accountReactivated: wasReactivated,
             });
         }
 
@@ -381,11 +367,8 @@ export const loginUser = async (req: Request, res: Response, next: NextFunction)
 
             return res.status(200).json({
                 accessToken: tempAccessToken,
-                message: wasReactivated
-                    ? "Account reactivated. 2FA verification required"
-                    : "2FA verification required",
+                message: "2FA verification required",
                 requires2FA: true,
-                accountReactivated: wasReactivated,
             });
         }
 
@@ -451,10 +434,6 @@ export const loginUser = async (req: Request, res: Response, next: NextFunction)
             accessToken,
             refreshToken,
             requiresOnboarding: !user.onboardingCompleted,
-            accountReactivated: wasReactivated,
-            message: wasReactivated
-                ? "Account reactivated successfully. Welcome back!"
-                : undefined,
         });
     } catch (err) {
         next(err);
@@ -493,11 +472,12 @@ export const logoutUser = async (req: Request, res: Response, next: NextFunction
 
         res.json({ 
             message: "Logged out successfully",
+            sessionsDeleted: 1
         });
     } catch (err) {
         next(err);
     }
-}
+};
 
 export const refreshToken = async (req: Request, res: Response, next: NextFunction) => {
     try {

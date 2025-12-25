@@ -1,7 +1,6 @@
 import { Router } from "express";
-import { forgotPassword, loginUser, logoutUser, registerUser, resetPassword, verifyEmailOtp, resendVerificationOtp, googleMobileAuth, refreshToken, verifyDevice, resendDeviceVerificationOtp } from "../controllers/auth.controller";
-import { getMyProfile } from "../controllers/auth.core.controller";
-import { authenticate } from "../middleware";
+import { forgotPassword, loginUser, logoutUser, registerUser, resetPassword, verifyEmailOtp, resendVerificationOtp, googleMobileAuth, refreshToken, verifyDevice, resendDeviceVerificationOtp, getMyProfile } from "../controllers/auth.controller";
+import { authenticate, authenticateDeactivated } from "../middleware";
 import {
   enable2FA,
   verify2FASetup,
@@ -14,6 +13,7 @@ import {
   deactivateAccount,
   deleteAccount,
   deleteProfileImage,
+  confirmReactivation,
 } from "../controllers/account.controller";
 import { getActivity } from "../controllers/activity.controller";
 import {
@@ -60,6 +60,7 @@ router.post("/2fa/regenerate-backup-codes", authenticate, regenerateBackupCodes)
 
 // Account management (Danger Zone)
 router.post("/account/deactivate", authenticate, deactivateAccount);
+router.post("/account/confirm-reactivation", authenticateDeactivated, confirmReactivation);
 router.post("/account/delete", authenticate, deleteAccount);
 router.delete("/account/profile-image", authenticate, deleteProfileImage);
 

@@ -7,6 +7,7 @@ export {
     loginUser,
     logoutUser,
     refreshToken,
+    getMyProfile,
 } from "./auth.core.controller";
 
 // Password management controllers

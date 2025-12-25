@@ -80,9 +80,6 @@ export const googleMobileAuth = async (req: Request, res: Response, next: NextFu
             },
         });
 
-        // Track if account was reactivated
-        let wasReactivated = false;
-
         // If user doesn't exist, create new user
         if (!user) {
             // Generate unique username from name or email
@@ -115,15 +112,22 @@ export const googleMobileAuth = async (req: Request, res: Response, next: NextFu
                 throw new BadRequestError("Account has been deleted");
             }
 
-            // If account is deactivated, reactivate it automatically
+            // Check if account is deactivated - require confirmation to reactivate
             if (!user.isActive) {
-                await prisma.user.update({
-                    where: { id: user.id },
-                    data: { isActive: true },
+                // Issue temporary token for reactivation confirmation (short-lived)
+                const { token: tempToken } = signAccessToken({ 
+                    id: user.id, 
+                    role: user.role
                 });
-                wasReactivated = true;
-                // Update local user state
-                user.isActive = true;
+
+                return res.status(403).json({
+                    success: false,
+                    error: "Account deactivated",
+                    message: "Your account is deactivated. Would you like to reactivate it?",
+                    accountDeactivated: true,
+                    requiresReactivation: true,
+                    tempToken: tempToken,
+                });
             }
 
             // User exists - check if Google provider is linked
@@ -242,14 +246,11 @@ export const googleMobileAuth = async (req: Request, res: Response, next: NextFu
                 return res.status(403).json({
                     success: false,
                     error: "New device detected",
-                    message: wasReactivated
-                        ? "Account reactivated. A new device has been detected. Your account has been blocked until device verification is completed. Please check your email for verification code."
-                        : "A new device has been detected. Your account has been blocked until device verification is completed. Please check your email for verification code.",
+                    message: "A new device has been detected. Your account has been blocked until device verification is completed. Please check your email for verification code.",
                     deviceBlocked: true,
                     requiresDeviceVerification: true,
                     deviceFingerprint: deviceInfo.fingerprint,
                     emailOrUsername: user.email,
-                    accountReactivated: wasReactivated,
                     otp: process.env.NODE_ENV === "production" ? undefined : otp,
                 });
             }
@@ -293,14 +294,11 @@ export const googleMobileAuth = async (req: Request, res: Response, next: NextFu
                 return res.status(403).json({
                     success: false,
                     error: "Device verification required",
-                    message: wasReactivated
-                        ? "Account reactivated. This device needs to be verified. Please check your email for verification code."
-                        : "This device needs to be verified. Please check your email for verification code.",
+                    message: "This device needs to be verified. Please check your email for verification code.",
                     deviceBlocked: true,
                     requiresDeviceVerification: true,
                     deviceFingerprint: deviceInfo.fingerprint,
                     emailOrUsername: user.email,
-                    accountReactivated: wasReactivated,
                     otp: process.env.NODE_ENV === "production" ? undefined : otp,
                 });
             }
@@ -327,12 +325,9 @@ export const googleMobileAuth = async (req: Request, res: Response, next: NextFu
             return res.status(403).json({
                 success: false,
                 error: "Account blocked",
-                message: wasReactivated
-                    ? "Account reactivated. Your account has been blocked due to a new device login. Please verify the pending device first."
-                    : "Your account has been blocked due to a new device login. Please verify the pending device first.",
+                message: "Your account has been blocked due to a new device login. Please verify the pending device first.",
                 deviceBlocked: true,
                 requiresDeviceVerification: true,
-                accountReactivated: wasReactivated,
             });
         }
 
@@ -390,12 +385,9 @@ export const googleMobileAuth = async (req: Request, res: Response, next: NextFu
                 onboardingCompleted: user.onboardingCompleted,
                 twoFactorEnabled: user.twoFactorEnabled,
                 hasPassword: hasPassword,
+                isActive: user.isActive,
             },
             requiresOnboarding: !user.onboardingCompleted,
-            accountReactivated: wasReactivated,
-            message: wasReactivated
-                ? "Account reactivated successfully. Welcome back!"
-                : undefined,
         });
     } catch (err) {
         next(err);
