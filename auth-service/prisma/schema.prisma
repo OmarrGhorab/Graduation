@@ -60,8 +60,8 @@ model User {
 model UserPreference {
   id              String   @id @default(uuid())
   userId          String   @unique
-  language        String?  @default("en")
-  themePreference String?  @default("light")
+  language        String?  @default("system") // "system", "en", "ar" - if system language not ar/en, defaults to en
+  themePreference String?  @default("system") // "system", "light", "dark"
   notifications   Boolean? @default(true)
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)

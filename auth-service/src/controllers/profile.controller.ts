@@ -503,7 +503,7 @@ export const updatePreferences = async (req: Request, res: Response, next: NextF
 
     // Validate and update language
     if (language !== undefined) {
-      const validLanguages = ["en", "ar", "es", "fr", "de"];
+      const validLanguages = ["system", "en", "ar"]; // "system" = use device language
       if (!validLanguages.includes(language)) {
         throw new BadRequestError(`Invalid language. Must be one of: ${validLanguages.join(", ")}`);
       }
@@ -512,7 +512,7 @@ export const updatePreferences = async (req: Request, res: Response, next: NextF
 
     // Validate and update theme
     if (themePreference !== undefined) {
-      const validThemes = ["light", "dark", "system"];
+      const validThemes = ["system", "light", "dark"]; // "system" = follow device theme
       if (!validThemes.includes(themePreference)) {
         throw new BadRequestError(`Invalid theme. Must be one of: ${validThemes.join(", ")}`);
       }
@@ -544,8 +544,8 @@ export const updatePreferences = async (req: Request, res: Response, next: NextF
           where: { userId },
           create: {
             userId,
-            language: preferenceUpdateData.language || "en",
-            themePreference: preferenceUpdateData.themePreference || "light",
+            language: preferenceUpdateData.language || "system",
+            themePreference: preferenceUpdateData.themePreference || "system",
             notifications: preferenceUpdateData.notifications !== undefined ? preferenceUpdateData.notifications : true,
           },
           update: preferenceUpdateData,
@@ -608,8 +608,8 @@ export const getPreferences = async (req: Request, res: Response, next: NextFunc
 
     res.status(200).json({
       preferences: preferences || {
-        language: "en",
-        themePreference: "light",
+        language: "system", // "system" means use device language, fallback to "en" if not ar/en
+        themePreference: "system", // "system" means follow device theme
         notifications: true,
       },
       newsletterEnabled: user?.newsletterEnabled || false,
