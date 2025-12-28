@@ -60,4 +60,31 @@ export async function verifyOtp(target: string, code: string): Promise<boolean> 
   return true;
 }
 
+export async function verifyOtpWithoutConsuming(target: string, code: string): Promise<boolean> {
+  const k = keys(target);
+
+  // cooldown check
+  const isCooling = await redis.get(k.cooldown);
+  if (isCooling) return false;
+
+  const stored = await redis.get(k.value);
+  if (!stored) return false;
+
+  const match = stored === code;
+  if (!match) {
+    const attempts = await redis.incr(k.attempts);
+    if (attempts === 1) {
+      await redis.expire(k.attempts, OTP_TTL_SEC);
+    }
+    if (attempts >= OTP_ATTEMPT_LIMIT) {
+      await redis.set(k.cooldown, "1", "EX", OTP_COOLDOWN_SEC);
+      await redis.del(k.attempts);
+    }
+    return false;
+  }
+
+  // success: do NOT delete OTP, just return true
+  return true;
+}
+
 

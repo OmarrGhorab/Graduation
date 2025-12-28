@@ -2,7 +2,7 @@ import { Request, Response, NextFunction } from "express";
 import bcrypt from "bcrypt";
 import prisma from "../libs/prisma";
 import { BadRequestError, UnauthorizedError, TooManyRequestsError } from "../utils/errors";
-import { createAndStoreOtp, verifyOtp } from "../utils/otp";
+import { createAndStoreOtp, verifyOtp, verifyOtpWithoutConsuming } from "../utils/otp";
 import {
   checkForgotPasswordAllowed,
   setForgotPasswordCooldown,
@@ -130,6 +130,58 @@ export const resetPassword = async (req: Request, res: Response, next: NextFunct
         await clearAllPasswordResetCooldowns(userEmail);
         
         res.json({ message: "Password reset successful" });
+    } catch (err) {
+        next(err);
+    }
+}
+
+export const verifyResetOtp = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        const { emailOrUsername, otp } = req.body as { emailOrUsername?: string; otp?: string };
+        if (!emailOrUsername || !otp) throw new BadRequestError("Missing required fields");
+
+        // Find user by email or username
+        const user = await prisma.user.findFirst({
+            where: {
+                OR: [{ email: emailOrUsername }, { username: emailOrUsername }],
+            },
+        });
+
+        if (!user) {
+            throw new BadRequestError("User not found");
+        }
+
+        const userEmail = user.email;
+
+        // Check if verification attempt is allowed (checks cooldown and attempts)
+        const { allowed, remainingCooldown, attempts } = await checkResetPasswordAllowed(userEmail);
+        
+        if (!allowed) {
+            const minutes = Math.ceil(remainingCooldown / 60);
+            throw new TooManyRequestsError(
+                `Too many verification attempts. Please wait ${minutes} minute${minutes > 1 ? "s" : ""} before trying again.`,
+                { cooldownRemaining: remainingCooldown, retryAfter: remainingCooldown, attempts }
+            );
+        }
+
+        // Verify OTP without consuming it
+        const ok = await verifyOtpWithoutConsuming(`reset:${userEmail}`, otp);
+        if (!ok) {
+            // Set cooldown on failed attempt
+            const cooldownDuration = await setResetPasswordCooldown(userEmail, true);
+            
+            if (cooldownDuration >= 1800) {
+                const minutes = Math.ceil(cooldownDuration / 60);
+                throw new TooManyRequestsError(
+                    `Too many failed verification attempts. Please wait ${minutes} minute${minutes > 1 ? "s" : ""} before trying again.`,
+                    { cooldownRemaining: cooldownDuration, retryAfter: cooldownDuration, attempts: attempts + 1 }
+                );
+            }
+            
+            throw new UnauthorizedError("Invalid or expired OTP");
+        }
+
+        res.json({ message: "OTP verified", valid: true });
     } catch (err) {
         next(err);
     }

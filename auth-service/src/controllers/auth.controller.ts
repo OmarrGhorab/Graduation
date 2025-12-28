@@ -14,6 +14,7 @@ export {
 export {
     forgotPassword,
     resetPassword,
+    verifyResetOtp,
 } from "./password.controller";
 
 // Email verification controllers

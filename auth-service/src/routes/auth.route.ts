@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { forgotPassword, loginUser, logoutUser, registerUser, resetPassword, verifyEmailOtp, resendVerificationOtp, googleMobileAuth, refreshToken, verifyDevice, resendDeviceVerificationOtp, getMyProfile } from "../controllers/auth.controller";
+import { forgotPassword, loginUser, logoutUser, registerUser, resetPassword, verifyResetOtp, verifyEmailOtp, resendVerificationOtp, googleMobileAuth, refreshToken, verifyDevice, resendDeviceVerificationOtp, getMyProfile } from "../controllers/auth.controller";
 import { authenticate, authenticateDeactivated } from "../middleware";
 import {
   enable2FA,
@@ -40,6 +40,7 @@ router.post("/google/mobile", googleMobileAuth); // Accepts idToken in body, ret
 
 // Password recovery
 router.post("/forgot-password", forgotPassword);
+router.post("/verify-reset-otp", verifyResetOtp);
 router.post("/reset-password", resetPassword);
 
 // Email verification
