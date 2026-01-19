@@ -262,9 +262,13 @@ export const publishNotificationEndpoint = async (
   next: NextFunction
 ) => {
   try {
+    console.log(`[Notification Controller] Received request body:`, JSON.stringify(req.body));
+    console.log(`[Notification Controller] Headers:`, JSON.stringify(req.headers));
+    
     const { userId, type, ...data } = req.body;
 
     if (!userId || !type) {
+      console.log(`[Notification Controller] Missing required fields - userId: ${userId}, type: ${type}`);
       throw new BadRequestError("userId and type are required");
     }
 
@@ -278,6 +282,8 @@ export const publishNotificationEndpoint = async (
       ...data,
     });
 
+    console.log(`[Notification Controller] Successfully published notification for user ${userId}`);
+
     res.status(200).json({
       message: "Notification published successfully",
       data: {
@@ -287,6 +293,7 @@ export const publishNotificationEndpoint = async (
       },
     });
   } catch (err) {
+    console.error(`[Notification Controller] Error:`, err);
     next(err);
   }
 };

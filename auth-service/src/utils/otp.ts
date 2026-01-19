@@ -1,5 +1,6 @@
 import crypto from "crypto";
 import redis from "../libs/redis";
+import { debugLog } from "./debug-logger";
 
 const OTP_TTL_SEC = parseInt(process.env.OTP_TTL_SEC || "600", 10); // 10 minutes
 const OTP_ATTEMPT_LIMIT = parseInt(process.env.OTP_ATTEMPT_LIMIT || "5", 10);
@@ -29,13 +30,26 @@ function keys(target: string) {
 export async function createAndStoreOtp(target: string, otp?: string): Promise<string> {
   const k = keys(target);
   const code = otp || generateNumericOtp();
-  
+
   // Use pipeline for atomic operations - reduces network round trips
   const pipeline = redis.pipeline();
   pipeline.set(k.value, code, "EX", OTP_TTL_SEC);
   pipeline.del(k.attempts);
-  await pipeline.exec();
-  
+
+  try {
+    const results = await pipeline.exec();
+    debugLog(`[OTP] Created and stored OTP for ${target} in Redis (Key: ${k.value}, EX: ${OTP_TTL_SEC})`);
+
+    // Check for errors in pipeline results
+    if (results) {
+      for (const [err, res] of results) {
+        if (err) debugLog(`[OTP] Redis pipeline error for ${target}:`, err);
+      }
+    }
+  } catch (error) {
+    debugLog(`[OTP] Failed to store OTP for ${target} in Redis:`, { error: String(error) });
+  }
+
   return code;
 }
 
@@ -63,11 +77,11 @@ export async function verifyOtp(target: string, code: string): Promise<boolean> 
   if (!match) {
     // Handle failed attempt with pipeline
     const attempts = await redis.incr(k.attempts);
-    
+
     if (attempts === 1) {
       await redis.expire(k.attempts, OTP_TTL_SEC);
     }
-    
+
     if (attempts >= OTP_ATTEMPT_LIMIT) {
       // OPTIMIZED: Batch cooldown set and attempts cleanup
       const cooldownPipeline = redis.pipeline();
@@ -83,7 +97,7 @@ export async function verifyOtp(target: string, code: string): Promise<boolean> 
   cleanupPipeline.del(k.value);
   cleanupPipeline.del(k.attempts);
   await cleanupPipeline.exec();
-  
+
   return true;
 }
 
@@ -109,11 +123,11 @@ export async function verifyOtpWithoutConsuming(target: string, code: string): P
   const match = stored === code;
   if (!match) {
     const attempts = await redis.incr(k.attempts);
-    
+
     if (attempts === 1) {
       await redis.expire(k.attempts, OTP_TTL_SEC);
     }
-    
+
     if (attempts >= OTP_ATTEMPT_LIMIT) {
       const cooldownPipeline = redis.pipeline();
       cooldownPipeline.set(k.cooldown, "1", "EX", OTP_COOLDOWN_SEC);

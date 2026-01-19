@@ -184,6 +184,7 @@ export async function updateNotificationsByType(
 
 /**
  * Publish a notification to a user
+ * - Checks for recent duplicates to prevent spam
  * - Always saves to database
  * - Always sends via SSE for real-time in-app delivery
  * - Only sends FCM push if user's notification preference is enabled
@@ -197,6 +198,31 @@ export async function publishNotification(
 ): Promise<void> {
   const startTime = Date.now();
   try {
+    // Check for duplicate notification in the last 30 seconds
+    // This prevents duplicate notifications from rapid retries or double-clicks
+    const thirtySecondsAgo = new Date(Date.now() - 30 * 1000);
+    const recentDuplicate = await prisma.notification.findFirst({
+      where: {
+        userId,
+        type: data.type,
+        createdAt: { gte: thirtySecondsAgo },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    if (recentDuplicate) {
+      // Check if the notification data is similar (same device for security alerts)
+      const existingData = recentDuplicate.data as Record<string, any>;
+      const isSameDevice = data.newDevice && existingData.newDevice &&
+        data.newDevice.name === existingData.newDevice?.name &&
+        data.newDevice.platform === existingData.newDevice?.platform;
+      
+      if (isSameDevice || data.type === recentDuplicate.type) {
+        console.log(`[Notification] Skipping duplicate notification for user ${userId}, type: ${data.type} (sent ${Math.round((Date.now() - recentDuplicate.createdAt.getTime()) / 1000)}s ago)`);
+        return; // Skip duplicate
+      }
+    }
+
     // Save to database for persistence and pagination
     const notification = await prisma.notification.create({
       data: {

@@ -6,8 +6,9 @@ import { generateUniqueUsername } from "../utils/username";
 import { extractDeviceInfo, extractDeviceName } from "../utils/device";
 import { createSession, getSessionDeviceInfo } from "../utils/sessions";
 import { createAndStoreOtp } from "../utils/otp";
-import { sendDeviceVerificationOTP } from "../utils/email";
+import { sendDeviceVerificationOTP, sendNewDeviceSecurityAlert } from "../utils/email";
 import { getUserLanguage } from "../utils/userLanguage";
+import { debugLog } from "../utils/debug-logger";
 import { OAuth2Client } from "google-auth-library";
 import dotenv from "dotenv";
 
@@ -21,7 +22,7 @@ export const googleMobileAuth = async (req: Request, res: Response, next: NextFu
     try {
         // Extract ID token from request body
         const idToken = req.body?.idToken;
-        
+
         if (!idToken || typeof idToken !== 'string') {
             throw new BadRequestError("ID token is required in request body");
         }
@@ -115,8 +116,8 @@ export const googleMobileAuth = async (req: Request, res: Response, next: NextFu
             // Check if account is deactivated - require confirmation to reactivate
             if (!user.isActive) {
                 // Issue temporary token for reactivation confirmation (short-lived)
-                const { token: tempToken } = signAccessToken({ 
-                    id: user.id, 
+                const { token: tempToken } = signAccessToken({
+                    id: user.id,
                     role: user.role
                 });
 
@@ -194,7 +195,7 @@ export const googleMobileAuth = async (req: Request, res: Response, next: NextFu
         const deviceInfo = extractDeviceInfo(req);
         const sessionDeviceInfo = await getSessionDeviceInfo(req);
         const deviceName = sessionDeviceInfo.deviceName || extractDeviceName(deviceInfo.userAgent);
-        
+
         // Try to find existing device
         let existingDevice = await prisma.userDevice.findUnique({
             where: {
@@ -241,7 +242,16 @@ export const googleMobileAuth = async (req: Request, res: Response, next: NextFu
                 // Create device verification OTP
                 const otp = await createAndStoreOtp(`device:${user.id}:${deviceInfo.fingerprint}`);
                 const userLanguage = await getUserLanguage(user.id);
-                sendDeviceVerificationOTP(user.email, otp, user.name, userLanguage).catch(console.error);
+                debugLog(`[OAuth] 📧 Sending unified security alert + OTP to ${user.email}`);
+                sendNewDeviceSecurityAlert(user.email, user.name, {
+                    name: deviceName || "Unknown Device",
+                    platform: deviceInfo.platform,
+                    ipAddress: sessionDeviceInfo.ipAddress,
+                }, userLanguage, otp)
+                    .then((sent: boolean) => {
+                        if (sent) debugLog(`[OAuth] ✓ Unified email sent successfully`);
+                    })
+                    .catch((err: Error) => debugLog(`[OAuth] ✗ Error sending unified email`, { error: String(err) }));
 
                 return res.status(403).json({
                     success: false,
@@ -289,7 +299,16 @@ export const googleMobileAuth = async (req: Request, res: Response, next: NextFu
             if (currentUser?.deviceBlocked && currentUser.pendingDeviceFingerprint === deviceInfo.fingerprint && !existingDevice.isTrusted) {
                 const otp = await createAndStoreOtp(`device:${user.id}:${deviceInfo.fingerprint}`);
                 const userLanguage = await getUserLanguage(user.id);
-                sendDeviceVerificationOTP(user.email, otp, user.name, userLanguage).catch(console.error);
+                debugLog(`[OAuth] 📧 Sending unified security alert + OTP to ${user.email} (Existing device)`);
+                sendNewDeviceSecurityAlert(user.email, user.name, {
+                    name: deviceName || "Unknown Device",
+                    platform: deviceInfo.platform,
+                    ipAddress: sessionDeviceInfo.ipAddress,
+                }, userLanguage, otp)
+                    .then((sent: boolean) => {
+                        if (sent) debugLog(`[OAuth] ✓ Unified email sent successfully (Existing device)`);
+                    })
+                    .catch((err: Error) => debugLog(`[OAuth] ✗ Error sending unified email (Existing device)`, { error: String(err) }));
 
                 return res.status(403).json({
                     success: false,
@@ -334,15 +353,15 @@ export const googleMobileAuth = async (req: Request, res: Response, next: NextFu
         // Issue tokens
         const { token: accessToken, jti: accessJti } = signAccessToken({ id: user.id, role: user.role });
         const { token: refreshToken, jti: refreshJti } = await signAndStoreRefreshToken(user.id);
-        
+
         // Create session record in database
         const expiresAt = new Date();
         expiresAt.setSeconds(expiresAt.getSeconds() + parseInt(process.env.ACCESS_TOKEN_TTL_SEC || "900", 10));
         const refreshExpiresAt = new Date();
         refreshExpiresAt.setSeconds(refreshExpiresAt.getSeconds() + parseInt(process.env.REFRESH_TOKEN_TTL_SEC || "2592000", 10));
-        
+
         const deviceId = existingDevice.id;
-        
+
         // Create session
         await createSession({
             userId: user.id,
@@ -355,7 +374,7 @@ export const googleMobileAuth = async (req: Request, res: Response, next: NextFu
             expiresAt: expiresAt,
             refreshExpiresAt: refreshExpiresAt,
         });
-        
+
         // Update last login
         await prisma.user.update({
             where: { id: user.id },

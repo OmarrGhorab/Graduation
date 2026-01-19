@@ -12,6 +12,13 @@ export async function publishNotification(
   }
 ): Promise<void> {
   const startTime = Date.now();
+  
+  // Debug logging
+  console.log(`[Notification Client] Starting notification publish for user ${userId}`);
+  console.log(`[Notification Client] URL: ${NOTIFICATION_SERVICE_URL}`);
+  console.log(`[Notification Client] Secret configured: ${!!process.env.INTERNAL_SERVICE_SECRET}`);
+  console.log(`[Notification Client] Data type: ${data.type}`);
+  
   try {
     if (!process.env.INTERNAL_SERVICE_SECRET) {
       console.warn(`[Notification Client] INTERNAL_SERVICE_SECRET not configured, notification may fail for user ${userId}`);
@@ -31,6 +38,8 @@ export async function publishNotification(
       }),
     });
 
+    console.log(`[Notification Client] Response status: ${response.status}`);
+
     if (!response.ok) {
       const errorText = await response.text().catch(() => response.statusText);
       console.error(`[Notification Client] HTTP ${response.status} error:`, errorText);
@@ -39,7 +48,8 @@ export async function publishNotification(
 
     const responseData = await response.json().catch(() => ({}));
     const duration = Date.now() - startTime;
-    console.log(`[Notification Client] ✓ Published notification for user ${userId}, type: ${data.type}, duration: ${duration}ms`, responseData);
+    console.log(`[Notification Client] ✓ Published notification for user ${userId}, type: ${data.type}, duration: ${duration}ms`);
+    console.log(`[Notification Client] Response data:`, JSON.stringify(responseData));
   } catch (error) {
     const duration = Date.now() - startTime;
     console.error(`[Notification Client] Error publishing notification for user ${userId}, type: ${data.type}, duration: ${duration}ms`, error);

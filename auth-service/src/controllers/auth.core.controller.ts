@@ -9,9 +9,10 @@ import { generateUsernameSuggestions } from "../utils/username";
 import { createAndStoreOtp } from "../utils/otp";
 import { extractDeviceInfo, extractDeviceName } from "../utils/device";
 import { createSession, getSessionDeviceInfo, revokeSession, cleanupExpiredSessionsOnLogin } from "../utils/sessions";
-import { sendVerificationOTP, sendDeviceVerificationOTP } from "../utils/email";
+import { sendVerificationOTP, sendDeviceVerificationOTP, sendNewDeviceSecurityAlert } from "../utils/email";
 import { getUserLanguage } from "../utils/userLanguage";
 import { publishNotification } from "../utils/notifications-client";
+import { debugLog } from "../utils/debug-logger";
 
 export const registerUser = async (req: Request, res: Response, next: NextFunction) => {
     try {
@@ -166,8 +167,8 @@ export const loginUser = async (req: Request, res: Response, next: NextFunction)
         // Check if account is deactivated - require confirmation to reactivate
         if (!user.isActive) {
             // Issue temporary token for reactivation confirmation (short-lived)
-            const { token: tempToken } = signAccessToken({ 
-                id: user.id, 
+            const { token: tempToken } = signAccessToken({
+                id: user.id,
                 role: user.role
             });
 
@@ -202,14 +203,23 @@ export const loginUser = async (req: Request, res: Response, next: NextFunction)
         // Handle device tracking and blocking
         if (!existingDevice) {
             // New device - check device limit
+            debugLog(`[Device Check] New device detected for user ${user.id}`, { fingerprint: deviceInfo.fingerprint.substring(0, 20) });
+            console.log(`[Device Check] New device detected for user ${user.id}, fingerprint: ${deviceInfo.fingerprint.substring(0, 20)}`);
+
             // Get user's devices, ordered by login count (most used first)
             const userDevices = await prisma.userDevice.findMany({
                 where: { userId: user.id },
                 orderBy: { lastLoginAt: "desc" },
             });
 
+            debugLog(`[Device Check] User has ${userDevices.length} existing devices`);
+            console.log(`[Device Check] User ${user.id} has ${userDevices.length} existing devices`);
+
             // If user has 2 or more devices, block account and require verification
             if (userDevices.length >= 2) {
+                debugLog(`[Device Check] ⚠️ User has ${userDevices.length} devices, triggering security flow`);
+                console.log(`[Device Check] ⚠️ User ${user.id} has ${userDevices.length} devices, triggering security flow`);
+
                 // Block account and store pending device fingerprint
                 await prisma.user.update({
                     where: { id: user.id },
@@ -238,11 +248,8 @@ export const loginUser = async (req: Request, res: Response, next: NextFunction)
                 const otp = await createAndStoreOtp(`device:${user.id}:${deviceInfo.fingerprint}`);
                 // Get user language preference
                 const userLanguage = await getUserLanguage(user.id);
-                // Send OTP via email (non-blocking)
-                sendDeviceVerificationOTP(user.email, otp, user.name, userLanguage).catch(console.error);
 
-                // SECURITY: Send notification to all trusted devices about suspicious login attempt
-                // This alerts the user on their existing devices that someone is trying to access their account
+                // SECURITY: Send notification and security alert email
                 const notificationData = {
                     type: "security_new_device_blocked",
                     title: "Security Alert: New Device Login Attempt",
@@ -257,11 +264,33 @@ export const loginUser = async (req: Request, res: Response, next: NextFunction)
                     securityTip: "If you don't recognize this device, change your password immediately and review your account activity.",
                 };
 
-                // Send notification to user (non-blocking)
-                console.log(`[Security] Sending new device blocked notification to user ${user.id}`);
-                publishNotification(user.id, notificationData).catch((err) => {
-                    console.error("[Security Notification] Failed to send new device alert:", err);
+                // Send notification to user (BLOCKING - wait for it to complete)
+                debugLog(`[Security] 🚨 Sending new device blocked notification to user ${user.id}`);
+                console.log(`[Security] 🚨 About to send notification to user ${user.id}`);
+                try {
+                    await publishNotification(user.id, notificationData);
+                    debugLog(`[Security] ✓ New device blocked notification sent successfully to user ${user.id}`);
+                    console.log(`[Security] ✓ Notification sent successfully to user ${user.id}`);
+                } catch (err) {
+                    debugLog(`[Security Notification] ✗ Failed to send new device alert`, { error: String(err) });
+                    console.error(`[Security Notification] ✗ Failed to send notification:`, err);
+                }
+
+                // Send security alert email with OTP (non-blocking) - Single unified email
+                debugLog(`[Security] 📧 Sending unified security alert + OTP email to ${user.email}`);
+                sendNewDeviceSecurityAlert(user.email, user.name, {
+                    name: deviceName,
+                    platform: deviceInfo.platform,
+                    ipAddress: deviceInfo.ipAddress,
+                }, userLanguage, otp).then((sent: boolean) => {
+                    if (sent) debugLog(`[Security] ✓ Unified security email sent successfully`);
+                    else debugLog(`[Security] ✗ Failed to send unified security email`);
+                }).catch((err: Error) => {
+                    debugLog(`[Email] Failed to send unified security email`, { error: String(err) });
+                    console.error(`[Email] Failed to send security alert:`, err);
                 });
+
+                debugLog(`[Device Check] Returning 403 response for new device`);
 
                 return res.status(403).json({
                     error: "New device detected",
@@ -273,6 +302,8 @@ export const loginUser = async (req: Request, res: Response, next: NextFunction)
                     otp: process.env.NODE_ENV === "production" ? undefined : otp,
                 });
             }
+
+            debugLog(`[Device Check] User has only ${userDevices.length} devices, allowing new device without verification`);
 
             // User has less than 2 devices, create new device (trusted)
             existingDevice = await prisma.userDevice.create({
@@ -304,6 +335,20 @@ export const loginUser = async (req: Request, res: Response, next: NextFunction)
             // If account is blocked for this device and device is not trusted, require verification
             if (user.deviceBlocked && user.pendingDeviceFingerprint === deviceInfo.fingerprint && !existingDevice.isTrusted) {
                 const otp = await createAndStoreOtp(`device:${user.id}:${deviceInfo.fingerprint}`);
+
+                // FIX: Send unified email also for existing but blocked devices
+                const userLanguage = await getUserLanguage(user.id);
+                debugLog(`[Security] 📧 Sending unified security alert + OTP to ${user.email} (Existing device)`);
+                sendNewDeviceSecurityAlert(user.email, user.name, {
+                    name: deviceName,
+                    platform: deviceInfo.platform,
+                    ipAddress: deviceInfo.ipAddress,
+                }, userLanguage, otp).then((sent: boolean) => {
+                    if (sent) debugLog(`[Security] ✓ Unified email sent successfully (Existing device)`);
+                }).catch((err: Error) => {
+                    debugLog(`[Email] Failed to send unified email (Existing device)`, { error: String(err) });
+                });
+
                 return res.status(403).json({
                     error: "Device verification required",
                     message: "This device needs to be verified. Please check your email for verification code.",
@@ -488,7 +533,7 @@ export const logoutUser = async (req: Request, res: Response, next: NextFunction
 
         if (!session) {
             // Session not found, but still return success (already logged out)
-            return res.json({ 
+            return res.json({
                 message: "Logged out successfully",
             });
         }
@@ -496,7 +541,7 @@ export const logoutUser = async (req: Request, res: Response, next: NextFunction
         // Use the working revokeSession utility function
         await revokeSession(session.id, userId, sessionTokenJti);
 
-        res.json({ 
+        res.json({
             message: "Logged out successfully",
             sessionsDeleted: 1
         });
