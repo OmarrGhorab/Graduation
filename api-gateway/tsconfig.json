@@ -4,7 +4,6 @@
         "module": "ESNext",
         "moduleResolution": "node",
         "outDir": "./dist",
-        "rootDir": "./src",
         "strict": true,
         "noImplicitAny": true,
         "sourceMap": true,
@@ -12,9 +11,10 @@
         "allowSyntheticDefaultImports": true,
         "skipLibCheck": true,
         "resolveJsonModule": true,
-        "forceConsistentCasingInFileNames": true
+        "forceConsistentCasingInFileNames": true,
+        "types": ["jest", "node"]
     },
-    "include": ["src/**/*"],
+    "include": ["src/**/*", "tests/**/*"],
     "exclude": ["node_modules", "dist"],
     "ts-node": {
         "esm": true,

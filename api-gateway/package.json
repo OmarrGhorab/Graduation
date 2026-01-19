@@ -4,7 +4,9 @@
   "main": "main.js",
   "type": "module",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
     "start": "tsx src/main.ts",
     "dev": "nodemon --exec tsx src/main.ts"
   },
@@ -18,7 +20,13 @@
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.4",
     "@types/express-http-proxy": "^1.6.7",
+    "@types/jest": "^30.0.0",
+    "@types/supertest": "^6.0.3",
+    "fast-check": "^4.5.3",
+    "jest": "^30.2.0",
     "nodemon": "^3.1.10",
+    "supertest": "^7.2.2",
+    "ts-jest": "^29.4.6",
     "tsx": "^4.20.6",
     "typescript": "^5.9.3"
   },
