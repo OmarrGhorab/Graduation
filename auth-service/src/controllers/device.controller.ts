@@ -7,6 +7,8 @@ import { extractDeviceInfo } from "../utils/device";
 import { createSession, getSessionDeviceInfo } from "../utils/sessions";
 import { sendDeviceVerificationOTP } from "../utils/email";
 import { getUserLanguage } from "../utils/userLanguage";
+import { publishNotification } from "../utils/notifications-client";
+import { debugLog } from "../utils/debug-logger";
 
 /**
  * Verify device with OTP
@@ -93,16 +95,36 @@ export const verifyDevice = async (req: Request, res: Response, next: NextFuncti
             },
         });
 
+        // SECURITY: Notify user that a new device was successfully added
+        const notificationData = {
+            type: "security_device_verified",
+            title: "New Device Added",
+            body: `A new device (${device.deviceName || "Unknown"}) has been successfully verified and added to your account.`,
+            deviceName: device.deviceName,
+            platform: device.platform,
+            timestamp: new Date().toISOString(),
+            securityTip: "If you didn't add this device, please change your password and review your account security immediately.",
+        };
+
+        // Send notification (BLOCKING - wait for it to complete)
+        console.log(`[Security] 🔓 Sending device verified notification to user ${user.id}`);
+        try {
+            await publishNotification(user.id, notificationData);
+            console.log(`[Security] ✓ Device verified notification sent successfully to user ${user.id}`);
+        } catch (err) {
+            console.error("[Security Notification] ✗ Failed to send device verified alert:", err);
+        }
+
         // Check if 2FA is enabled
         if (user.twoFactorEnabled) {
             // 2FA is enabled - issue temporary access token for 2FA verification
             const { token: tempAccessToken, jti: tempAccessJti } = signAccessToken({ id: user.id, role: user.role });
-            
+
             // Create temporary session for 2FA verification (will be replaced after 2FA succeeds)
             const sessionDeviceInfo = await getSessionDeviceInfo(req);
             const expiresAt = new Date();
             expiresAt.setSeconds(expiresAt.getSeconds() + parseInt(process.env.ACCESS_TOKEN_TTL_SEC || "900", 10));
-            
+
             // Create temporary session (no refresh token yet, will be added after 2FA)
             await prisma.session.create({
                 data: {
@@ -120,11 +142,12 @@ export const verifyDevice = async (req: Request, res: Response, next: NextFuncti
                     lastActivityAt: new Date(),
                 },
             });
-            
+
             return res.status(200).json({
                 message: "Device verified successfully. 2FA verification required.",
                 deviceVerified: true,
                 requires2FA: true,
+                accessToken: tempAccessToken,
                 emailOrUsername: emailOrUsername,
             });
         }
@@ -132,7 +155,7 @@ export const verifyDevice = async (req: Request, res: Response, next: NextFuncti
         // Issue tokens
         const { token: accessToken, jti: accessJti } = signAccessToken({ id: user.id, role: user.role });
         const { token: refreshToken, jti: refreshJti } = await signAndStoreRefreshToken(user.id);
-        
+
         // Create session record in database
         const sessionDeviceInfo = await getSessionDeviceInfo(req);
         const expiresAt = new Date();
@@ -169,7 +192,10 @@ export const verifyDevice = async (req: Request, res: Response, next: NextFuncti
                 onboardingCompleted: user.onboardingCompleted,
                 role: user.role,
                 profileImg: user.profileImg,
+                twoFactorEnabled: user.twoFactorEnabled,
             },
+            accessToken,
+            refreshToken,
             requiresOnboarding: !user.onboardingCompleted,
         });
     } catch (err) {
@@ -227,7 +253,12 @@ export const resendDeviceVerificationOtp = async (req: Request, res: Response, n
         // Get user language preference
         const userLanguage = await getUserLanguage(user.id);
         // Send OTP via email (non-blocking)
-        sendDeviceVerificationOTP(user.email, otp, user.name, userLanguage).catch(console.error);
+        debugLog(`[Device] 📧 Resending verification OTP to ${user.email}`);
+        sendDeviceVerificationOTP(user.email, otp, user.name, userLanguage)
+            .then(sent => {
+                if (sent) debugLog(`[Device] ✓ Verification OTP resent successfully`);
+            })
+            .catch(err => debugLog(`[Device] ✗ Error resending OTP`, { error: String(err) }));
 
         return res.json({
             message: "Device verification OTP has been sent.",

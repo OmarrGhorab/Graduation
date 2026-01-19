@@ -4,15 +4,14 @@ import { UnauthorizedError } from "../utils/errors";
 import { getAccessTokenFromRequest } from "../utils/cookies";
 import { prisma } from "../libs/prisma";
 import { updateSessionActivity } from "../utils/sessions";
+import { getDeviceLocationFromRequest, hasValidLocation } from "./deviceInfo.middleware";
+import { updateSessionLocation } from "../services/location.service";
 
 /**
  * Authentication middleware to verify access token and attach user info to request
  * Extracts token from cookies (access_token) or Authorization header (Bearer token)
  * 
- * Note: For cookie parsing to work, you need to install and use cookie-parser middleware:
- * npm install cookie-parser
- * npm install --save-dev @types/cookie-parser
- * Then in main.ts: import cookieParser from "cookie-parser"; app.use(cookieParser());
+ * OPTIMIZED: Combined user and session queries into a single DB call for better performance
  */
 export const authenticate = async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -36,16 +35,35 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
       throw new UnauthorizedError("Invalid token type");
     }
 
-    // Check user account status
-    const user = await prisma.user.findUnique({
-      where: { id: payload.sub },
+    // OPTIMIZED: Single query to get session with user data
+    // This reduces 2 DB queries to 1, improving latency on every authenticated request
+    const session = await prisma.session.findFirst({
+      where: {
+        sessionToken: payload.jti,
+        userId: payload.sub,
+        isRevoked: false,
+        expiresAt: {
+          gt: new Date(),
+        },
+      },
       select: {
         id: true,
-        isActive: true,
-        deletedAt: true,
-        role: true,
+        user: {
+          select: {
+            id: true,
+            isActive: true,
+            deletedAt: true,
+            role: true,
+          },
+        },
       },
     });
+
+    if (!session) {
+      throw new UnauthorizedError("Session not found, has been revoked, or has expired");
+    }
+
+    const user = session.user;
 
     if (!user) {
       throw new UnauthorizedError("User not found");
@@ -59,25 +77,6 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
       throw new UnauthorizedError("Account is deactivated");
     }
 
-    // Verify session exists in database and is not revoked (ensures immediate logout after session revocation)
-    const session = await prisma.session.findFirst({
-      where: {
-        sessionToken: payload.jti,
-        userId: user.id,
-        isRevoked: false, // Exclude revoked sessions
-        expiresAt: {
-          gt: new Date(), // Exclude expired sessions
-        },
-      },
-      select: {
-        id: true,
-      },
-    });
-
-    if (!session) {
-      throw new UnauthorizedError("Session not found, has been revoked, or has expired");
-    }
-
     // Attach user info to request object
     req.user = {
       id: user.id,
@@ -87,9 +86,16 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
 
     // Update session activity (non-blocking)
     updateSessionActivity(payload.jti).catch((err) => {
-      // Log error but don't block request
       console.error("Failed to update session activity:", err);
     });
+
+    // Update session location if valid location headers present (non-blocking)
+    const deviceLocation = getDeviceLocationFromRequest(req);
+    if (hasValidLocation(deviceLocation)) {
+      updateSessionLocation(payload.jti, deviceLocation).catch((err) => {
+        console.error("Failed to update session location:", err);
+      });
+    }
 
     next();
   } catch (err) {

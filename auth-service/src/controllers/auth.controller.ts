@@ -7,12 +7,14 @@ export {
     loginUser,
     logoutUser,
     refreshToken,
+    getMyProfile,
 } from "./auth.core.controller";
 
 // Password management controllers
 export {
     forgotPassword,
     resetPassword,
+    verifyResetOtp,
 } from "./password.controller";
 
 // Email verification controllers

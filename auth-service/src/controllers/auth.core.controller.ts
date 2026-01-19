@@ -8,9 +8,11 @@ import { aj } from "../libs/arcjet";
 import { generateUsernameSuggestions } from "../utils/username";
 import { createAndStoreOtp } from "../utils/otp";
 import { extractDeviceInfo, extractDeviceName } from "../utils/device";
-import { createSession, getSessionDeviceInfo } from "../utils/sessions";
-import { sendVerificationOTP, sendDeviceVerificationOTP } from "../utils/email";
+import { createSession, getSessionDeviceInfo, revokeSession, cleanupExpiredSessionsOnLogin } from "../utils/sessions";
+import { sendVerificationOTP, sendDeviceVerificationOTP, sendNewDeviceSecurityAlert } from "../utils/email";
 import { getUserLanguage } from "../utils/userLanguage";
+import { publishNotification } from "../utils/notifications-client";
+import { debugLog } from "../utils/debug-logger";
 
 export const registerUser = async (req: Request, res: Response, next: NextFunction) => {
     try {
@@ -67,15 +69,16 @@ export const registerUser = async (req: Request, res: Response, next: NextFuncti
         const deviceInfo = extractDeviceInfo(req);
         let deviceId: string | null = null;
 
-        // Create device record for new user
-        const deviceName = extractDeviceName(sessionDeviceInfo.userAgent);
+        // Create device record for new user - use device name from headers if available
+        const deviceName = sessionDeviceInfo.deviceName || extractDeviceName(sessionDeviceInfo.userAgent);
         const newDevice = await prisma.userDevice.create({
             data: {
                 userId: user.id,
                 deviceFingerprint: deviceInfo.fingerprint,
                 deviceName: deviceName,
-                platform: deviceInfo.platform,
+                platform: sessionDeviceInfo.platform as any,
                 ipAddress: sessionDeviceInfo.ipAddress,
+                userAgent: sessionDeviceInfo.userAgent,
                 isTrusted: true, // New registrations are trusted by default
                 lastLoginAt: new Date(),
             },
@@ -161,31 +164,26 @@ export const loginUser = async (req: Request, res: Response, next: NextFunction)
         const ok = await bcrypt.compare(password, user.password);
         if (!ok) throw new UnauthorizedError("Invalid credentials");
 
-        // Track if account was reactivated during login
-        let wasReactivated = false;
-
-        // If account is deactivated but password is correct, reactivate it automatically
+        // Check if account is deactivated - require confirmation to reactivate
         if (!user.isActive) {
-            await prisma.user.update({
-                where: { id: user.id },
-                data: { isActive: true },
+            // Issue temporary token for reactivation confirmation (short-lived)
+            const { token: tempToken } = signAccessToken({
+                id: user.id,
+                role: user.role
             });
-            wasReactivated = true;
-            // Update user object for rest of login flow
-            user.isActive = true;
+
+            return res.status(403).json({
+                error: "Account deactivated",
+                message: "Your account is deactivated. Would you like to reactivate it?",
+                accountDeactivated: true,
+                requiresReactivation: true,
+                tempToken: tempToken,
+            });
         }
 
         //  Unverified users: block login
         if (!user.verified) {
-            return res.status(403).json({
-                error: "Account not verified",
-                message: wasReactivated
-                    ? "Account reactivated. Please verify your account before logging in. Check your email for the verification OTP."
-                    : "Please verify your account before logging in. Check your email for the verification OTP.",
-                verified: false,
-                requiresVerification: true,
-                accountReactivated: wasReactivated,
-            });
+            throw new UnauthorizedError("Please verify your email before logging in");
         }
 
         // Extract device information
@@ -205,14 +203,23 @@ export const loginUser = async (req: Request, res: Response, next: NextFunction)
         // Handle device tracking and blocking
         if (!existingDevice) {
             // New device - check device limit
+            debugLog(`[Device Check] New device detected for user ${user.id}`, { fingerprint: deviceInfo.fingerprint.substring(0, 20) });
+            console.log(`[Device Check] New device detected for user ${user.id}, fingerprint: ${deviceInfo.fingerprint.substring(0, 20)}`);
+
             // Get user's devices, ordered by login count (most used first)
             const userDevices = await prisma.userDevice.findMany({
                 where: { userId: user.id },
                 orderBy: { lastLoginAt: "desc" },
             });
 
+            debugLog(`[Device Check] User has ${userDevices.length} existing devices`);
+            console.log(`[Device Check] User ${user.id} has ${userDevices.length} existing devices`);
+
             // If user has 2 or more devices, block account and require verification
             if (userDevices.length >= 2) {
+                debugLog(`[Device Check] ⚠️ User has ${userDevices.length} devices, triggering security flow`);
+                console.log(`[Device Check] ⚠️ User ${user.id} has ${userDevices.length} devices, triggering security flow`);
+
                 // Block account and store pending device fingerprint
                 await prisma.user.update({
                     where: { id: user.id },
@@ -241,22 +248,62 @@ export const loginUser = async (req: Request, res: Response, next: NextFunction)
                 const otp = await createAndStoreOtp(`device:${user.id}:${deviceInfo.fingerprint}`);
                 // Get user language preference
                 const userLanguage = await getUserLanguage(user.id);
-                // Send OTP via email (non-blocking)
-                sendDeviceVerificationOTP(user.email, otp, user.name, userLanguage).catch(console.error);
+
+                // SECURITY: Send notification and security alert email
+                const notificationData = {
+                    type: "security_new_device_blocked",
+                    title: "Security Alert: New Device Login Attempt",
+                    body: `Someone tried to log in from a new device (${deviceName}). If this wasn't you, please secure your account immediately.`,
+                    newDevice: {
+                        name: deviceName,
+                        platform: deviceInfo.platform,
+                        ipAddress: deviceInfo.ipAddress,
+                    },
+                    timestamp: new Date().toISOString(),
+                    actionRequired: true,
+                    securityTip: "If you don't recognize this device, change your password immediately and review your account activity.",
+                };
+
+                // Send notification to user (BLOCKING - wait for it to complete)
+                debugLog(`[Security] 🚨 Sending new device blocked notification to user ${user.id}`);
+                console.log(`[Security] 🚨 About to send notification to user ${user.id}`);
+                try {
+                    await publishNotification(user.id, notificationData);
+                    debugLog(`[Security] ✓ New device blocked notification sent successfully to user ${user.id}`);
+                    console.log(`[Security] ✓ Notification sent successfully to user ${user.id}`);
+                } catch (err) {
+                    debugLog(`[Security Notification] ✗ Failed to send new device alert`, { error: String(err) });
+                    console.error(`[Security Notification] ✗ Failed to send notification:`, err);
+                }
+
+                // Send security alert email with OTP (non-blocking) - Single unified email
+                debugLog(`[Security] 📧 Sending unified security alert + OTP email to ${user.email}`);
+                sendNewDeviceSecurityAlert(user.email, user.name, {
+                    name: deviceName,
+                    platform: deviceInfo.platform,
+                    ipAddress: deviceInfo.ipAddress,
+                }, userLanguage, otp).then((sent: boolean) => {
+                    if (sent) debugLog(`[Security] ✓ Unified security email sent successfully`);
+                    else debugLog(`[Security] ✗ Failed to send unified security email`);
+                }).catch((err: Error) => {
+                    debugLog(`[Email] Failed to send unified security email`, { error: String(err) });
+                    console.error(`[Email] Failed to send security alert:`, err);
+                });
+
+                debugLog(`[Device Check] Returning 403 response for new device`);
 
                 return res.status(403).json({
                     error: "New device detected",
-                    message: wasReactivated
-                        ? "Account reactivated. A new device has been detected. Your account has been blocked until device verification is completed. Please check your email for verification code."
-                        : "A new device has been detected. Your account has been blocked until device verification is completed. Please check your email for verification code.",
+                    message: "A new device has been detected. Your account has been blocked until device verification is completed. Please check your email for verification code.",
                     deviceBlocked: true,
                     requiresDeviceVerification: true,
                     deviceFingerprint: deviceInfo.fingerprint,
-                    accountReactivated: wasReactivated,
                     // Expose OTP in non-production for testing
                     otp: process.env.NODE_ENV === "production" ? undefined : otp,
                 });
             }
+
+            debugLog(`[Device Check] User has only ${userDevices.length} devices, allowing new device without verification`);
 
             // User has less than 2 devices, create new device (trusted)
             existingDevice = await prisma.userDevice.create({
@@ -288,15 +335,26 @@ export const loginUser = async (req: Request, res: Response, next: NextFunction)
             // If account is blocked for this device and device is not trusted, require verification
             if (user.deviceBlocked && user.pendingDeviceFingerprint === deviceInfo.fingerprint && !existingDevice.isTrusted) {
                 const otp = await createAndStoreOtp(`device:${user.id}:${deviceInfo.fingerprint}`);
+
+                // FIX: Send unified email also for existing but blocked devices
+                const userLanguage = await getUserLanguage(user.id);
+                debugLog(`[Security] 📧 Sending unified security alert + OTP to ${user.email} (Existing device)`);
+                sendNewDeviceSecurityAlert(user.email, user.name, {
+                    name: deviceName,
+                    platform: deviceInfo.platform,
+                    ipAddress: deviceInfo.ipAddress,
+                }, userLanguage, otp).then((sent: boolean) => {
+                    if (sent) debugLog(`[Security] ✓ Unified email sent successfully (Existing device)`);
+                }).catch((err: Error) => {
+                    debugLog(`[Email] Failed to send unified email (Existing device)`, { error: String(err) });
+                });
+
                 return res.status(403).json({
                     error: "Device verification required",
-                    message: wasReactivated
-                        ? "Account reactivated. This device needs to be verified. Please check your email for verification code."
-                        : "This device needs to be verified. Please check your email for verification code.",
+                    message: "This device needs to be verified. Please check your email for verification code.",
                     deviceBlocked: true,
                     requiresDeviceVerification: true,
                     deviceFingerprint: deviceInfo.fingerprint,
-                    accountReactivated: wasReactivated,
                     otp: process.env.NODE_ENV === "production" ? undefined : otp,
                 });
             }
@@ -320,12 +378,9 @@ export const loginUser = async (req: Request, res: Response, next: NextFunction)
         if (user.deviceBlocked && user.pendingDeviceFingerprint !== deviceInfo.fingerprint) {
             return res.status(403).json({
                 error: "Account blocked",
-                message: wasReactivated
-                    ? "Account reactivated. Your account has been blocked due to a new device login. Please verify the pending device first."
-                    : "Your account has been blocked due to a new device login. Please verify the pending device first.",
+                message: "Your account has been blocked due to a new device login. Please verify the pending device first.",
                 deviceBlocked: true,
                 requiresDeviceVerification: true,
-                accountReactivated: wasReactivated,
             });
         }
 
@@ -380,11 +435,8 @@ export const loginUser = async (req: Request, res: Response, next: NextFunction)
 
             return res.status(200).json({
                 accessToken: tempAccessToken,
-                message: wasReactivated
-                    ? "Account reactivated. 2FA verification required"
-                    : "2FA verification required",
+                message: "2FA verification required",
                 requires2FA: true,
-                accountReactivated: wasReactivated,
             });
         }
 
@@ -435,6 +487,9 @@ export const loginUser = async (req: Request, res: Response, next: NextFunction)
             data: { lastLoginAt: new Date() },
         });
 
+        // OPTIMIZED: Cleanup expired sessions on login (non-blocking)
+        cleanupExpiredSessionsOnLogin(user.id);
+
         return res.json({
             user: {
                 id: user.id,
@@ -445,14 +500,11 @@ export const loginUser = async (req: Request, res: Response, next: NextFunction)
                 onboardingCompleted: user.onboardingCompleted,
                 role: user.role,
                 profileImg: user.profileImg,
+                twoFactorEnabled: user.twoFactorEnabled,
             },
             accessToken,
             refreshToken,
             requiresOnboarding: !user.onboardingCompleted,
-            accountReactivated: wasReactivated,
-            message: wasReactivated
-                ? "Account reactivated successfully. Welcome back!"
-                : undefined,
         });
     } catch (err) {
         next(err);
@@ -461,77 +513,42 @@ export const loginUser = async (req: Request, res: Response, next: NextFunction)
 
 export const logoutUser = async (req: Request, res: Response, next: NextFunction) => {
     try {
-        // Extract tokens from request
-        const refreshToken = getRefreshTokenFromRequest(req);
-        const accessToken = getAccessTokenFromRequest(req);
-
-        let sessionTokenJti: string | null = null;
-
-        // Get access token JTI to revoke session
-        if (accessToken) {
-            try {
-                const payload = await verifyAccessToken(accessToken);
-                sessionTokenJti = payload.jti;
-            } catch {
-                // ignore errors when verifying token during logout
-            }
+        if (!req.user) {
+            throw new UnauthorizedError("User not authenticated");
         }
 
-        // Revoke session in database if access token is valid
-        if (sessionTokenJti) {
-            try {
-                // Find session to get refresh token before revoking
-                const session = await prisma.session.findFirst({
-                    where: {
-                        sessionToken: sessionTokenJti,
-                        isRevoked: false,
-                    },
-                    select: {
-                        id: true,
-                        refreshToken: true,
-                    },
-                });
+        const userId = req.user.id;
+        const sessionTokenJti = req.user.jti;
 
-                if (session) {
-                    // Revoke refresh token in Redis if it exists
-                    if (session.refreshToken) {
-                        try {
-                            await revokeRefreshTokenByJti(session.refreshToken);
-                        } catch {
-                            // ignore errors when revoking token during logout
-                        }
-                    }
+        // Find the session by sessionToken JTI
+        const session = await prisma.session.findFirst({
+            where: {
+                userId: userId,
+                sessionToken: sessionTokenJti,
+            },
+            select: {
+                id: true,
+            },
+        });
 
-                    // Revoke session in database
-                    await prisma.session.update({
-                        where: { id: session.id },
-                        data: {
-                            isRevoked: true,
-                            isActive: false,
-                            revokedAt: new Date(),
-                        },
-                    });
-                }
-            } catch {
-                // ignore errors when revoking session during logout
-            }
+        if (!session) {
+            // Session not found, but still return success (already logged out)
+            return res.json({
+                message: "Logged out successfully",
+            });
         }
 
-        // Also revoke refresh token from request if provided (fallback)
-        if (refreshToken) {
-            try {
-                const payload = await verifyRefreshToken(refreshToken);
-                await revokeRefreshTokenByJti(payload.jti);
-            } catch {
-                // ignore errors when revoking token during logout
-            }
-        }
+        // Use the working revokeSession utility function
+        await revokeSession(session.id, userId, sessionTokenJti);
 
-        res.json({ message: "Logged out" });
+        res.json({
+            message: "Logged out successfully",
+            sessionsDeleted: 1
+        });
     } catch (err) {
         next(err);
     }
-}
+};
 
 export const refreshToken = async (req: Request, res: Response, next: NextFunction) => {
     try {
@@ -585,6 +602,7 @@ export const refreshToken = async (req: Request, res: Response, next: NextFuncti
                 profileImg: true,
                 isActive: true,
                 deletedAt: true,
+                twoFactorEnabled: true,
             },
         });
 
@@ -654,6 +672,7 @@ export const refreshToken = async (req: Request, res: Response, next: NextFuncti
                 onboardingCompleted: user.onboardingCompleted,
                 role: user.role,
                 profileImg: user.profileImg,
+                twoFactorEnabled: user.twoFactorEnabled,
             },
             accessToken,
             refreshToken: newRefreshToken,
@@ -697,6 +716,14 @@ export const getMyProfile = async (req: Request, res: Response, next: NextFuncti
                 bio: true,
                 goals: true,
                 newsletterEnabled: true,
+                // Include user preferences
+                preferences: {
+                    select: {
+                        language: true,
+                        themePreference: true,
+                        notifications: true
+                    },
+                },
                 // Explicitly exclude sensitive fields
                 password: false,
                 deletedAt: false,

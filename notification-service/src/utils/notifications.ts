@@ -2,9 +2,192 @@ import prisma from "../libs/prisma";
 import { messaging } from "../libs/firebase";
 import admin from "../libs/firebase";
 import { getUserFcmTokens, getUserFcmTokensWithPlatform } from "./fcm-tokens";
+import { sendToUser } from "../libs/sse";
+
+// Auth service URL for fetching user preferences
+const AUTH_SERVICE_URL = process.env.AUTH_SERVICE_URL || "http://localhost:6001";
+const INTERNAL_SERVICE_SECRET = process.env.INTERNAL_SERVICE_SECRET || "";
 
 /**
- * Publish a notification to a user via FCM push notification and save to database
+ * Fetch user notification preference from auth-service
+ * Returns true if notifications are enabled, false otherwise
+ */
+async function getUserNotificationPreference(userId: string): Promise<boolean> {
+  try {
+    const response = await fetch(`${AUTH_SERVICE_URL}/api/v1/internal/users/${userId}/preferences`, {
+      headers: {
+        "x-internal-service-secret": INTERNAL_SERVICE_SECRET,
+      },
+    });
+
+    if (!response.ok) {
+      console.warn(`[Notification] Failed to fetch user preferences for ${userId}, defaulting to enabled`);
+      return true; // Default to enabled if we can't fetch
+    }
+
+    const data = await response.json();
+    // notifications field: true = enabled, false = disabled, null/undefined = default to true
+    return data.notifications !== false;
+  } catch (error) {
+    console.error(`[Notification] Error fetching user preferences for ${userId}:`, error);
+    return true; // Default to enabled on error
+  }
+}
+
+/**
+ * Send a silent push notification to a specific device
+ * Used for background data sync like location requests
+ */
+export async function sendSilentPushNotification(
+  token: string,
+  platform: string | null,
+  data: Record<string, string>
+): Promise<void> {
+  if (!messaging) {
+    console.warn("[FCM] FCM not available, skipping silent push notification");
+    throw new Error("Push notifications are not configured");
+  }
+
+  try {
+    const message: admin.messaging.Message = {
+      token,
+      data,
+      // Android configuration for silent/data-only notification
+      android: {
+        priority: "high",
+        // No notification field = silent/data-only message
+      },
+      // iOS configuration for silent notification
+      apns: {
+        payload: {
+          aps: {
+            "content-available": 1, // Silent notification flag
+            // No alert, sound, or badge = silent
+          },
+        },
+        headers: {
+          "apns-priority": "10", // High priority for immediate delivery
+          "apns-push-type": "background", // Background push type
+        },
+      },
+    };
+
+    const response = await messaging.send(message);
+    console.log(`[FCM] Silent push notification sent successfully: ${response}`);
+  } catch (error) {
+    console.error("[FCM] Error sending silent push notification:", error);
+    throw error;
+  }
+}
+
+/**
+ * Update an existing notification's data (e.g., mark request as accepted/declined)
+ * Also sends real-time update via SSE
+ */
+export async function updateNotification(
+  notificationId: string,
+  updates: {
+    type?: string;
+    data?: Record<string, any>;
+  }
+): Promise<void> {
+  try {
+    const notification = await prisma.notification.findUnique({
+      where: { id: notificationId },
+    });
+
+    if (!notification) {
+      console.warn(`[Notification] Notification ${notificationId} not found for update`);
+      return;
+    }
+
+    // Merge existing data with updates
+    const existingData = notification.data as Record<string, any>;
+    const newData = updates.data ? { ...existingData, ...updates.data } : existingData;
+
+    const updated = await prisma.notification.update({
+      where: { id: notificationId },
+      data: {
+        type: updates.type || notification.type,
+        data: newData,
+      },
+    });
+
+    // Send real-time update via SSE
+    const payload = {
+      id: updated.id,
+      type: updated.type,
+      data: newData,
+      read: updated.read,
+      createdAt: updated.createdAt.toISOString(),
+      updated: true, // Flag to indicate this is an update, not a new notification
+    };
+
+    sendToUser(notification.userId, payload);
+    console.log(`[Notification] Updated notification ${notificationId} for user ${notification.userId}`);
+  } catch (error) {
+    console.error(`[Notification] Error updating notification ${notificationId}:`, error);
+  }
+}
+
+/**
+ * Update notifications by type and data criteria
+ * Useful for updating request notifications when they're accepted/declined
+ */
+export async function updateNotificationsByType(
+  userId: string,
+  type: string,
+  matchCriteria: Record<string, any>,
+  updates: {
+    newType?: string;
+    dataUpdates?: Record<string, any>;
+  }
+): Promise<void> {
+  try {
+    // Find notifications matching the criteria
+    const notifications = await prisma.notification.findMany({
+      where: {
+        userId,
+        type,
+      },
+    });
+
+    for (const notification of notifications) {
+      const data = notification.data as Record<string, any>;
+      
+      // Check if notification matches the criteria
+      const matches = Object.entries(matchCriteria).every(([key, value]) => {
+        // Handle nested keys like "child.id"
+        const keys = key.split('.');
+        let current = data;
+        for (const k of keys) {
+          if (current && typeof current === 'object' && k in current) {
+            current = current[k];
+          } else {
+            return false;
+          }
+        }
+        return current === value;
+      });
+
+      if (matches) {
+        await updateNotification(notification.id, {
+          type: updates.newType,
+          data: updates.dataUpdates,
+        });
+      }
+    }
+  } catch (error) {
+    console.error(`[Notification] Error updating notifications by type:`, error);
+  }
+}
+
+/**
+ * Publish a notification to a user
+ * - Checks for recent duplicates to prevent spam
+ * - Always saves to database
+ * - Always sends via SSE for real-time in-app delivery
+ * - Only sends FCM push if user's notification preference is enabled
  */
 export async function publishNotification(
   userId: string,
@@ -15,8 +198,33 @@ export async function publishNotification(
 ): Promise<void> {
   const startTime = Date.now();
   try {
+    // Check for duplicate notification in the last 30 seconds
+    // This prevents duplicate notifications from rapid retries or double-clicks
+    const thirtySecondsAgo = new Date(Date.now() - 30 * 1000);
+    const recentDuplicate = await prisma.notification.findFirst({
+      where: {
+        userId,
+        type: data.type,
+        createdAt: { gte: thirtySecondsAgo },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    if (recentDuplicate) {
+      // Check if the notification data is similar (same device for security alerts)
+      const existingData = recentDuplicate.data as Record<string, any>;
+      const isSameDevice = data.newDevice && existingData.newDevice &&
+        data.newDevice.name === existingData.newDevice?.name &&
+        data.newDevice.platform === existingData.newDevice?.platform;
+      
+      if (isSameDevice || data.type === recentDuplicate.type) {
+        console.log(`[Notification] Skipping duplicate notification for user ${userId}, type: ${data.type} (sent ${Math.round((Date.now() - recentDuplicate.createdAt.getTime()) / 1000)}s ago)`);
+        return; // Skip duplicate
+      }
+    }
+
     // Save to database for persistence and pagination
-    const dbPromise = prisma.notification.create({
+    const notification = await prisma.notification.create({
       data: {
         userId,
         type: data.type,
@@ -24,11 +232,29 @@ export async function publishNotification(
       },
     });
 
-    // Send FCM push notification to all user's devices
-    const fcmPromise = sendFcmNotification(userId, data);
+    // Prepare notification payload for real-time delivery
+    const notificationPayload = {
+      id: notification.id,
+      type: data.type,
+      data: data,
+      read: false,
+      createdAt: notification.createdAt.toISOString(),
+    };
 
-    // Execute both in parallel
-    await Promise.all([dbPromise, fcmPromise]);
+    // Always send via SSE for real-time in-app delivery
+    const sseSent = sendToUser(userId, notificationPayload);
+    console.log(`[Notification] SSE delivery for user ${userId}: ${sseSent ? "sent" : "no active connections"}`);
+
+    // Check user's notification preference before sending FCM
+    const notificationsEnabled = await getUserNotificationPreference(userId);
+    
+    if (notificationsEnabled) {
+      // User has notifications enabled - send FCM push
+      await sendFcmNotification(userId, data);
+      console.log(`[Notification] FCM push sent for user ${userId} (notifications enabled)`);
+    } else {
+      console.log(`[Notification] Skipping FCM push for user ${userId} (notifications disabled)`);
+    }
 
     const duration = Date.now() - startTime;
     console.log(`[Notification] Published notification for user ${userId}, type: ${data.type}, duration: ${duration}ms`);
@@ -251,6 +477,11 @@ function getNotificationTitle(type: string): string {
     unlink_request: "Unlink Request",
     unlink_request_accepted: "Unlink Request Accepted",
     unlink_request_declined: "Unlink Request Declined",
+    // Security notifications
+    security_new_device_blocked: "Security Alert: New Device Login Attempt",
+    security_device_verified: "New Device Added",
+    security_password_changed: "Password Changed",
+    security_account_locked: "Account Locked",
   };
 
   return titles[type] || "New Notification";
@@ -278,6 +509,15 @@ function getNotificationBody(
       return `${data.accepterName || "Someone"} accepted your unlink request`;
     case "unlink_request_declined":
       return `${data.declinerName || "Someone"} declined your unlink request`;
+    // Security notifications
+    case "security_new_device_blocked":
+      return data.body || `Someone tried to log in from a new device (${data.newDevice?.name || "Unknown"}). If this wasn't you, please secure your account.`;
+    case "security_device_verified":
+      return `A new device (${data.deviceName || "Unknown"}) has been added to your account.`;
+    case "security_password_changed":
+      return "Your password was recently changed. If you didn't do this, please contact support immediately.";
+    case "security_account_locked":
+      return "Your account has been locked due to suspicious activity. Please verify your identity to unlock.";
     default:
       return "You have a new notification";
   }

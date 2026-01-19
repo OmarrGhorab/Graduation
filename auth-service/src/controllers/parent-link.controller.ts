@@ -2,7 +2,7 @@ import { Request, Response, NextFunction } from "express";
 import prisma from "../libs/prisma";
 import { BadRequestError, NotFoundError, UnauthorizedError } from "../utils/errors";
 import { UserRole, Prisma } from "@prisma/client";
-import { publishNotification as publishNotificationUtil } from "../utils/notifications-client";
+import { publishNotification as publishNotificationUtil, updateNotifications } from "../utils/notifications-client";
 import { sendParentLinkRequestHelper, sendUnlinkRequestHelper } from "../utils/parent-link";
 import {
   RequestStatus,
@@ -19,6 +19,39 @@ import {
   fetchLinkedAccounts,
   validateParentUser,
 } from "../services/parentLink.service";
+
+/**
+ * Verify if a parent-child link exists (internal service endpoint)
+ */
+export const verifyParentChildLink = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const { parentId, childId } = req.query;
+
+    if (!parentId || !childId) {
+      throw new BadRequestError("parentId and childId are required");
+    }
+
+    const link = await prisma.parentChildLink.findFirst({
+      where: {
+        parentId: parentId as string,
+        childId: childId as string,
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    res.status(200).json({
+      linked: !!link,
+    });
+  } catch (err) {
+    next(err);
+  }
+};
 
 /**
  * Search for parents by username or email (paginated)
@@ -287,6 +320,20 @@ export const respondToRequest = async (
       respondedAt: result.respondedAt?.toISOString(),
     });
 
+    // Update the parent's original notification to show the new status
+    await updateNotifications(
+      parentId,
+      "parent_link_request",
+      { requestId: request.id },
+      {
+        dataUpdates: {
+          status: result.status,
+          respondedAt: result.respondedAt?.toISOString(),
+          actionTaken: action,
+        },
+      }
+    );
+
     res.status(200).json({
       message: `Request ${action}ed successfully`,
       request: {
@@ -467,14 +514,33 @@ export const respondToUnlinkRequest = async (
 
       // If accepted, delete parent-child link
       if (action === "accept") {
-        await tx.parentChildLink.delete({
+        console.log(`[Unlink] Deleting parent-child link: parentId=${request.parentId}, childId=${request.childId}`);
+        
+        const deleteResult = await tx.parentChildLink.deleteMany({
           where: {
-            parentId_childId: {
-              parentId: request.parentId,
-              childId: request.childId,
-            },
+            parentId: request.parentId,
+            childId: request.childId,
           },
         });
+        
+        console.log(`[Unlink] Deleted ${deleteResult.count} link(s)`);
+        
+        if (deleteResult.count === 0) {
+          console.warn(`[Unlink] No link found to delete for parentId=${request.parentId}, childId=${request.childId}`);
+        }
+
+        // Also reset the ParentLinkRequest status so they can re-link in the future
+        await tx.parentLinkRequest.updateMany({
+          where: {
+            parentId: request.parentId,
+            childId: request.childId,
+            status: RequestStatus.ACCEPTED,
+          },
+          data: {
+            status: RequestStatus.CANCELLED,
+          },
+        });
+        console.log(`[Unlink] Reset ParentLinkRequest status to CANCELLED`);
       }
 
       return updatedRequest;
@@ -495,6 +561,20 @@ export const respondToUnlinkRequest = async (
       status: result.status,
       respondedAt: result.respondedAt?.toISOString(),
     });
+
+    // Update the parent's original notification to show the new status
+    await updateNotifications(
+      parentId,
+      "unlink_request",
+      { requestId: request.id },
+      {
+        dataUpdates: {
+          status: result.status,
+          respondedAt: result.respondedAt?.toISOString(),
+          actionTaken: action,
+        },
+      }
+    );
 
     res.status(200).json({
       message: `Unlink request ${action}ed successfully`,

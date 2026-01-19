@@ -6,6 +6,7 @@ import {
   registerFcmToken,
   unregisterFcmToken,
 } from "../utils/fcm-tokens";
+import { addConnection, removeConnection, getConnectionCount } from "../libs/sse";
 
 /**
  * Get paginated notifications for the authenticated user
@@ -261,9 +262,13 @@ export const publishNotificationEndpoint = async (
   next: NextFunction
 ) => {
   try {
+    console.log(`[Notification Controller] Received request body:`, JSON.stringify(req.body));
+    console.log(`[Notification Controller] Headers:`, JSON.stringify(req.headers));
+    
     const { userId, type, ...data } = req.body;
 
     if (!userId || !type) {
+      console.log(`[Notification Controller] Missing required fields - userId: ${userId}, type: ${type}`);
       throw new BadRequestError("userId and type are required");
     }
 
@@ -277,6 +282,8 @@ export const publishNotificationEndpoint = async (
       ...data,
     });
 
+    console.log(`[Notification Controller] Successfully published notification for user ${userId}`);
+
     res.status(200).json({
       message: "Notification published successfully",
       data: {
@@ -285,6 +292,92 @@ export const publishNotificationEndpoint = async (
         timestamp: new Date().toISOString(),
       },
     });
+  } catch (err) {
+    console.error(`[Notification Controller] Error:`, err);
+    next(err);
+  }
+};
+
+/**
+ * Update existing notifications endpoint
+ * Used to update notification status (e.g., mark request as accepted/declined)
+ */
+export const updateNotificationsEndpoint = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const { userId, type, matchCriteria, newType, dataUpdates } = req.body;
+
+    if (!userId || !type || !matchCriteria) {
+      throw new BadRequestError("userId, type, and matchCriteria are required");
+    }
+
+    const { updateNotificationsByType } = await import("../utils/notifications");
+
+    console.log(`[Notification Controller] Updating notifications for user ${userId}, type: ${type}`, { matchCriteria, newType, dataUpdates });
+
+    await updateNotificationsByType(userId, type, matchCriteria, {
+      newType,
+      dataUpdates,
+    });
+
+    res.status(200).json({
+      message: "Notifications updated successfully",
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
+ * SSE endpoint for real-time in-app notifications
+ * Clients connect to this endpoint to receive notifications in real-time
+ */
+export const subscribeToNotifications = async (
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    if (!req.user) {
+      throw new UnauthorizedError("User not authenticated");
+    }
+
+    const userId = req.user.id;
+
+    // Set SSE headers
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Connection", "keep-alive");
+    res.setHeader("X-Accel-Buffering", "no"); // Disable nginx buffering
+    res.flushHeaders();
+
+    // Send initial connection confirmation
+    res.write(`data: ${JSON.stringify({ type: "connected", message: "SSE connection established" })}\n\n`);
+
+    // Add this connection to the user's connections
+    addConnection(userId, res);
+
+    // Send heartbeat every 30 seconds to keep connection alive
+    const heartbeatInterval = setInterval(() => {
+      try {
+        res.write(`: heartbeat\n\n`);
+      } catch (error) {
+        clearInterval(heartbeatInterval);
+      }
+    }, 30000);
+
+    // Handle client disconnect
+    req.on("close", () => {
+      clearInterval(heartbeatInterval);
+      removeConnection(userId, res);
+      console.log(`[SSE] Client disconnected for user ${userId}`);
+    });
+
+    // Log connection info
+    console.log(`[SSE] New subscription for user ${userId}, total connections: ${getConnectionCount(userId)}`);
   } catch (err) {
     next(err);
   }

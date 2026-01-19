@@ -1,5 +1,5 @@
 import express from 'express';
-import { authenticate } from '../middleware';
+import { authenticate, authenticateInternalService } from '../middleware';
 import {
   searchParents,
   sendParentLinkRequest,
@@ -9,9 +9,13 @@ import {
   sendUnlinkRequest,
   getPendingUnlinkRequests,
   respondToUnlinkRequest,
+  verifyParentChildLink,
 } from '../controllers/parent-link.controller';
 
 const router = express.Router();
+
+// Internal service endpoint (for notification-service to verify links)
+router.get('/verify-link', authenticateInternalService, verifyParentChildLink);
 
 // All routes require authentication
 router.get('/search', authenticate, searchParents);

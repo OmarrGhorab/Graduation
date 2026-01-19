@@ -6,8 +6,10 @@ import {
   markNotificationsRead,
   deleteNotification,
   publishNotificationEndpoint,
+  updateNotificationsEndpoint,
   registerFcmTokenEndpoint,
   unregisterFcmTokenEndpoint,
+  subscribeToNotifications,
 } from '../controllers/notifications.controller';
 
 const router = express.Router();
@@ -15,6 +17,12 @@ const router = express.Router();
 // Internal endpoint for other services to publish notifications
 // Protected by internal service authentication
 router.post('/publish', authenticateInternalService, publishNotificationEndpoint);
+
+// Internal endpoint to update existing notifications
+router.patch('/update', authenticateInternalService, updateNotificationsEndpoint);
+
+// SSE endpoint for real-time in-app notifications (requires user authentication)
+router.get('/subscribe', authenticate, subscribeToNotifications);
 
 // FCM token management endpoints (requires user authentication)
 router.post('/register-token', authenticate, registerFcmTokenEndpoint);

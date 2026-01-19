@@ -63,12 +63,20 @@ export const uploadProfileImageEndpoint = async (req: Request, res: Response, ne
         name: true,
         email: true,
         profileImg: true,
+        password: true, // Need to check if password exists
       },
     });
 
+    // Add hasPassword field and remove the actual password from response
+    const hasPassword = !!updatedUser.password;
+    const { password, ...userWithoutPassword } = updatedUser;
+
     res.status(200).json({
       message: "Profile image updated successfully",
-      user: updatedUser,
+      user: {
+        ...userWithoutPassword,
+        hasPassword,
+      },
     });
   } catch (err) {
     next(err);
@@ -86,7 +94,7 @@ export const updateProfile = async (req: Request, res: Response, next: NextFunct
     }
 
     const userId = req.user.id;
-    const { name, username, password, currentPassword } = req.body;
+    const { name, username, password, currentPassword, bio, goals, interests } = req.body;
 
     // Fetch current user
     const currentUser = await prisma.user.findUnique({
@@ -153,29 +161,63 @@ export const updateProfile = async (req: Request, res: Response, next: NextFunct
 
     // Update password if provided
     if (password !== undefined && password.trim() !== "") {
-      if (!currentPassword) {
-        throw new BadRequestError("Current password is required to change password");
-      }
-
       // Check if user has a password (OAuth users don't have passwords)
       if (!currentUser.password) {
-        throw new BadRequestError("Cannot change password for OAuth accounts. Please set a password first.");
-      }
+        // OAuth user setting password for the first time - no current password needed
+        // Validate new password
+        if (password.length < 6) {
+          throw new BadRequestError("Password must be at least 6 characters long");
+        }
 
-      // Verify current password
-      const isPasswordValid = await bcrypt.compare(currentPassword, currentUser.password);
-      if (!isPasswordValid) {
-        throw new BadRequestError("Current password is incorrect");
-      }
+        // Hash new password
+        const hashedPassword = await bcrypt.hash(password, 10);
+        updateData.password = hashedPassword;
+      } else {
+        // User already has a password - require current password to change it
+        if (!currentPassword) {
+          throw new BadRequestError("Current password is required to change password");
+        }
 
-      // Validate new password
-      if (password.length < 6) {
-        throw new BadRequestError("Password must be at least 6 characters long");
-      }
+        // Verify current password
+        const isPasswordValid = await bcrypt.compare(currentPassword, currentUser.password);
+        if (!isPasswordValid) {
+          throw new BadRequestError("Current password is incorrect");
+        }
 
-      // Hash new password
-      const hashedPassword = await bcrypt.hash(password, 10);
-      updateData.password = hashedPassword;
+        // Validate new password
+        if (password.length < 6) {
+          throw new BadRequestError("Password must be at least 6 characters long");
+        }
+
+        // Hash new password
+        const hashedPassword = await bcrypt.hash(password, 10);
+        updateData.password = hashedPassword;
+      }
+    }
+
+    // Update bio if provided
+    if (bio !== undefined) {
+      if (bio.trim().length > 200) {
+        throw new BadRequestError("Bio must be at most 200 characters");
+      }
+      updateData.bio = bio.trim();
+    }
+
+    // Update goals if provided
+    if (goals !== undefined) {
+      if (!Array.isArray(goals)) {
+        throw new BadRequestError("Goals must be an array");
+      }
+      if (goals.length > 3) {
+        throw new BadRequestError("Maximum 3 goals allowed");
+      }
+      updateData.goals = goals;
+    }
+
+    // Update interests if provided
+    if (interests !== undefined && Array.isArray(interests)) {
+      // This will be handled separately after the user update
+      // to properly manage the Interest and UserInterest tables
     }
 
     // Update user
@@ -189,12 +231,76 @@ export const updateProfile = async (req: Request, res: Response, next: NextFunct
         email: true,
         profileImg: true,
         lastUsernameChange: true,
+        bio: true,
+        goals: true,
       },
     });
 
+    // Handle interests update if provided
+    if (interests !== undefined && Array.isArray(interests)) {
+      // Remove existing interests
+      await prisma.userInterest.deleteMany({
+        where: { userId },
+      });
+
+      // Add new interests
+      for (const interestName of interests) {
+        if (!interestName || typeof interestName !== "string") {
+          continue;
+        }
+
+        // Find or create the interest
+        const interest = await prisma.interest.upsert({
+          where: { name: interestName.trim() },
+          create: { name: interestName.trim() },
+          update: {},
+        });
+
+        // Link user to interest
+        await prisma.userInterest.create({
+          data: {
+            userId,
+            interestId: interest.id,
+          },
+        });
+      }
+    }
+
+    // Fetch updated user with interests
+    const userWithInterests = await prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        username: true,
+        name: true,
+        email: true,
+        profileImg: true,
+        lastUsernameChange: true,
+        bio: true,
+        goals: true,
+        password: true, // Need to check if password exists
+        interests: {
+          include: {
+            interest: true,
+          },
+        },
+      },
+    });
+
+    // Add hasPassword field and remove the actual password from response
+    const hasPassword = !!userWithInterests?.password;
+    const { password: _, ...userWithoutPassword } = userWithInterests || {};
+
     res.status(200).json({
       message: "Profile updated successfully",
-      user: updatedUser,
+      user: {
+        ...userWithoutPassword,
+        hasPassword,
+        interests: userWithInterests?.interests.map((ui) => ({
+          id: ui.interest.id,
+          name: ui.interest.name,
+        })),
+      },
     });
   } catch (err) {
     next(err);
@@ -260,8 +366,22 @@ export const getProfile = async (req: Request, res: Response, next: NextFunction
         bio: true,
         goals: true,
         newsletterEnabled: true,
+        onboardingCompleted: true,
         lastUsernameChange: true,
         createdAt: true,
+        password: true, // Need to check if password exists
+        interests: {
+          include: {
+            interest: true,
+          },
+        },
+        preferences: {
+          select: {
+            language: true,
+            themePreference: true,
+            notifications: true,
+          },
+        },
       },
     });
 
@@ -280,10 +400,219 @@ export const getProfile = async (req: Request, res: Response, next: NextFunction
       nextUsernameChangeDate.setDate(nextUsernameChangeDate.getDate() + 14);
     }
 
+    // Add hasPassword field and remove the actual password from response
+    const hasPassword = !!user.password;
+    const { password, ...userWithoutPassword } = user;
+
     res.status(200).json({
-      user,
+      user: {
+        ...userWithoutPassword,
+        hasPassword,
+        interests: userWithoutPassword.interests.map((ui) => ({
+          id: ui.interest.id,
+          name: ui.interest.name,
+        })),
+      },
       canChangeUsername,
       nextUsernameChangeDate,
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+
+/**
+ * Check if username is available
+ * Public endpoint - no authentication required
+ */
+export const checkUsernameAvailability = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { username } = req.query;
+
+    if (!username || typeof username !== "string") {
+      throw new BadRequestError("Username is required");
+    }
+
+    const normalizedUsername = username.trim().toLowerCase();
+
+    if (normalizedUsername.length < 3) {
+      return res.status(400).json({
+        available: false,
+        message: "Username must be at least 3 characters long",
+      });
+    }
+
+    if (normalizedUsername.length > 30) {
+      return res.status(400).json({
+        available: false,
+        message: "Username must be at most 30 characters long",
+      });
+    }
+
+    // Check if username contains only valid characters (alphanumeric, underscore, hyphen)
+    const validUsernameRegex = /^[a-z0-9_-]+$/;
+    if (!validUsernameRegex.test(normalizedUsername)) {
+      return res.status(400).json({
+        available: false,
+        message: "Username can only contain letters, numbers, underscores, and hyphens",
+      });
+    }
+
+    // Check if username exists
+    const existingUser = await prisma.user.findUnique({
+      where: { username: normalizedUsername },
+      select: { id: true },
+    });
+
+    if (existingUser) {
+      // Generate suggestions
+      const suggestions = await generateUsernameSuggestions(normalizedUsername);
+      
+      return res.status(200).json({
+        available: false,
+        message: "Username is already taken",
+        suggestions: suggestions.length > 0 ? suggestions : undefined,
+      });
+    }
+
+    res.status(200).json({
+      available: true,
+      message: "Username is available",
+      username: normalizedUsername,
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
+ * Update user preferences (theme, language, notifications, newsletter)
+ */
+export const updatePreferences = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    if (!req.user) {
+      throw new BadRequestError("User not authenticated");
+    }
+
+    const userId = req.user.id;
+    const { language, themePreference, notifications, newsletterEnabled } = req.body;
+
+    const updateData: any = {};
+    const preferenceUpdateData: any = {};
+
+    // Validate and update language
+    if (language !== undefined) {
+      const validLanguages = ["system", "en", "ar"]; // "system" = use device language
+      if (!validLanguages.includes(language)) {
+        throw new BadRequestError(`Invalid language. Must be one of: ${validLanguages.join(", ")}`);
+      }
+      preferenceUpdateData.language = language;
+    }
+
+    // Validate and update theme
+    if (themePreference !== undefined) {
+      const validThemes = ["system", "light", "dark"]; // "system" = follow device theme
+      if (!validThemes.includes(themePreference)) {
+        throw new BadRequestError(`Invalid theme. Must be one of: ${validThemes.join(", ")}`);
+      }
+      preferenceUpdateData.themePreference = themePreference;
+    }
+
+    // Update notifications preference
+    if (notifications !== undefined) {
+      if (typeof notifications !== "boolean") {
+        throw new BadRequestError("Notifications must be a boolean value");
+      }
+      preferenceUpdateData.notifications = notifications;
+    }
+
+    // Update newsletter preference (stored in User table)
+    if (newsletterEnabled !== undefined) {
+      if (typeof newsletterEnabled !== "boolean") {
+        throw new BadRequestError("Newsletter enabled must be a boolean value");
+      }
+      updateData.newsletterEnabled = newsletterEnabled;
+    }
+
+    // Update user preferences and newsletter setting in a transaction
+    const result = await prisma.$transaction(async (tx) => {
+      // Update or create user preferences if there are preference changes
+      let preferences = null;
+      if (Object.keys(preferenceUpdateData).length > 0) {
+        preferences = await tx.userPreference.upsert({
+          where: { userId },
+          create: {
+            userId,
+            language: preferenceUpdateData.language || "system",
+            themePreference: preferenceUpdateData.themePreference || "system",
+            notifications: preferenceUpdateData.notifications !== undefined ? preferenceUpdateData.notifications : true,
+          },
+          update: preferenceUpdateData,
+        });
+      }
+
+      // Update user newsletter setting if provided
+      let user = null;
+      if (Object.keys(updateData).length > 0) {
+        user = await tx.user.update({
+          where: { id: userId },
+          data: updateData,
+          select: {
+            id: true,
+            newsletterEnabled: true,
+          },
+        });
+      }
+
+      // Fetch complete preferences
+      if (!preferences) {
+        preferences = await tx.userPreference.findUnique({
+          where: { userId },
+        });
+      }
+
+      return { preferences, user };
+    });
+
+    res.status(200).json({
+      message: "Preferences updated successfully",
+      preferences: result.preferences,
+      newsletterEnabled: result.user?.newsletterEnabled,
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
+ * Get user preferences
+ */
+export const getPreferences = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    if (!req.user) {
+      throw new BadRequestError("User not authenticated");
+    }
+
+    const userId = req.user.id;
+
+    const [preferences, user] = await Promise.all([
+      prisma.userPreference.findUnique({
+        where: { userId },
+      }),
+      prisma.user.findUnique({
+        where: { id: userId },
+        select: { newsletterEnabled: true },
+      }),
+    ]);
+
+    res.status(200).json({
+      preferences: preferences || {
+        language: "system", // "system" means use device language, fallback to "en" if not ar/en
+        themePreference: "system", // "system" means follow device theme
+        notifications: true,
+      },
+      newsletterEnabled: user?.newsletterEnabled || false,
     });
   } catch (err) {
     next(err);

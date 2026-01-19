@@ -8,6 +8,13 @@ export interface DeviceInfo {
     ipAddress: string | null;
     platform: Platform | null;
     deviceName?: string | null;
+    // Client-provided info from headers
+    clientDeviceName?: string | null;
+    clientDeviceModel?: string | null;
+    clientOsVersion?: string | null;
+    clientAppVersion?: string | null;
+    clientLocation?: string | null;
+    clientTimezone?: string | null;
 }
 
 /**
@@ -120,12 +127,29 @@ export function generateDeviceFingerprint(
 
 /**
  * Extract device information from request
+ * Supports custom headers from mobile clients:
+ * - X-Device-Name: Custom device name (e.g., "Omar's iPhone")
+ * - X-Device-Model: Device model (e.g., "iPhone 15 Pro", "Samsung Galaxy S24")
+ * - X-Device-OS-Version: OS version (e.g., "iOS 17.2", "Android 14")
+ * - X-App-Version: App version (e.g., "1.0.0")
+ * - X-Device-Location: Location string (e.g., "Cairo, Egypt")
+ * - X-Device-Timezone: Timezone (e.g., "Africa/Cairo")
+ * - X-Device-Platform: Platform override (e.g., "android", "ios")
  */
 export function extractDeviceInfo(req: Request, deviceName?: string): DeviceInfo {
     const userAgent = req.headers["user-agent"] || null;
     const ipAddress = getClientIp(req);
     const acceptLanguage = req.headers["accept-language"] || null;
     const acceptEncoding = req.headers["accept-encoding"] || null;
+
+    // Extract custom headers from client
+    const clientDeviceName = getHeader(req, "x-device-name");
+    const clientDeviceModel = getHeader(req, "x-device-model");
+    const clientOsVersion = getHeader(req, "x-device-os-version");
+    const clientAppVersion = getHeader(req, "x-app-version");
+    const clientLocation = getHeader(req, "x-device-location");
+    const clientTimezone = getHeader(req, "x-device-timezone");
+    const clientPlatform = getHeader(req, "x-device-platform");
 
     const fingerprint = generateDeviceFingerprint(
         userAgent,
@@ -134,15 +158,42 @@ export function extractDeviceInfo(req: Request, deviceName?: string): DeviceInfo
         acceptEncoding || undefined
     );
 
-    const platform = detectPlatform(userAgent || undefined);
+    // Use client-provided platform if valid, otherwise detect from user agent
+    let platform = detectPlatform(userAgent || undefined);
+    if (clientPlatform) {
+        const normalizedPlatform = clientPlatform.toUpperCase();
+        if (normalizedPlatform === "ANDROID") platform = Platform.ANDROID;
+        else if (normalizedPlatform === "IOS") platform = Platform.IOS;
+        else if (normalizedPlatform === "WEB") platform = Platform.WEB;
+        else if (normalizedPlatform === "DESKTOP") platform = Platform.DESKTOP;
+    }
+
+    // Build device name: prefer client-provided, then parameter, then extracted
+    const finalDeviceName = clientDeviceName || deviceName || extractDeviceName(userAgent) || null;
 
     return {
         fingerprint,
         userAgent,
         ipAddress,
         platform,
-        deviceName: deviceName || null,
+        deviceName: finalDeviceName,
+        // Client-provided info
+        clientDeviceName,
+        clientDeviceModel,
+        clientOsVersion,
+        clientAppVersion,
+        clientLocation,
+        clientTimezone,
     };
+}
+
+/**
+ * Helper to get a header value as string
+ */
+function getHeader(req: Request, name: string): string | null {
+    const value = req.headers[name];
+    if (!value) return null;
+    return typeof value === "string" ? value : value[0] || null;
 }
 
 /**

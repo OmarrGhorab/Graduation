@@ -38,8 +38,6 @@ model User {
   updatedAt                DateTime        @updatedAt
 
   providers              AuthProvider[]
-  verifications          Verification[]
-  passwordResets         PasswordReset[]
   interests              UserInterest[]
   enrollments            CourseEnrollment[]
   devices                UserDevice[]
@@ -50,6 +48,7 @@ model User {
   receivedUnlinkRequests UnlinkRequest[]     @relation("ReceivedUnlinkRequests")
   parentLinks            ParentChildLink[]   @relation("ChildLinks")
   childLinks             ParentChildLink[]   @relation("ParentLinks")
+  locationHistory        LocationHistory[]
 
   @@index([username])
   @@index([role])
@@ -59,8 +58,8 @@ model User {
 model UserPreference {
   id              String   @id @default(uuid())
   userId          String   @unique
-  language        String?  @default("en")
-  themePreference String?  @default("light")
+  language        String?  @default("system") // "system", "en", "ar" - if system language not ar/en, defaults to en
+  themePreference String?  @default("system") // "system", "light", "dark"
   notifications   Boolean? @default(true)
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -76,7 +75,6 @@ model UserDevice {
   userAgent         String?
   platform          Platform?
   isTrusted         Boolean   @default(false)
-  pushToken         String? // for notifications
   lastLoginAt       DateTime?
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
@@ -108,34 +106,6 @@ model AuthProvider {
 
   @@unique([provider, providerId])
   @@index([userId])
-}
-
-model Verification {
-  id         String           @id @default(uuid())
-  type       VerificationType
-  code       String
-  expiresAt  DateTime
-  verifiedAt DateTime?
-  user       User             @relation(fields: [userId], references: [id], onDelete: Cascade)
-  userId     String
-  createdAt  DateTime         @default(now())
-
-  @@unique([userId, type, code])
-  @@index([userId, type])
-}
-
-model PasswordReset {
-  id        String    @id @default(uuid())
-  token     String    @unique
-  expiresAt DateTime
-  used      Boolean   @default(false)
-  usedAt    DateTime?
-  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  userId    String
-  createdAt DateTime  @default(now())
-
-  @@index([userId])
-  @@index([token])
 }
 
 model Interest {
@@ -187,6 +157,13 @@ model Session {
   userAgent String? // Current user agent from latest request
   location  String? // Geographic location (city/country)
 
+  // GPS Location tracking (from mobile device headers)
+  lastLatitude          Float?    // GPS latitude coordinate
+  lastLongitude         Float?    // GPS longitude coordinate
+  lastLocationAccuracy  Float?    // Accuracy in meters (lower = more precise)
+  lastLocationAddress   String?   // Full reverse-geocoded address
+  lastLocationTimestamp DateTime? // When location was last updated
+
   // Session state
   isActive  Boolean @default(true)
   isRevoked Boolean @default(false)
@@ -206,6 +183,25 @@ model Session {
   @@index([refreshToken])
   @@index([isActive, expiresAt]) // For finding active, non-expired sessions
   @@index([userId, isActive]) // For finding user's active sessions
+  @@index([userId, isActive, isRevoked, expiresAt]) // OPTIMIZED: For auth middleware combined query
+  @@index([expiresAt]) // OPTIMIZED: For expired session cleanup jobs
+}
+
+// Location history for child tracking feature
+model LocationHistory {
+  id        String   @id @default(uuid())
+  userId    String
+  latitude  Float
+  longitude Float
+  accuracy  Float?
+  address   String?
+  timestamp DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([userId, timestamp])
+  @@index([timestamp]) // OPTIMIZED: For time-range queries and cleanup jobs
 }
 
 enum UserRole {
@@ -229,12 +225,6 @@ enum Provider {
   EMAIL
   GOOGLE
   APPLE
-}
-
-enum VerificationType {
-  EMAIL
-  TWO_FACTOR
-  DEVICE_VERIFICATION
 }
 
 model ParentLinkRequest {
