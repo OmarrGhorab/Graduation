@@ -322,6 +322,33 @@ export async function cleanupExpiredSessions(userId: string) {
 }
 
 /**
+ * OPTIMIZED: Global cleanup of all expired sessions
+ * Should be called periodically (e.g., via cron job or on server startup)
+ */
+export async function cleanupAllExpiredSessions(): Promise<number> {
+  const result = await prisma.session.deleteMany({
+    where: {
+      expiresAt: {
+        lt: new Date(),
+      },
+    },
+  });
+
+  console.log(`[Session Cleanup] Deleted ${result.count} expired sessions`);
+  return result.count;
+}
+
+/**
+ * OPTIMIZED: Cleanup expired sessions on user login
+ * Non-blocking cleanup to keep session table clean
+ */
+export async function cleanupExpiredSessionsOnLogin(userId: string): Promise<void> {
+  cleanupExpiredSessions(userId).catch((err) => {
+    console.error(`[Session Cleanup] Failed to cleanup sessions for user ${userId}:`, err);
+  });
+}
+
+/**
  * Get location data from IP address using free IP geolocation service
  */
 async function getLocationFromIp(ip: string): Promise<string | null> {

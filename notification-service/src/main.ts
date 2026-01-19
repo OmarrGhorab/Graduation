@@ -27,6 +27,41 @@ app.get("/", async (req: Request, res: Response) => {
     res.send(`notification service is running`);
 });
 
+// Debug endpoint to check env (REMOVE IN PRODUCTION)
+app.get("/debug/env", async (req: Request, res: Response) => {
+    res.json({
+        hasSecret: !!process.env.INTERNAL_SERVICE_SECRET,
+        secretLength: process.env.INTERNAL_SERVICE_SECRET?.length,
+        secretPreview: process.env.INTERNAL_SERVICE_SECRET?.substring(0, 20) + "...",
+    });
+});
+
+// Health check with dependency verification
+app.get("/health", async (req: Request, res: Response) => {
+    try {
+        // Check database connectivity
+        const dbHealthy = await prisma.$queryRaw`SELECT 1`.then(() => true).catch(() => false);
+        
+        const isHealthy = dbHealthy;
+        
+        res.status(isHealthy ? 200 : 503).json({
+            status: isHealthy ? "ok" : "degraded",
+            service: "notification-service",
+            dependencies: {
+                database: dbHealthy ? "ok" : "error",
+            },
+            timestamp: new Date().toISOString(),
+        });
+    } catch (error) {
+        res.status(503).json({
+            status: "error",
+            service: "notification-service",
+            error: "Health check failed",
+            timestamp: new Date().toISOString(),
+        });
+    }
+});
+
 app.use("/api/v1/notifications", notificationsRouter);
 app.use("/api/v1/location", locationRouter);
 

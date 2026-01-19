@@ -23,55 +23,63 @@ import {
   getSessionById,
   cleanupSessions,
 } from "../controllers/sessions.controller";
+import {
+  loginLimiter,
+  registerLimiter,
+  forgotPasswordLimiter,
+  otpVerifyLimiter,
+  refreshTokenLimiter,
+  generalApiLimiter,
+} from "../middleware/rateLimiter.middleware";
 
 const router = Router();
 
-// Auth routes
-router.post("/register", registerUser);
-router.post("/login", loginUser);
+// Auth routes - with rate limiting
+router.post("/register", registerLimiter, registerUser);
+router.post("/login", loginLimiter, loginUser);
 router.post("/logout", authenticate, logoutUser);
-router.post("/refresh", refreshToken);
+router.post("/refresh", refreshTokenLimiter, refreshToken);
 
 // Profile
-router.get("/myprofile", authenticate, getMyProfile);
+router.get("/myprofile", authenticate, generalApiLimiter, getMyProfile);
 
 // Google OAuth (Mobile App - ID Token Verification)
-router.post("/google/mobile", googleMobileAuth); // Accepts idToken in body, returns tokens in JSON
+router.post("/google/mobile", loginLimiter, googleMobileAuth); // Accepts idToken in body, returns tokens in JSON
 
-// Password recovery
-router.post("/forgot-password", forgotPassword);
-router.post("/verify-reset-otp", verifyResetOtp);
-router.post("/reset-password", resetPassword);
+// Password recovery - with rate limiting
+router.post("/forgot-password", forgotPasswordLimiter, forgotPassword);
+router.post("/verify-reset-otp", otpVerifyLimiter, verifyResetOtp);
+router.post("/reset-password", otpVerifyLimiter, resetPassword);
 
-// Email verification
-router.post("/verify-email-otp", verifyEmailOtp);
-router.post("/resend-verification-otp", resendVerificationOtp);
+// Email verification - with rate limiting
+router.post("/verify-email-otp", otpVerifyLimiter, verifyEmailOtp);
+router.post("/resend-verification-otp", forgotPasswordLimiter, resendVerificationOtp);
 
-// Device verification
-router.post("/verify-device", verifyDevice);
-router.post("/resend-device-verification-otp", resendDeviceVerificationOtp);
+// Device verification - with rate limiting
+router.post("/verify-device", otpVerifyLimiter, verifyDevice);
+router.post("/resend-device-verification-otp", forgotPasswordLimiter, resendDeviceVerificationOtp);
 
 // 2FA routes
-router.post("/2fa/verify-login", authenticate, verify2FALogin); // Requires authentication from login step
-router.get("/2fa/status", authenticate, get2FAStatus);
-router.post("/2fa/enable", authenticate, enable2FA);
-router.post("/2fa/verify-setup", authenticate, verify2FASetup);
-router.post("/2fa/disable", authenticate, disable2FA);
-router.post("/2fa/regenerate-backup-codes", authenticate, regenerateBackupCodes);
+router.post("/2fa/verify-login", authenticate, otpVerifyLimiter, verify2FALogin); // Requires authentication from login step
+router.get("/2fa/status", authenticate, generalApiLimiter, get2FAStatus);
+router.post("/2fa/enable", authenticate, generalApiLimiter, enable2FA);
+router.post("/2fa/verify-setup", authenticate, otpVerifyLimiter, verify2FASetup);
+router.post("/2fa/disable", authenticate, generalApiLimiter, disable2FA);
+router.post("/2fa/regenerate-backup-codes", authenticate, generalApiLimiter, regenerateBackupCodes);
 
 // Account management (Danger Zone)
-router.post("/account/deactivate", authenticate, deactivateAccount);
-router.post("/account/confirm-reactivation", authenticateDeactivated, confirmReactivation);
-router.post("/account/delete", authenticate, deleteAccount);
-router.delete("/account/profile-image", authenticate, deleteProfileImage);
+router.post("/account/deactivate", authenticate, generalApiLimiter, deactivateAccount);
+router.post("/account/confirm-reactivation", authenticateDeactivated, generalApiLimiter, confirmReactivation);
+router.post("/account/delete", authenticate, generalApiLimiter, deleteAccount);
+router.delete("/account/profile-image", authenticate, generalApiLimiter, deleteProfileImage);
 
 // Activity and Sessions
-router.get("/activity", authenticate, getActivity);
-router.get("/sessions", authenticate, getSessions);
-router.delete("/sessions/cleanup", authenticate, cleanupSessions); // Clean up expired sessions
+router.get("/activity", authenticate, generalApiLimiter, getActivity);
+router.get("/sessions", authenticate, generalApiLimiter, getSessions);
+router.delete("/sessions/cleanup", authenticate, generalApiLimiter, cleanupSessions); // Clean up expired sessions
 // IMPORTANT: Put /all route BEFORE /:sessionId route to avoid route conflict
-router.delete("/sessions/all", authenticate, revokeAllSessions);
-router.get("/sessions/:sessionId", authenticate, getSessionById); // Get session details
-router.delete("/sessions/:sessionId", authenticate, revokeSessionById);
+router.delete("/sessions/all", authenticate, generalApiLimiter, revokeAllSessions);
+router.get("/sessions/:sessionId", authenticate, generalApiLimiter, getSessionById); // Get session details
+router.delete("/sessions/:sessionId", authenticate, generalApiLimiter, revokeSessionById);
 
 export default router;

@@ -19,6 +19,7 @@ model Notification {
   @@index([userId, createdAt])
   @@index([userId, read])
   @@index([createdAt])
+  @@index([userId, type]) // OPTIMIZED: For filtering notifications by type
 }
 
 model FcmToken {

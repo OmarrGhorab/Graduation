@@ -12,6 +12,7 @@ import {
 } from "../utils/passwordReset";
 import { sendPasswordResetOTP } from "../utils/email";
 import { getUserLanguageByEmail } from "../utils/userLanguage";
+import { publishNotification } from "../utils/notifications-client";
 
 export const forgotPassword = async (req: Request, res: Response, next: NextFunction) => {
     try {
@@ -128,6 +129,21 @@ export const resetPassword = async (req: Request, res: Response, next: NextFunct
         
         // Clear all password reset cooldowns and attempts on successful reset
         await clearAllPasswordResetCooldowns(userEmail);
+
+        // SECURITY: Notify user that their password was changed
+        const notificationData = {
+            type: "security_password_changed",
+            title: "Password Changed",
+            body: "Your password was recently changed. If you didn't do this, please contact support immediately.",
+            timestamp: new Date().toISOString(),
+            actionRequired: false,
+            securityTip: "If you didn't change your password, your account may be compromised. Please contact support immediately.",
+        };
+
+        // Send notification (non-blocking)
+        publishNotification(user.id, notificationData).catch((err) => {
+            console.error("[Security Notification] Failed to send password changed alert:", err);
+        });
         
         res.json({ message: "Password reset successful" });
     } catch (err) {

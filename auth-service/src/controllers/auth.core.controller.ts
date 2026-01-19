@@ -8,9 +8,10 @@ import { aj } from "../libs/arcjet";
 import { generateUsernameSuggestions } from "../utils/username";
 import { createAndStoreOtp } from "../utils/otp";
 import { extractDeviceInfo, extractDeviceName } from "../utils/device";
-import { createSession, getSessionDeviceInfo, revokeSession } from "../utils/sessions";
+import { createSession, getSessionDeviceInfo, revokeSession, cleanupExpiredSessionsOnLogin } from "../utils/sessions";
 import { sendVerificationOTP, sendDeviceVerificationOTP } from "../utils/email";
 import { getUserLanguage } from "../utils/userLanguage";
+import { publishNotification } from "../utils/notifications-client";
 
 export const registerUser = async (req: Request, res: Response, next: NextFunction) => {
     try {
@@ -240,6 +241,28 @@ export const loginUser = async (req: Request, res: Response, next: NextFunction)
                 // Send OTP via email (non-blocking)
                 sendDeviceVerificationOTP(user.email, otp, user.name, userLanguage).catch(console.error);
 
+                // SECURITY: Send notification to all trusted devices about suspicious login attempt
+                // This alerts the user on their existing devices that someone is trying to access their account
+                const notificationData = {
+                    type: "security_new_device_blocked",
+                    title: "Security Alert: New Device Login Attempt",
+                    body: `Someone tried to log in from a new device (${deviceName}). If this wasn't you, please secure your account immediately.`,
+                    newDevice: {
+                        name: deviceName,
+                        platform: deviceInfo.platform,
+                        ipAddress: deviceInfo.ipAddress,
+                    },
+                    timestamp: new Date().toISOString(),
+                    actionRequired: true,
+                    securityTip: "If you don't recognize this device, change your password immediately and review your account activity.",
+                };
+
+                // Send notification to user (non-blocking)
+                console.log(`[Security] Sending new device blocked notification to user ${user.id}`);
+                publishNotification(user.id, notificationData).catch((err) => {
+                    console.error("[Security Notification] Failed to send new device alert:", err);
+                });
+
                 return res.status(403).json({
                     error: "New device detected",
                     message: "A new device has been detected. Your account has been blocked until device verification is completed. Please check your email for verification code.",
@@ -418,6 +441,9 @@ export const loginUser = async (req: Request, res: Response, next: NextFunction)
             where: { id: user.id },
             data: { lastLoginAt: new Date() },
         });
+
+        // OPTIMIZED: Cleanup expired sessions on login (non-blocking)
+        cleanupExpiredSessionsOnLogin(user.id);
 
         return res.json({
             user: {

@@ -33,11 +33,13 @@ export async function publishNotification(
 
     if (!response.ok) {
       const errorText = await response.text().catch(() => response.statusText);
+      console.error(`[Notification Client] HTTP ${response.status} error:`, errorText);
       throw new Error(`Failed to publish notification: ${response.status} ${errorText}`);
     }
 
+    const responseData = await response.json().catch(() => ({}));
     const duration = Date.now() - startTime;
-    console.log(`[Notification Client] Published notification for user ${userId}, type: ${data.type}, duration: ${duration}ms`);
+    console.log(`[Notification Client] ✓ Published notification for user ${userId}, type: ${data.type}, duration: ${duration}ms`, responseData);
   } catch (error) {
     const duration = Date.now() - startTime;
     console.error(`[Notification Client] Error publishing notification for user ${userId}, type: ${data.type}, duration: ${duration}ms`, error);

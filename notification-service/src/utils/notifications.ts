@@ -451,6 +451,11 @@ function getNotificationTitle(type: string): string {
     unlink_request: "Unlink Request",
     unlink_request_accepted: "Unlink Request Accepted",
     unlink_request_declined: "Unlink Request Declined",
+    // Security notifications
+    security_new_device_blocked: "Security Alert: New Device Login Attempt",
+    security_device_verified: "New Device Added",
+    security_password_changed: "Password Changed",
+    security_account_locked: "Account Locked",
   };
 
   return titles[type] || "New Notification";
@@ -478,6 +483,15 @@ function getNotificationBody(
       return `${data.accepterName || "Someone"} accepted your unlink request`;
     case "unlink_request_declined":
       return `${data.declinerName || "Someone"} declined your unlink request`;
+    // Security notifications
+    case "security_new_device_blocked":
+      return data.body || `Someone tried to log in from a new device (${data.newDevice?.name || "Unknown"}). If this wasn't you, please secure your account.`;
+    case "security_device_verified":
+      return `A new device (${data.deviceName || "Unknown"}) has been added to your account.`;
+    case "security_password_changed":
+      return "Your password was recently changed. If you didn't do this, please contact support immediately.";
+    case "security_account_locked":
+      return "Your account has been locked due to suspicious activity. Please verify your identity to unlock.";
     default:
       return "You have a new notification";
   }

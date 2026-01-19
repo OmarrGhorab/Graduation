@@ -38,8 +38,6 @@ model User {
   updatedAt                DateTime        @updatedAt
 
   providers              AuthProvider[]
-  verifications          Verification[]
-  passwordResets         PasswordReset[]
   interests              UserInterest[]
   enrollments            CourseEnrollment[]
   devices                UserDevice[]
@@ -108,34 +106,6 @@ model AuthProvider {
 
   @@unique([provider, providerId])
   @@index([userId])
-}
-
-model Verification {
-  id         String           @id @default(uuid())
-  type       VerificationType
-  code       String
-  expiresAt  DateTime
-  verifiedAt DateTime?
-  user       User             @relation(fields: [userId], references: [id], onDelete: Cascade)
-  userId     String
-  createdAt  DateTime         @default(now())
-
-  @@unique([userId, type, code])
-  @@index([userId, type])
-}
-
-model PasswordReset {
-  id        String    @id @default(uuid())
-  token     String    @unique
-  expiresAt DateTime
-  used      Boolean   @default(false)
-  usedAt    DateTime?
-  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  userId    String
-  createdAt DateTime  @default(now())
-
-  @@index([userId])
-  @@index([token])
 }
 
 model Interest {
@@ -213,6 +183,8 @@ model Session {
   @@index([refreshToken])
   @@index([isActive, expiresAt]) // For finding active, non-expired sessions
   @@index([userId, isActive]) // For finding user's active sessions
+  @@index([userId, isActive, isRevoked, expiresAt]) // OPTIMIZED: For auth middleware combined query
+  @@index([expiresAt]) // OPTIMIZED: For expired session cleanup jobs
 }
 
 // Location history for child tracking feature
@@ -229,6 +201,7 @@ model LocationHistory {
 
   @@index([userId])
   @@index([userId, timestamp])
+  @@index([timestamp]) // OPTIMIZED: For time-range queries and cleanup jobs
 }
 
 enum UserRole {
@@ -252,12 +225,6 @@ enum Provider {
   EMAIL
   GOOGLE
   APPLE
-}
-
-enum VerificationType {
-  EMAIL
-  TWO_FACTOR
-  DEVICE_VERIFICATION
 }
 
 model ParentLinkRequest {

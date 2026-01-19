@@ -7,6 +7,7 @@ import { extractDeviceInfo } from "../utils/device";
 import { createSession, getSessionDeviceInfo } from "../utils/sessions";
 import { sendDeviceVerificationOTP } from "../utils/email";
 import { getUserLanguage } from "../utils/userLanguage";
+import { publishNotification } from "../utils/notifications-client";
 
 /**
  * Verify device with OTP
@@ -91,6 +92,22 @@ export const verifyDevice = async (req: Request, res: Response, next: NextFuncti
                 deviceBlocked: false,
                 pendingDeviceFingerprint: null,
             },
+        });
+
+        // SECURITY: Notify user that a new device was successfully added
+        const notificationData = {
+            type: "security_device_verified",
+            title: "New Device Added",
+            body: `A new device (${device.deviceName || "Unknown"}) has been added to your account.`,
+            deviceName: device.deviceName,
+            platform: device.platform,
+            timestamp: new Date().toISOString(),
+            securityTip: "If you didn't add this device, please change your password and review your account security.",
+        };
+
+        // Send notification (non-blocking)
+        publishNotification(user.id, notificationData).catch((err) => {
+            console.error("[Security Notification] Failed to send device verified alert:", err);
         });
 
         // Check if 2FA is enabled

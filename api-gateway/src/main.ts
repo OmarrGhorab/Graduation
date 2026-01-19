@@ -4,6 +4,8 @@ dotenv.config();
 import express, { Request, Response, NextFunction } from "express";
 import cors from "cors";
 import proxy from "express-http-proxy";
+import compression from "compression";
+import timeout from "connect-timeout";
 import arcjet, { detectBot } from "@arcjet/node";
 
 // Initialize Arcjet with bot detection
@@ -22,9 +24,32 @@ const aj = arcjet({
 
 const app = express();
 
+// OPTIMIZED: Add gzip compression for responses
+app.use(compression({
+    level: 6, // Balanced compression level (1-9)
+    threshold: 1024, // Only compress responses > 1KB
+    filter: (req, res) => {
+        // Don't compress SSE streams
+        if (req.headers.accept === 'text/event-stream') {
+            return false;
+        }
+        return compression.filter(req, res);
+    }
+}));
+
+// OPTIMIZED: Add request timeout (30 seconds)
+app.use(timeout("30s"));
+
+// Middleware to check if request has timed out
+const haltOnTimedout = (req: Request, res: Response, next: NextFunction) => {
+    if (!req.timedout) next();
+};
+
 // Middleware
 app.use(express.json({ limit: "10mb" }));
+app.use(haltOnTimedout);
 app.use(express.urlencoded({ extended: true, limit: "10mb" }));
+app.use(haltOnTimedout);
 // CORS configuration - allow mobile apps and web clients
 const allowedOrigins = process.env.ALLOWED_ORIGINS
     ? process.env.ALLOWED_ORIGINS.split(',').map(origin => origin.trim())
@@ -46,9 +71,53 @@ app.use(cors({
     allowedHeaders: ["Content-Type", "Authorization", "x-refresh-token", "x-forwarded-for"],
 }));
 
-// Health check (skip protection)
-app.get("/health", (req: Request, res: Response) => {
-    res.json({ status: "ok", service: "api-gateway" });
+// OPTIMIZED: Health check with upstream service verification
+app.get("/health", async (req: Request, res: Response) => {
+    const checkService = async (url: string, name: string): Promise<{ name: string; status: string; latency?: number }> => {
+        const start = Date.now();
+        try {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 5000); // 5s timeout
+            
+            const response = await fetch(url, { signal: controller.signal });
+            clearTimeout(timeoutId);
+            
+            return {
+                name,
+                status: response.ok ? "ok" : "error",
+                latency: Date.now() - start,
+            };
+        } catch (error) {
+            return { name, status: "error" };
+        }
+    };
+
+    try {
+        // Check upstream services in parallel
+        const [authService, notificationService] = await Promise.all([
+            checkService("http://localhost:6001/health", "auth-service"),
+            checkService("http://localhost:6003/health", "notification-service"),
+        ]);
+
+        const allHealthy = authService.status === "ok" && notificationService.status === "ok";
+
+        res.status(allHealthy ? 200 : 503).json({
+            status: allHealthy ? "ok" : "degraded",
+            service: "api-gateway",
+            upstreams: {
+                "auth-service": authService,
+                "notification-service": notificationService,
+            },
+            timestamp: new Date().toISOString(),
+        });
+    } catch (error) {
+        res.status(503).json({
+            status: "error",
+            service: "api-gateway",
+            error: "Health check failed",
+            timestamp: new Date().toISOString(),
+        });
+    }
 });
 
 // Arcjet protection middleware (bot + VPN/proxy/hosting detection)
