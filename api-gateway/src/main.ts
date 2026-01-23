@@ -1,183 +1,59 @@
-import dotenv from "dotenv";
-dotenv.config();
+import { loadConfig } from "./config/index.js";
+import { createApp } from "./app.js";
 
-import express, { Request, Response, NextFunction } from "express";
-import cors from "cors";
-import proxy from "express-http-proxy";
-import compression from "compression";
-import timeout from "connect-timeout";
-import arcjet, { detectBot } from "@arcjet/node";
+/**
+ * Main entry point for the API Gateway application.
+ * 
+ * This function:
+ * - Loads and validates configuration from environment variables
+ * - Creates and configures the Express application
+ * - Starts the HTTP server on the configured port
+ * - Sets up graceful shutdown handlers for SIGTERM and SIGINT
+ * 
+ * If configuration loading or server startup fails, the process exits with code 1.
+ * 
+ * @returns Promise that resolves when the server is running
+ * 
+ * @example
+ * ```typescript
+ * // Called automatically when the module is executed
+ * main();
+ * ```
+ */
+async function main(): Promise<void> {
+  try {
+    // Load and validate configuration
+    const config = loadConfig();
 
-// Initialize Arcjet with bot detection
-const aj = arcjet({
-    key: process.env.ARCJET_KEY || "",
-    rules: [
-        detectBot({
-            mode: process.env.NODE_ENV === "production" ? "LIVE" : "DRY_RUN",
-            allow: [
-                "CATEGORY:SEARCH_ENGINE", // Google, Bing, etc
-                "CATEGORY:MONITOR", // Uptime monitoring services
-            ],
-        }),
-    ],
-});
+    // Create Express app with configuration
+    const app = createApp(config);
 
-const app = express();
+    // Start HTTP server
+    const server = app.listen(config.server.port, () => {
+      console.log(
+        `api-gateway is running on port ${config.server.port} (${config.server.nodeEnv})`
+      );
+    });
 
-// OPTIMIZED: Add gzip compression for responses
-app.use(compression({
-    level: 6, // Balanced compression level (1-9)
-    threshold: 1024, // Only compress responses > 1KB
-    filter: (req, res) => {
-        // Don't compress SSE streams
-        if (req.headers.accept === 'text/event-stream') {
-            return false;
-        }
-        return compression.filter(req, res);
-    }
-}));
+    // Handle graceful shutdown
+    process.on("SIGTERM", () => {
+      console.log("SIGTERM signal received: closing HTTP server");
+      server.close(() => {
+        console.log("HTTP server closed");
+      });
+    });
 
-// OPTIMIZED: Add request timeout (30 seconds)
-app.use(timeout("30s"));
+    process.on("SIGINT", () => {
+      console.log("SIGINT signal received: closing HTTP server");
+      server.close(() => {
+        console.log("HTTP server closed");
+      });
+    });
+  } catch (error) {
+    console.error("Failed to start API Gateway:", error);
+    process.exit(1);
+  }
+}
 
-// Middleware to check if request has timed out
-const haltOnTimedout = (req: Request, res: Response, next: NextFunction) => {
-    if (!req.timedout) next();
-};
-
-// Middleware
-app.use(express.json({ limit: "10mb" }));
-app.use(haltOnTimedout);
-app.use(express.urlencoded({ extended: true, limit: "10mb" }));
-app.use(haltOnTimedout);
-// CORS configuration - allow mobile apps and web clients
-const allowedOrigins = process.env.ALLOWED_ORIGINS
-    ? process.env.ALLOWED_ORIGINS.split(',').map(origin => origin.trim())
-    : ["http://localhost:3000", "http://localhost:8080", 'http://10.0.2.2'];
-
-app.use(cors({
-    origin: (origin, callback) => {
-        // Allow requests with no origin (mobile apps, Postman, etc.)
-        if (!origin) {
-            return callback(null, true);
-        }
-        // Allow if origin is in whitelist
-        if (allowedOrigins.includes(origin) || allowedOrigins.includes("*")) {
-            return callback(null, true);
-        }
-        callback(new Error("Not allowed by CORS"));
-    },
-    credentials: true,
-    allowedHeaders: ["Content-Type", "Authorization", "x-refresh-token", "x-forwarded-for"],
-}));
-
-// OPTIMIZED: Health check with upstream service verification
-app.get("/health", async (req: Request, res: Response) => {
-    const checkService = async (url: string, name: string): Promise<{ name: string; status: string; latency?: number }> => {
-        const start = Date.now();
-        try {
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 5000); // 5s timeout
-            
-            const response = await fetch(url, { signal: controller.signal });
-            clearTimeout(timeoutId);
-            
-            return {
-                name,
-                status: response.ok ? "ok" : "error",
-                latency: Date.now() - start,
-            };
-        } catch (error) {
-            return { name, status: "error" };
-        }
-    };
-
-    try {
-        // Check upstream services in parallel
-        const [authService, notificationService] = await Promise.all([
-            checkService("http://localhost:6001/health", "auth-service"),
-            checkService("http://localhost:6003/health", "notification-service"),
-        ]);
-
-        const allHealthy = authService.status === "ok" && notificationService.status === "ok";
-
-        res.status(allHealthy ? 200 : 503).json({
-            status: allHealthy ? "ok" : "degraded",
-            service: "api-gateway",
-            upstreams: {
-                "auth-service": authService,
-                "notification-service": notificationService,
-            },
-            timestamp: new Date().toISOString(),
-        });
-    } catch (error) {
-        res.status(503).json({
-            status: "error",
-            service: "api-gateway",
-            error: "Health check failed",
-            timestamp: new Date().toISOString(),
-        });
-    }
-});
-
-// Arcjet protection middleware (bot + VPN/proxy/hosting detection)
-const arcjetProtection = async (req: Request, res: Response, next: NextFunction) => {
-    // Skip protection if no Arcjet key configured or if not in production
-    const isProd = process.env.NODE_ENV === "production";
-    if (!process.env.ARCJET_KEY || !isProd) {
-        return next();
-    }
-
-    try {
-        const decision = await aj.protect(req);
-
-        // Block if request is denied (bot detected)
-        if (decision.isDenied()) {
-            if (decision.reason.isBot()) {
-                console.log("Bot detected, blocking request");
-                return res.status(403).json({ error: "Forbidden: Bot detected" });
-            }
-            return res.status(403).json({ error: "Forbidden" });
-        }
-
-        // Block VPN, proxy, hosting, and relay IPs
-        if (
-            decision.ip.isHosting() ||
-            decision.ip.isVpn() ||
-            decision.ip.isProxy() ||
-            decision.ip.isRelay()
-        ) {
-            console.log("VPN/Proxy/Hosting detected, blocking request");
-            return res.status(403).json({ error: "Forbidden: VPN/Proxy not allowed" });
-        }
-
-        // Request passed all checks
-        next();
-    } catch (error) {
-        console.error("Arcjet protection error:", error);
-        // On error, allow request through (fail open)
-        next();
-    }
-};
-
-// Apply Arcjet protection to all routes except health check
-app.use(arcjetProtection);
-
-// Notification service proxy
-app.use("/api/v1/notifications", proxy("http://localhost:6003", {
-    proxyReqPathResolver: (req) => req.originalUrl
-}));
-
-// Location request endpoint goes to notification service (for silent push)
-app.use("/api/v1/location/request", proxy("http://localhost:6003", {
-    proxyReqPathResolver: (req) => req.originalUrl
-}));
-
-// Auth service proxy (everything else including /api/v1/location/*)
-app.use("/", proxy("http://localhost:6001"));
-
-const PORT = process.env.PORT || 3000;
-
-app.listen(PORT, () => {
-    console.log(`api-gateway is running on port ${PORT}`);
-});
+// Start the application
+main();
