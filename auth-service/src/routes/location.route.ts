@@ -12,7 +12,7 @@ import {
 const router = express.Router();
 
 // Current user's location endpoints
-router.post("/update", authenticate, updateLocation);
+router.post("/", authenticate, updateLocation);
 router.get("/me", authenticate, getMyLocation);
 router.get("/history", authenticate, getMyLocationHistory);
 

@@ -80,6 +80,11 @@ export const resetPassword = async (req: Request, res: Response, next: NextFunct
         const { emailOrUsername, otp, newPassword } = req.body as { emailOrUsername?: string; otp?: string; newPassword?: string };
         if (!emailOrUsername || !otp || !newPassword) throw new BadRequestError("Missing required fields");
 
+        // Validate password strength
+        if (newPassword.length < 8) {
+            throw new BadRequestError("Password must be at least 8 characters");
+        }
+
         // Find user by email or username
         const user = await prisma.user.findFirst({
             where: {

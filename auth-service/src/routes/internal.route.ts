@@ -1,10 +1,13 @@
 import express from 'express';
 import { authenticateInternalService } from '../middleware';
-import { getUserPreferencesInternal } from '../controllers/internal.controller';
+import { getUserPreferencesInternal, validateTokenInternal } from '../controllers/internal.controller';
 
 const router = express.Router();
 
 // Internal endpoint to get user preferences (for notification-service)
 router.get('/users/:userId/preferences', authenticateInternalService, getUserPreferencesInternal);
+
+// Internal endpoint to validate tokens (for other services)
+router.post('/validate-token', authenticateInternalService, validateTokenInternal);
 
 export default router;
