@@ -93,3 +93,33 @@ func (r *MemberRepository) CountMembers(ctx context.Context, conversationID stri
 		Count(&count).Error
 	return count, err
 }
+
+// IncrementUnreadCount increments unread count for all members except the excluded ones
+func (r *MemberRepository) IncrementUnreadCount(ctx context.Context, conversationID string, excludeUserIDs []string) error {
+	query := r.db.WithContext(ctx).
+		Model(&models.ConversationMember{}).
+		Where("conversation_id = ? AND left_at IS NULL", conversationID)
+
+	if len(excludeUserIDs) > 0 {
+		query = query.Where("user_id NOT IN ?", excludeUserIDs)
+	}
+
+	return query.UpdateColumn("unread_count", gorm.Expr("unread_count + ?", 1)).Error
+}
+
+// ResetUnreadCount resets unread count for a user
+func (r *MemberRepository) ResetUnreadCount(ctx context.Context, conversationID, userID string, lastReadMessageID *string) error {
+	updates := map[string]interface{}{
+		"unread_count": 0,
+		"last_read_at": gorm.Expr("NOW()"),
+	}
+
+	if lastReadMessageID != nil {
+		updates["last_read_message_id"] = *lastReadMessageID
+	}
+
+	return r.db.WithContext(ctx).
+		Model(&models.ConversationMember{}).
+		Where("conversation_id = ? AND user_id = ?", conversationID, userID).
+		Updates(updates).Error
+}

@@ -54,7 +54,10 @@ type Conversation struct {
 	Members     []ConversationMember `gorm:"foreignKey:ConversationID" json:"members,omitempty"`
 
 	// Transient fields
-	UnreadCount int `gorm:"-" json:"unread_count"`
+	UnreadCount         int    `gorm:"-" json:"unread_count"`
+	LastMessageContent  string `gorm:"->" json:"-"`
+	LastMessageSenderID string `gorm:"->" json:"-"`
+	PreviewText         string `gorm:"-" json:"preview_text"`
 }
 
 // TableName specifies the table name for GORM
@@ -64,14 +67,20 @@ func (Conversation) TableName() string {
 
 // ConversationMember represents a member of a conversation
 type ConversationMember struct {
-	ID             string     `gorm:"type:uuid;primaryKey" json:"id"`
-	ConversationID string     `gorm:"type:uuid;not null" json:"conversation_id"`
-	UserID         string     `gorm:"type:uuid;not null" json:"user_id"`
-	UserRole       UserRole   `gorm:"type:varchar(20);not null" json:"user_role"`
-	MemberRole     MemberRole `gorm:"type:varchar(20);not null;default:'MEMBER'" json:"member_role"`
-	JoinedAt       time.Time  `gorm:"autoCreateTime" json:"joined_at"`
-	LeftAt         *time.Time `json:"left_at,omitempty"`
-	LastReadAt     *time.Time `json:"last_read_at,omitempty"`
+	ID                string     `gorm:"type:uuid;primaryKey" json:"id"`
+	ConversationID    string     `gorm:"type:uuid;not null" json:"conversation_id"`
+	UserID            string     `gorm:"type:uuid;not null" json:"user_id"`
+	UserRole          UserRole   `gorm:"type:varchar(20);not null" json:"user_role"`
+	MemberRole        MemberRole `gorm:"type:varchar(20);not null;default:'MEMBER'" json:"member_role"`
+	JoinedAt          time.Time  `gorm:"autoCreateTime" json:"joined_at"`
+	LeftAt            *time.Time `json:"left_at,omitempty"`
+	LastReadAt        *time.Time `json:"last_read_at,omitempty"`
+	LastReadMessageID *string    `gorm:"type:uuid" json:"last_read_message_id,omitempty"`
+	UnreadCount       int        `gorm:"default:0" json:"unread_count"`
+
+	// Transient fields
+	UserName  string `gorm:"-" json:"user_name,omitempty"`
+	UserImage string `gorm:"-" json:"user_image,omitempty"`
 }
 
 // TableName specifies the table name for GORM

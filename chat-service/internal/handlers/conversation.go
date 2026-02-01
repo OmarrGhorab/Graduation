@@ -116,12 +116,35 @@ func (h *ConversationHandler) GetConversation(c *fiber.Ctx) error {
 	return c.JSON(conversation)
 }
 
+// GetMembers retrieves all members for a conversation
+func (h *ConversationHandler) GetMembers(c *fiber.Ctx) error {
+	userID := c.Locals("user_id").(string)
+	conversationID := c.Params("id")
+
+	members, err := h.conversationSvc.GetMembers(c.Context(), conversationID, userID)
+	if err != nil {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+			"error": fiber.Map{"code": "FORBIDDEN", "message": err.Error()},
+		})
+	}
+
+	return c.JSON(fiber.Map{"members": members})
+}
+
+type MarkAsReadRequest struct {
+	MessageID *string `json:"message_id"`
+}
+
 // MarkAsRead marks all messages in a conversation as read
 func (h *ConversationHandler) MarkAsRead(c *fiber.Ctx) error {
 	userID := c.Locals("user_id").(string)
 	conversationID := c.Params("id")
 
-	if err := h.conversationSvc.MarkAsRead(c.Context(), conversationID, userID); err != nil {
+	var req MarkAsReadRequest
+	// Ignore error if body is empty or invalid, as message_id is optional
+	_ = c.BodyParser(&req)
+
+	if err := h.conversationSvc.MarkAsRead(c.Context(), conversationID, userID, req.MessageID); err != nil {
 		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
 			"error": fiber.Map{"code": "FORBIDDEN", "message": err.Error()},
 		})

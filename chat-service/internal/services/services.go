@@ -26,7 +26,7 @@ func NewServices(repos *repositories.Repositories, redis *cache.RedisClient, cfg
 	// TODO: Add AuthServiceURL to config. For now, we reuse NotificationServiceURL if similar, or assume localhost:6002
 	// Actually, looking at .env, we don't have AUTH_SERVICE_URL.
 	// Auth Service is on port 6002 usually.
-	authSvcURL := "http://localhost:6002" // Default fallback
+	authSvcURL := "http://localhost:6001" // Default fallback
 	if cfg.NotificationServiceURL != "" {
 		// Just a hack if we don't have separate config
 	}
@@ -34,7 +34,7 @@ func NewServices(repos *repositories.Repositories, redis *cache.RedisClient, cfg
 	authClient := clients.NewAuthClient(authSvcURL, cfg.InternalServiceSecret)
 
 	return &Services{
-		Conversation: NewConversationService(repos, redis, notificationSvc),
+		Conversation: NewConversationService(repos, redis, notificationSvc, authClient),
 		Message:      NewMessageService(repos, redis, notificationSvc, authClient),
 		Typing:       NewTypingService(redis),
 		Poll:         NewPollService(repos.Message, redis, cfg.PollTimeout, cfg.PollInterval),

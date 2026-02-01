@@ -52,7 +52,7 @@ func (c *AuthClient) GetBatchUsers(ctx context.Context, userIDs []string) (map[s
 		return nil, err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", c.serviceURL+"/api/internal/users/batch", bytes.NewBuffer(jsonBody))
+	req, err := http.NewRequestWithContext(ctx, "POST", c.serviceURL+"/api/v1/internal/users/batch", bytes.NewBuffer(jsonBody))
 	if err != nil {
 		return nil, err
 	}
@@ -62,18 +62,23 @@ func (c *AuthClient) GetBatchUsers(ctx context.Context, userIDs []string) (map[s
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
+		fmt.Printf("[AuthClient] Request failed: %v\n", err)
 		return nil, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
+		fmt.Printf("[AuthClient] Status: %d\n", resp.StatusCode)
 		return nil, fmt.Errorf("auth service returned status: %d", resp.StatusCode)
 	}
 
+	// Read body for debugging
 	var users map[string]UserProfile
 	if err := json.NewDecoder(resp.Body).Decode(&users); err != nil {
+		fmt.Printf("[AuthClient] Decode error: %v\n", err)
 		return nil, err
 	}
 
+	// fmt.Printf("[AuthClient] Received users: %+v\n", users) // Optional: Uncomment to see full data
 	return users, nil
 }

@@ -10,7 +10,7 @@ export const authenticateInternalService = async (
   next: NextFunction
 ): Promise<void> => {
   try {
-    const internalSecret = req.headers['x-internal-secret'] as string;
+    const internalSecret = req.headers['x-internal-service-secret'] as string;
     const expectedSecret = process.env.INTERNAL_SERVICE_SECRET;
 
     if (!expectedSecret) {

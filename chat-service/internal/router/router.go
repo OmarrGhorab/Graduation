@@ -24,6 +24,7 @@ func SetupRoutes(app *fiber.App, hdlrs *handlers.Handlers, authMiddleware *middl
 	conversations.Post("/direct", hdlrs.Conversation.CreateDirect)
 	conversations.Get("/", hdlrs.Conversation.GetUserConversations)
 	conversations.Get("/:id", hdlrs.Conversation.GetConversation)
+	conversations.Get("/:id/members", hdlrs.Conversation.GetMembers)
 	conversations.Post("/:id/members", hdlrs.Conversation.AddMember)
 	conversations.Delete("/:id/members/:memberId", hdlrs.Conversation.RemoveMember)
 	conversations.Patch("/:id/members/:memberId/role", hdlrs.Conversation.UpdateMemberRole)

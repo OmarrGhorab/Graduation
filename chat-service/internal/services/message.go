@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 
 	"github.com/google/uuid"
 	"github.com/graduation/chat-service/internal/clients"
@@ -93,18 +94,28 @@ func (s *MessageService) SendMessage(ctx context.Context, input SendMessageInput
 	// Send notifications to offline members (async, non-blocking)
 	go s.notifyMembers(context.Background(), input.ConversationID, input.SenderID, fullMessage)
 
+	// Increment unread count for other members
+	go func() {
+		_ = s.repos.Member.IncrementUnreadCount(context.Background(), input.ConversationID, []string{input.SenderID})
+	}()
+
 	return fullMessage, nil
 }
 
 // notifyMembers sends push notifications to offline members
 func (s *MessageService) notifyMembers(ctx context.Context, conversationID, senderID string, message *models.Message) {
+	fmt.Printf("[DEBUG] NotifyMembers started for Conv: %s, Sender: %s\n", conversationID, senderID)
+
 	memberIDs, err := s.repos.Member.GetConversationMemberIDs(ctx, conversationID)
 	if err != nil {
+		fmt.Printf("[DEBUG] Failed to get members: %v\n", err)
 		return
 	}
+	fmt.Printf("[DEBUG] Found %d members\n", len(memberIDs))
 
 	conv, err := s.repos.Conversation.GetByID(ctx, conversationID)
 	if err != nil {
+		fmt.Printf("[DEBUG] Failed to get conversation: %v\n", err)
 		return
 	}
 
@@ -116,13 +127,24 @@ func (s *MessageService) notifyMembers(ctx context.Context, conversationID, send
 		}
 		// Check if member has active poll connection
 		isPolling, _ := s.redis.Exists(ctx, "poll:"+memberID+":"+conversationID)
+		fmt.Printf("[DEBUG] Member %s isPolling: %v\n", memberID, isPolling)
+
+		// FIXME: For debugging, we can temporarily disable this check or invert it if needed.
+		// For now, let's keep it but logging is key.
 		if !isPolling {
 			offlineMembers = append(offlineMembers, memberID)
 		}
 	}
 
+	fmt.Printf("[DEBUG] Offline members to notify: %d\n", len(offlineMembers))
+
 	if len(offlineMembers) > 0 {
-		s.notification.SendChatNotification(ctx, message, conv, offlineMembers)
+		err := s.notification.SendChatNotification(ctx, message, conv, offlineMembers)
+		if err != nil {
+			fmt.Printf("[DEBUG] SendChatNotification error: %v\n", err)
+		} else {
+			fmt.Printf("[DEBUG] SendChatNotification success\n")
+		}
 	}
 }
 
@@ -170,19 +192,23 @@ func (s *MessageService) enrichMessages(ctx context.Context, messages []models.M
 	}
 
 	// Fetch user details
+	fmt.Printf("[MessageService] Fetching details for %d users: %v\n", len(ids), ids)
 	users, err := s.authClient.GetBatchUsers(ctx, ids)
 	if err != nil {
-		// Log error but return messages without enrichment
+		fmt.Printf("[MessageService] Failed to enrich: %v\n", err)
 		return messages, nil
 	}
 
 	// Map details to messages
+	matches := 0
 	for i := range messages {
 		if user, ok := users[messages[i].SenderID]; ok {
 			messages[i].SenderName = user.Name
 			messages[i].SenderImage = user.Image
+			matches++
 		}
 	}
+	fmt.Printf("[MessageService] Enriched %d messages\n", matches)
 
 	return messages, nil
 }
@@ -228,9 +254,15 @@ func (s *MessageService) EditMessage(ctx context.Context, messageID, userID, con
 }
 
 // PinMessage pins a message
-func (s *MessageService) PinMessage(ctx context.Context, conversationID, messageID, userID string, userRole models.UserRole, memberRole models.MemberRole) error {
+func (s *MessageService) PinMessage(ctx context.Context, conversationID, messageID, userID string, userRole models.UserRole) error {
+	// Get member role
+	member, err := s.repos.Member.GetByConversationAndUser(ctx, conversationID, userID)
+	if err != nil {
+		return errors.New("you are not a member of this conversation")
+	}
+
 	// Check permission
-	if !canPin(userRole, memberRole) {
+	if !canPin(userRole, member.MemberRole) {
 		return errors.New("you don't have permission to pin messages")
 	}
 
@@ -243,10 +275,9 @@ func (s *MessageService) PinMessage(ctx context.Context, conversationID, message
 		return errors.New("message does not belong to this conversation")
 	}
 
-	// Check if already pinned
-	isPinned, _ := s.repos.Message.IsPinned(ctx, messageID)
-	if isPinned {
-		return errors.New("message is already pinned")
+	// Clear any existing pins in this conversation (ensure one pin only)
+	if err := s.repos.Message.UnpinAllInConversation(ctx, conversationID); err != nil {
+		return err
 	}
 
 	pinnedMsg := &models.PinnedMessage{
@@ -260,9 +291,15 @@ func (s *MessageService) PinMessage(ctx context.Context, conversationID, message
 }
 
 // UnpinMessage unpins a message
-func (s *MessageService) UnpinMessage(ctx context.Context, conversationID, messageID, userID string, userRole models.UserRole, memberRole models.MemberRole) error {
+func (s *MessageService) UnpinMessage(ctx context.Context, conversationID, messageID, userID string, userRole models.UserRole) error {
+	// Get member role
+	member, err := s.repos.Member.GetByConversationAndUser(ctx, conversationID, userID)
+	if err != nil {
+		return errors.New("you are not a member of this conversation")
+	}
+
 	// Check permission
-	if !canPin(userRole, memberRole) {
+	if !canPin(userRole, member.MemberRole) {
 		return errors.New("you don't have permission to unpin messages")
 	}
 
@@ -277,7 +314,39 @@ func (s *MessageService) GetPinnedMessages(ctx context.Context, conversationID, 
 		return nil, errors.New("you are not a member of this conversation")
 	}
 
-	return s.repos.Message.GetPinnedMessages(ctx, conversationID)
+	pinnedMsgs, err := s.repos.Message.GetPinnedMessages(ctx, conversationID)
+	if err != nil || len(pinnedMsgs) == 0 {
+		return pinnedMsgs, err
+	}
+
+	// Extract messages for enrichment
+	msgsToEnrich := make([]models.Message, 0, len(pinnedMsgs))
+	for _, pm := range pinnedMsgs {
+		if pm.Message != nil {
+			msgsToEnrich = append(msgsToEnrich, *pm.Message)
+		}
+	}
+
+	if len(msgsToEnrich) > 0 {
+		enriched, err := s.enrichMessages(ctx, msgsToEnrich)
+		if err == nil {
+			// Map enriched messages back to pinned messages
+			msgMap := make(map[string]models.Message)
+			for _, m := range enriched {
+				msgMap[m.ID] = m
+			}
+
+			for i := range pinnedMsgs {
+				if pinnedMsgs[i].Message != nil {
+					if enrichedMsg, ok := msgMap[pinnedMsgs[i].Message.ID]; ok {
+						pinnedMsgs[i].Message = &enrichedMsg
+					}
+				}
+			}
+		}
+	}
+
+	return pinnedMsgs, nil
 }
 
 // canModerate checks if a role can moderate messages

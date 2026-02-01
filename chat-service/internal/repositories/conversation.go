@@ -65,11 +65,9 @@ func (r *ConversationRepository) GetUserConversations(ctx context.Context, userI
 	var conversations []models.Conversation
 	query := r.db.WithContext(ctx).
 		Table("conversations").
-		Select("conversations.*, "+
-			"(SELECT COUNT(*) FROM messages "+
-			"WHERE messages.conversation_id = conversations.id "+
-			"AND messages.created_at > COALESCE(conversation_members.last_read_at, conversation_members.joined_at) "+
-			"AND messages.sender_id != ?) as unread_count", userID).
+		Select("conversations.*, conversation_members.unread_count, "+
+			"(SELECT content FROM messages WHERE messages.conversation_id = conversations.id ORDER BY created_at DESC LIMIT 1) as last_message_content, "+
+			"(SELECT sender_id FROM messages WHERE messages.conversation_id = conversations.id ORDER BY created_at DESC LIMIT 1) as last_message_sender_id").
 		Joins("JOIN conversation_members ON conversation_members.conversation_id = conversations.id").
 		Where("conversation_members.user_id = ? AND conversation_members.left_at IS NULL", userID)
 

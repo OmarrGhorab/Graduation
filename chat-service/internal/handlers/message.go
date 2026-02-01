@@ -163,11 +163,10 @@ func (h *MessageHandler) EditMessage(c *fiber.Ctx) error {
 func (h *MessageHandler) PinMessage(c *fiber.Ctx) error {
 	userID := c.Locals("user_id").(string)
 	userRole := c.Locals("user_role").(models.UserRole)
-	memberRole := c.Locals("member_role").(models.MemberRole)
 	conversationID := c.Params("id")
 	messageID := c.Params("messageId")
 
-	if err := h.messageSvc.PinMessage(c.Context(), conversationID, messageID, userID, userRole, memberRole); err != nil {
+	if err := h.messageSvc.PinMessage(c.Context(), conversationID, messageID, userID, userRole); err != nil {
 		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
 			"error": fiber.Map{"code": "FORBIDDEN", "message": err.Error()},
 		})
@@ -180,11 +179,10 @@ func (h *MessageHandler) PinMessage(c *fiber.Ctx) error {
 func (h *MessageHandler) UnpinMessage(c *fiber.Ctx) error {
 	userID := c.Locals("user_id").(string)
 	userRole := c.Locals("user_role").(models.UserRole)
-	memberRole := c.Locals("member_role").(models.MemberRole)
 	conversationID := c.Params("id")
 	messageID := c.Params("messageId")
 
-	if err := h.messageSvc.UnpinMessage(c.Context(), conversationID, messageID, userID, userRole, memberRole); err != nil {
+	if err := h.messageSvc.UnpinMessage(c.Context(), conversationID, messageID, userID, userRole); err != nil {
 		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
 			"error": fiber.Map{"code": "FORBIDDEN", "message": err.Error()},
 		})

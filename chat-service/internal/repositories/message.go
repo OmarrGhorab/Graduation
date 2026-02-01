@@ -143,3 +143,8 @@ func (r *MessageRepository) IsPinned(ctx context.Context, messageID string) (boo
 		Count(&count).Error
 	return count > 0, err
 }
+
+// UnpinAllInConversation removes all pinned messages for a conversation
+func (r *MessageRepository) UnpinAllInConversation(ctx context.Context, conversationID string) error {
+	return r.db.WithContext(ctx).Delete(&models.PinnedMessage{}, "conversation_id = ?", conversationID).Error
+}
