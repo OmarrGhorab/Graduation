@@ -13,9 +13,9 @@ const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-const allowedOrigins = process.env.ALLOWED_ORIGINS 
-  ? process.env.ALLOWED_ORIGINS.split(',').map(origin => origin.trim())
-  : ["http://localhost:3000"];
+const allowedOrigins = process.env.ALLOWED_ORIGINS
+    ? process.env.ALLOWED_ORIGINS.split(',').map(origin => origin.trim())
+    : ["http://localhost:3000"];
 
 app.use(cors({
     origin: allowedOrigins,
@@ -41,9 +41,9 @@ app.get("/health", async (req: Request, res: Response) => {
     try {
         // Check database connectivity
         const dbHealthy = await prisma.$queryRaw`SELECT 1`.then(() => true).catch(() => false);
-        
+
         const isHealthy = dbHealthy;
-        
+
         res.status(isHealthy ? 200 : 503).json({
             status: isHealthy ? "ok" : "degraded",
             service: "notification-service",
@@ -77,23 +77,40 @@ const server = app.listen(PORT, () => {
 // Graceful shutdown
 const gracefulShutdown = async (signal: string) => {
     console.log(`\n${signal} received. Starting graceful shutdown...`);
-    
-    // Stop accepting new connections
-    server.close(async () => {
-        console.log('HTTP server closed');
-        
-        // Disconnect Prisma
-        await prisma.$disconnect();
-        console.log('Database connection closed');
-        
-        process.exit(0);
-    });
-    
-    // Force shutdown after 10 seconds
-    setTimeout(() => {
+
+    // Set a timeout to force exit if graceful shutdown takes too long
+    const forceShutdownTimeout = setTimeout(() => {
         console.error('Forced shutdown after timeout');
         process.exit(1);
     }, 10000);
+
+    try {
+        // Disconnect Prisma first or in parallel
+        await prisma.$disconnect();
+        console.log('Database connection closed');
+
+        // Stop accepting new connections
+        // We use close() but we don't necessarily wait for all connections to finish 
+        // because SSE connections will keep it open forever.
+        server.close((err) => {
+            if (err) {
+                console.error('Error closing HTTP server:', err);
+            } else {
+                console.log('HTTP server closed');
+            }
+            clearTimeout(forceShutdownTimeout);
+            process.exit(0);
+        });
+
+        // For Node 18.2.0+ we can force close connections
+        if ('closeAllConnections' in server) {
+            (server as any).closeAllConnections();
+        }
+
+    } catch (error) {
+        console.error('Error during graceful shutdown:', error);
+        process.exit(1);
+    }
 };
 
 process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
