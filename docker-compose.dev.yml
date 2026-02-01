@@ -1,0 +1,84 @@
+# Docker Compose for Local Development
+# Single instance per service for easier debugging
+
+version: "3.8"
+
+services:
+  # Databases
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: graduation
+      POSTGRES_PASSWORD: graduation_secret
+      POSTGRES_DB: graduation
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
+  # Single instances for development
+  api-gateway:
+    build: ./api-gateway
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+      - NODE_ENV=development
+      - ALLOWED_ORIGINS=*
+      - AUTH_SERVICE_URLS=http://auth-service:6001
+      - NOTIFICATION_SERVICE_URLS=http://notification-service:6003
+      - CHAT_SERVICE_URLS=http://chat-service:6004
+    depends_on:
+      - auth-service
+      - notification-service
+      - chat-service
+
+  auth-service:
+    build: ./auth-service
+    ports:
+      - "6001:6001"
+    environment:
+      - PORT=6001
+      - NODE_ENV=development
+      - DATABASE_URL=postgresql://graduation:graduation_secret@postgres:5432/graduation
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      - postgres
+      - redis
+
+  notification-service:
+    build: ./notification-service
+    ports:
+      - "6003:6003"
+    environment:
+      - PORT=6003
+      - NODE_ENV=development
+      - DATABASE_URL=postgresql://graduation:graduation_secret@postgres:5432/graduation
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      - postgres
+      - redis
+
+  chat-service:
+    build: ./chat-service
+    ports:
+      - "6004:6004"
+    environment:
+      - PORT=6004
+      - ENV=development
+      - DATABASE_URL=postgresql://graduation:graduation_secret@postgres:5432/graduation?sslmode=disable
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      - postgres
+      - redis
+
+volumes:
+  postgres_data:
+  redis_data:

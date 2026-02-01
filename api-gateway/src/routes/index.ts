@@ -1,6 +1,6 @@
 import { Express, Request, Response } from "express";
 import proxy from "express-http-proxy";
-import { AppConfig } from "../config/index.js";
+import { AppConfig, ServiceEndpoint } from "../config/index.js";
 import { checkAllServices } from "../services/health.service.js";
 
 /**
@@ -16,33 +16,54 @@ export interface ProxyRoute {
   preservePath?: boolean;
 }
 
+// Round-robin counters for load balancing
+const serviceIndexes: Record<string, number> = {
+  auth: 0,
+  notification: 0,
+  chat: 0,
+};
+
+/**
+ * Gets the next service URL using round-robin load balancing
+ */
+function getNextServiceUrl(services: ServiceEndpoint[], serviceKey: string): string {
+  if (services.length === 0) {
+    throw new Error(`No ${serviceKey} services configured`);
+  }
+  const url = services[serviceIndexes[serviceKey]].url;
+  serviceIndexes[serviceKey] = (serviceIndexes[serviceKey] + 1) % services.length;
+  return url;
+}
+
 /**
  * Sets up all routes for the API Gateway.
  * 
  * Routes are applied in priority order (most specific first):
  * 1. /health - Gateway health check endpoint (not proxied)
- * 2. /api/v1/notifications - Proxied to notification service
- * 3. /api/v1/location/request - Proxied to notification service (silent push)
- * 4. / - Catch-all proxied to auth service
+ * 2. /api/v1/conversations - Proxied to chat service (load balanced)
+ * 3. /api/v1/typing - Proxied to chat service (load balanced)
+ * 4. /api/v1/media - Proxied to chat service (load balanced)
+ * 5. /api/v1/notifications - Proxied to notification service (load balanced)
+ * 6. /api/v1/location/request - Proxied to notification service (load balanced)
+ * 7. / - Catch-all proxied to auth service (load balanced)
  * 
  * All proxy routes preserve the original request path when forwarding to upstream services.
+ * All services support multiple instances with round-robin load balancing.
  * 
  * @param app - Express application instance to configure
  * @param config - Application configuration containing service endpoints
  * @returns void
- * 
- * @example
- * ```typescript
- * const app = express();
- * const config = loadConfig();
- * setupRoutes(app, config);
- * ```
  */
 export function setupRoutes(app: Express, config: AppConfig): void {
   // Health check endpoint (not proxied)
   app.get("/health", async (req: Request, res: Response) => {
     try {
-      const services = [config.services.auth, config.services.notification];
+      // Flatten all service instances for health checking
+      const services = [
+        ...config.services.auth,
+        ...config.services.notification,
+        ...config.services.chat,
+      ];
       const healthCheck = await checkAllServices(services);
 
       // Return 200 if all healthy, 503 if any unhealthy
@@ -58,25 +79,47 @@ export function setupRoutes(app: Express, config: AppConfig): void {
     }
   });
 
-  // Notification service routes
+  // Chat service routes (load balanced)
+  app.use(
+    "/api/v1/conversations",
+    proxy(() => getNextServiceUrl(config.services.chat, "chat"), {
+      proxyReqPathResolver: (req) => req.originalUrl,
+    })
+  );
+
+  app.use(
+    "/api/v1/typing",
+    proxy(() => getNextServiceUrl(config.services.chat, "chat"), {
+      proxyReqPathResolver: (req) => req.originalUrl,
+    })
+  );
+
+  app.use(
+    "/api/v1/media",
+    proxy(() => getNextServiceUrl(config.services.chat, "chat"), {
+      proxyReqPathResolver: (req) => req.originalUrl,
+    })
+  );
+
+  // Notification service routes (load balanced)
   app.use(
     "/api/v1/notifications",
-    proxy(config.services.notification.url, {
+    proxy(() => getNextServiceUrl(config.services.notification, "notification"), {
       proxyReqPathResolver: (req) => req.originalUrl,
     })
   );
 
   app.use(
     "/api/v1/location/request",
-    proxy(config.services.notification.url, {
+    proxy(() => getNextServiceUrl(config.services.notification, "notification"), {
       proxyReqPathResolver: (req) => req.originalUrl,
     })
   );
 
-  // Auth service catch-all (must be last)
+  // Auth service catch-all (load balanced, must be last)
   app.use(
     "/",
-    proxy(config.services.auth.url, {
+    proxy(() => getNextServiceUrl(config.services.auth, "auth"), {
       proxyReqPathResolver: (req) => req.originalUrl,
     })
   );

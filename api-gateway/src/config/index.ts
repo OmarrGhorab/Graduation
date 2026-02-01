@@ -44,13 +44,16 @@ export interface ServiceEndpoint {
 
 /**
  * Configuration for all upstream services that the gateway proxies to.
+ * All services support multiple instances for load balancing.
  * 
- * @property auth - Authentication service endpoint configuration
- * @property notification - Notification service endpoint configuration
+ * @property auth - Authentication service instances
+ * @property notification - Notification service instances
+ * @property chat - Chat service instances
  */
 export interface ServicesConfig {
-  auth: ServiceEndpoint;
-  notification: ServiceEndpoint;
+  auth: ServiceEndpoint[];
+  notification: ServiceEndpoint[];
+  chat: ServiceEndpoint[];
 }
 
 /**
@@ -72,7 +75,7 @@ export interface SecurityConfig {
  * 
  * @property server - Server configuration (port, environment)
  * @property cors - CORS configuration (allowed origins, headers)
- * @property services - Upstream service endpoints
+ * @property services - Upstream service endpoints (all support multiple instances)
  * @property security - Security settings (Arcjet protection)
  */
 export interface AppConfig {
@@ -80,6 +83,21 @@ export interface AppConfig {
   cors: CorsConfig;
   services: ServicesConfig;
   security: SecurityConfig;
+}
+
+/**
+ * Parses comma-separated URLs into ServiceEndpoint array
+ */
+function parseServiceUrls(urlsString: string, serviceName: string): ServiceEndpoint[] {
+  return urlsString
+    .split(",")
+    .map((url) => url.trim())
+    .filter((url) => url.length > 0)
+    .map((url, index) => ({
+      name: `${serviceName}-${index + 1}`,
+      url,
+      healthPath: "/health",
+    }));
 }
 
 /**
@@ -107,16 +125,35 @@ export function validateConfig(config: AppConfig): void {
 
   // Validate service URLs
   const urlPattern = /^https?:\/\/.+/;
-  if (!urlPattern.test(config.services.auth.url)) {
-    throw new Error(
-      `Invalid AUTH_SERVICE_URL: must be a valid HTTP/HTTPS URL`
-    );
+
+  // Validate auth service URLs
+  if (config.services.auth.length === 0) {
+    throw new Error("At least one AUTH_SERVICE_URL is required");
+  }
+  for (const service of config.services.auth) {
+    if (!urlPattern.test(service.url)) {
+      throw new Error(`Invalid AUTH_SERVICE_URL: ${service.url} must be a valid HTTP/HTTPS URL`);
+    }
   }
 
-  if (!urlPattern.test(config.services.notification.url)) {
-    throw new Error(
-      `Invalid NOTIFICATION_SERVICE_URL: must be a valid HTTP/HTTPS URL`
-    );
+  // Validate notification service URLs
+  if (config.services.notification.length === 0) {
+    throw new Error("At least one NOTIFICATION_SERVICE_URL is required");
+  }
+  for (const service of config.services.notification) {
+    if (!urlPattern.test(service.url)) {
+      throw new Error(`Invalid NOTIFICATION_SERVICE_URL: ${service.url} must be a valid HTTP/HTTPS URL`);
+    }
+  }
+
+  // Validate chat service URLs
+  if (config.services.chat.length === 0) {
+    throw new Error("At least one CHAT_SERVICE_URL is required");
+  }
+  for (const service of config.services.chat) {
+    if (!urlPattern.test(service.url)) {
+      throw new Error(`Invalid CHAT_SERVICE_URL: ${service.url} must be a valid HTTP/HTTPS URL`);
+    }
   }
 }
 
@@ -152,11 +189,10 @@ export function loadConfig(): AppConfig {
     .map((origin) => origin.trim())
     .filter((origin) => origin.length > 0);
 
-  // Parse service URLs with defaults
-  const authServiceUrl =
-    process.env.AUTH_SERVICE_URL || "http://localhost:6001";
-  const notificationServiceUrl =
-    process.env.NOTIFICATION_SERVICE_URL || "http://localhost:6003";
+  // Parse service URLs (all support multiple instances)
+  const authServiceUrls = process.env.AUTH_SERVICE_URLS || "http://localhost:6001,http://localhost:6011,http://localhost:6021";
+  const notificationServiceUrls = process.env.NOTIFICATION_SERVICE_URLS || "http://localhost:6003,http://localhost:6013,http://localhost:6023";
+  const chatServiceUrls = process.env.CHAT_SERVICE_URLS || "http://localhost:6004,http://localhost:6014,http://localhost:6024";
 
   // Build configuration object
   const config: AppConfig = {
@@ -176,16 +212,9 @@ export function loadConfig(): AppConfig {
       ],
     },
     services: {
-      auth: {
-        name: "auth-service",
-        url: authServiceUrl,
-        healthPath: "/health",
-      },
-      notification: {
-        name: "notification-service",
-        url: notificationServiceUrl,
-        healthPath: "/health",
-      },
+      auth: parseServiceUrls(authServiceUrls, "auth-service"),
+      notification: parseServiceUrls(notificationServiceUrls, "notification-service"),
+      chat: parseServiceUrls(chatServiceUrls, "chat-service"),
     },
     security: {
       arcjetKey: process.env.ARCJET_KEY,

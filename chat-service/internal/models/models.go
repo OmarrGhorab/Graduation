@@ -1,6 +1,7 @@
 package models
 
 import (
+	"encoding/json"
 	"time"
 )
 
@@ -43,13 +44,13 @@ const (
 
 // Conversation represents a chat conversation (direct or group)
 type Conversation struct {
-	ID          string           `gorm:"type:uuid;primaryKey" json:"id"`
-	Type        ConversationType `gorm:"type:varchar(20);not null" json:"type"`
-	Name        string           `gorm:"type:varchar(255)" json:"name,omitempty"`
-	Description string           `gorm:"type:text" json:"description,omitempty"`
-	CreatedBy   string           `gorm:"type:uuid;not null" json:"created_by"`
-	CreatedAt   time.Time        `gorm:"autoCreateTime" json:"created_at"`
-	UpdatedAt   time.Time        `gorm:"autoUpdateTime" json:"updated_at"`
+	ID          string               `gorm:"type:uuid;primaryKey" json:"id"`
+	Type        ConversationType     `gorm:"type:varchar(20);not null" json:"type"`
+	Name        string               `gorm:"type:varchar(255)" json:"name,omitempty"`
+	Description string               `gorm:"type:text" json:"description,omitempty"`
+	CreatedBy   string               `gorm:"type:uuid;not null" json:"created_by"`
+	CreatedAt   time.Time            `gorm:"autoCreateTime" json:"created_at"`
+	UpdatedAt   time.Time            `gorm:"autoUpdateTime" json:"updated_at"`
 	Members     []ConversationMember `gorm:"foreignKey:ConversationID" json:"members,omitempty"`
 }
 
@@ -76,19 +77,19 @@ func (ConversationMember) TableName() string {
 
 // Message represents a chat message
 type Message struct {
-	ID             string      `gorm:"type:uuid;primaryKey" json:"id"`
-	ConversationID string      `gorm:"type:uuid;not null" json:"conversation_id"`
-	SenderID       string      `gorm:"type:uuid;not null" json:"sender_id"`
-	SenderRole     UserRole    `gorm:"type:varchar(20);not null" json:"sender_role"`
-	Type           MessageType `gorm:"type:varchar(20);not null;default:'text'" json:"type"`
-	Content        string      `gorm:"type:text" json:"content,omitempty"`
-	MediaURL       string      `gorm:"type:text" json:"media_url,omitempty"`
-	MediaMetadata  string      `gorm:"type:jsonb" json:"media_metadata,omitempty"`
-	ReplyToID      *string     `gorm:"type:uuid" json:"reply_to_id,omitempty"`
-	ReplyTo        *Message    `gorm:"foreignKey:ReplyToID" json:"reply_to,omitempty"`
-	IsDeleted      bool        `gorm:"default:false" json:"is_deleted"`
-	CreatedAt      time.Time   `gorm:"autoCreateTime" json:"created_at"`
-	UpdatedAt      time.Time   `gorm:"autoUpdateTime" json:"updated_at"`
+	ID             string          `gorm:"type:uuid;primaryKey" json:"id"`
+	ConversationID string          `gorm:"type:uuid;not null" json:"conversation_id"`
+	SenderID       string          `gorm:"type:uuid;not null" json:"sender_id"`
+	SenderRole     UserRole        `gorm:"type:varchar(20);not null" json:"sender_role"`
+	Type           MessageType     `gorm:"type:varchar(20);not null;default:'text'" json:"type"`
+	Content        string          `gorm:"type:text" json:"content,omitempty"`
+	MediaURL       string          `gorm:"type:text" json:"media_url,omitempty"`
+	MediaMetadata  json.RawMessage `gorm:"type:jsonb" json:"media_metadata,omitempty"`
+	ReplyToID      *string         `gorm:"type:uuid" json:"reply_to_id,omitempty"`
+	ReplyTo        *Message        `gorm:"foreignKey:ReplyToID" json:"reply_to,omitempty"`
+	IsDeleted      bool            `gorm:"default:false" json:"is_deleted"`
+	CreatedAt      time.Time       `gorm:"autoCreateTime" json:"created_at"`
+	UpdatedAt      time.Time       `gorm:"autoUpdateTime" json:"updated_at"`
 }
 
 // TableName specifies the table name for GORM

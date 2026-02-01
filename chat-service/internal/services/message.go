@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 
 	"github.com/google/uuid"
@@ -56,6 +57,14 @@ func (s *MessageService) SendMessage(ctx context.Context, input SendMessageInput
 		Content:        input.Content,
 		MediaURL:       input.MediaURL,
 		ReplyToID:      input.ReplyToID,
+	}
+
+	// Handle media metadata
+	if input.MediaMetadata != nil {
+		metadataJSON, _ := json.Marshal(input.MediaMetadata)
+		message.MediaMetadata = metadataJSON
+	} else {
+		message.MediaMetadata = json.RawMessage("{}")
 	}
 
 	if err := s.repos.Message.Create(ctx, message); err != nil {

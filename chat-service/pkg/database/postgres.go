@@ -5,6 +5,7 @@ import (
 	"log"
 	"time"
 
+	"github.com/graduation/chat-service/internal/models"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
@@ -55,4 +56,23 @@ func NewPostgresConnection(databaseURL string) (*gorm.DB, error) {
 
 	log.Println("Successfully connected to PostgreSQL database")
 	return db, nil
+}
+
+// AutoMigrate runs GORM auto-migration to create/update database tables
+func AutoMigrate(db *gorm.DB) error {
+	log.Println("Running database auto-migration...")
+
+	err := db.AutoMigrate(
+		&models.Conversation{},
+		&models.ConversationMember{},
+		&models.Message{},
+		&models.PinnedMessage{},
+		&models.DeviceToken{},
+	)
+	if err != nil {
+		return fmt.Errorf("auto-migration failed: %w", err)
+	}
+
+	log.Println("Database auto-migration completed successfully")
+	return nil
 }
