@@ -16,14 +16,34 @@ export interface ProxyRoute {
   preservePath?: boolean;
 }
 
+// Round-robin counter for chat service load balancing
+let chatServiceIndex = 0;
+
+/**
+ * Gets the next chat service URL using round-robin load balancing
+ */
+function getNextChatServiceUrl(config: AppConfig): string {
+  const chatServices = config.services.chat;
+  if (chatServices.length === 0) {
+    throw new Error("No chat services configured");
+  }
+  const url = chatServices[chatServiceIndex].url;
+  chatServiceIndex = (chatServiceIndex + 1) % chatServices.length;
+  return url;
+}
+
 /**
  * Sets up all routes for the API Gateway.
  * 
  * Routes are applied in priority order (most specific first):
  * 1. /health - Gateway health check endpoint (not proxied)
- * 2. /api/v1/notifications - Proxied to notification service
- * 3. /api/v1/location/request - Proxied to notification service (silent push)
- * 4. / - Catch-all proxied to auth service
+ * 2. /api/v1/chat - Proxied to chat service (with load balancing)
+ * 3. /api/v1/conversations - Proxied to chat service
+ * 4. /api/v1/typing - Proxied to chat service
+ * 5. /api/v1/media - Proxied to chat service
+ * 6. /api/v1/notifications - Proxied to notification service
+ * 7. /api/v1/location/request - Proxied to notification service (silent push)
+ * 8. / - Catch-all proxied to auth service
  * 
  * All proxy routes preserve the original request path when forwarding to upstream services.
  * 
@@ -42,7 +62,11 @@ export function setupRoutes(app: Express, config: AppConfig): void {
   // Health check endpoint (not proxied)
   app.get("/health", async (req: Request, res: Response) => {
     try {
-      const services = [config.services.auth, config.services.notification];
+      const services = [
+        config.services.auth,
+        config.services.notification,
+        ...config.services.chat
+      ];
       const healthCheck = await checkAllServices(services);
 
       // Return 200 if all healthy, 503 if any unhealthy
@@ -57,6 +81,28 @@ export function setupRoutes(app: Express, config: AppConfig): void {
       });
     }
   });
+
+  // Chat service routes (load balanced across multiple instances)
+  app.use(
+    "/api/v1/conversations",
+    proxy(() => getNextChatServiceUrl(config), {
+      proxyReqPathResolver: (req) => req.originalUrl,
+    })
+  );
+
+  app.use(
+    "/api/v1/typing",
+    proxy(() => getNextChatServiceUrl(config), {
+      proxyReqPathResolver: (req) => req.originalUrl,
+    })
+  );
+
+  app.use(
+    "/api/v1/media",
+    proxy(() => getNextChatServiceUrl(config), {
+      proxyReqPathResolver: (req) => req.originalUrl,
+    })
+  );
 
   // Notification service routes
   app.use(

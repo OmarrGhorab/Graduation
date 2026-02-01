@@ -47,10 +47,12 @@ export interface ServiceEndpoint {
  * 
  * @property auth - Authentication service endpoint configuration
  * @property notification - Notification service endpoint configuration
+ * @property chat - Chat service endpoint configuration (supports multiple instances)
  */
 export interface ServicesConfig {
   auth: ServiceEndpoint;
   notification: ServiceEndpoint;
+  chat: ServiceEndpoint[];
 }
 
 /**
@@ -118,6 +120,15 @@ export function validateConfig(config: AppConfig): void {
       `Invalid NOTIFICATION_SERVICE_URL: must be a valid HTTP/HTTPS URL`
     );
   }
+
+  // Validate chat service URLs
+  for (const chatService of config.services.chat) {
+    if (!urlPattern.test(chatService.url)) {
+      throw new Error(
+        `Invalid CHAT_SERVICE_URL: ${chatService.url} must be a valid HTTP/HTTPS URL`
+      );
+    }
+  }
 }
 
 /**
@@ -158,6 +169,12 @@ export function loadConfig(): AppConfig {
   const notificationServiceUrl =
     process.env.NOTIFICATION_SERVICE_URL || "http://localhost:6003";
 
+  // Parse chat service URLs (supports multiple instances for load balancing)
+  const chatServiceUrls = (process.env.CHAT_SERVICE_URLS || "http://localhost:6004,http://localhost:6005,http://localhost:6006")
+    .split(",")
+    .map((url) => url.trim())
+    .filter((url) => url.length > 0);
+
   // Build configuration object
   const config: AppConfig = {
     server: {
@@ -186,6 +203,11 @@ export function loadConfig(): AppConfig {
         url: notificationServiceUrl,
         healthPath: "/health",
       },
+      chat: chatServiceUrls.map((url, index) => ({
+        name: `chat-service-${index + 1}`,
+        url,
+        healthPath: "/health",
+      })),
     },
     security: {
       arcjetKey: process.env.ARCJET_KEY,
