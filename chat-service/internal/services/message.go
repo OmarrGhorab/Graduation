@@ -6,6 +6,7 @@ import (
 	"errors"
 
 	"github.com/google/uuid"
+	"github.com/graduation/chat-service/internal/clients"
 	"github.com/graduation/chat-service/internal/models"
 	"github.com/graduation/chat-service/internal/repositories"
 	"github.com/graduation/chat-service/pkg/cache"
@@ -16,14 +17,16 @@ type MessageService struct {
 	repos        *repositories.Repositories
 	redis        *cache.RedisClient
 	notification *NotificationService
+	authClient   *clients.AuthClient
 }
 
 // NewMessageService creates a new MessageService
-func NewMessageService(repos *repositories.Repositories, redis *cache.RedisClient, notification *NotificationService) *MessageService {
+func NewMessageService(repos *repositories.Repositories, redis *cache.RedisClient, notification *NotificationService, authClient *clients.AuthClient) *MessageService {
 	return &MessageService{
 		repos:        repos,
 		redis:        redis,
 		notification: notification,
+		authClient:   authClient,
 	}
 }
 
@@ -34,7 +37,7 @@ type SendMessageInput struct {
 	SenderRole     models.UserRole
 	Type           models.MessageType
 	Content        string
-	MediaURL       string
+	MediaURLs      []string
 	MediaMetadata  map[string]interface{}
 	ReplyToID      *string
 }
@@ -55,7 +58,7 @@ func (s *MessageService) SendMessage(ctx context.Context, input SendMessageInput
 		SenderRole:     input.SenderRole,
 		Type:           input.Type,
 		Content:        input.Content,
-		MediaURL:       input.MediaURL,
+		MediaURLs:      input.MediaURLs,
 		ReplyToID:      input.ReplyToID,
 	}
 
@@ -79,6 +82,13 @@ func (s *MessageService) SendMessage(ctx context.Context, input SendMessageInput
 
 	// Get full message with reply
 	fullMessage, _ := s.repos.Message.GetByIDWithReply(ctx, message.ID)
+
+	// Enrich with sender details (single user)
+	users, _ := s.authClient.GetBatchUsers(ctx, []string{input.SenderID})
+	if user, ok := users[input.SenderID]; ok {
+		fullMessage.SenderName = user.Name
+		fullMessage.SenderImage = user.Image
+	}
 
 	// Send notifications to offline members (async, non-blocking)
 	go s.notifyMembers(context.Background(), input.ConversationID, input.SenderID, fullMessage)
@@ -117,19 +127,64 @@ func (s *MessageService) notifyMembers(ctx context.Context, conversationID, send
 }
 
 // GetMessages retrieves messages for a conversation
-func (s *MessageService) GetMessages(ctx context.Context, conversationID, userID string, limit, offset int) ([]models.Message, error) {
+func (s *MessageService) GetMessages(ctx context.Context, conversationID, userID string, query string, limit, offset int) ([]models.Message, error) {
 	// Verify user is a member
 	isMember, err := s.repos.Member.IsMember(ctx, conversationID, userID)
 	if err != nil || !isMember {
 		return nil, errors.New("you are not a member of this conversation")
 	}
 
-	return s.repos.Message.GetConversationMessages(ctx, conversationID, limit, offset)
+	messages, err := s.repos.Message.GetConversationMessages(ctx, conversationID, query, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+
+	return s.enrichMessages(ctx, messages)
 }
 
 // GetMessagesAfter retrieves messages after a specific message (for long polling)
 func (s *MessageService) GetMessagesAfter(ctx context.Context, conversationID, afterMessageID string, limit int) ([]models.Message, error) {
-	return s.repos.Message.GetMessagesAfter(ctx, conversationID, afterMessageID, limit)
+	messages, err := s.repos.Message.GetMessagesAfter(ctx, conversationID, afterMessageID, limit)
+	if err != nil {
+		return nil, err
+	}
+
+	return s.enrichMessages(ctx, messages)
+}
+
+// enrichMessages adds user details to messages
+func (s *MessageService) enrichMessages(ctx context.Context, messages []models.Message) ([]models.Message, error) {
+	if len(messages) == 0 {
+		return messages, nil
+	}
+
+	// Collect unique sender IDs
+	senderIDs := make(map[string]bool)
+	for _, msg := range messages {
+		senderIDs[msg.SenderID] = true
+	}
+
+	ids := make([]string, 0, len(senderIDs))
+	for id := range senderIDs {
+		ids = append(ids, id)
+	}
+
+	// Fetch user details
+	users, err := s.authClient.GetBatchUsers(ctx, ids)
+	if err != nil {
+		// Log error but return messages without enrichment
+		return messages, nil
+	}
+
+	// Map details to messages
+	for i := range messages {
+		if user, ok := users[messages[i].SenderID]; ok {
+			messages[i].SenderName = user.Name
+			messages[i].SenderImage = user.Image
+		}
+	}
+
+	return messages, nil
 }
 
 // DeleteMessage soft deletes a message
@@ -145,6 +200,31 @@ func (s *MessageService) DeleteMessage(ctx context.Context, messageID, userID st
 	}
 
 	return s.repos.Message.SoftDelete(ctx, messageID)
+}
+
+// EditMessage edits a message content
+func (s *MessageService) EditMessage(ctx context.Context, messageID, userID, content string) (*models.Message, error) {
+	message, err := s.repos.Message.GetByID(ctx, messageID)
+	if err != nil {
+		return nil, errors.New("message not found")
+	}
+
+	// Only sender can edit
+	if message.SenderID != userID {
+		return nil, errors.New("you can only edit your own messages")
+	}
+
+	// Cannot edit deleted messages
+	if message.IsDeleted {
+		return nil, errors.New("cannot edit deleted message")
+	}
+
+	// Update content
+	if err := s.repos.Message.UpdateContent(ctx, messageID, content); err != nil {
+		return nil, err
+	}
+
+	return s.repos.Message.GetByIDWithReply(ctx, messageID)
 }
 
 // PinMessage pins a message

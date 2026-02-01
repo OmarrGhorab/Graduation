@@ -46,10 +46,16 @@ func (r *MessageRepository) GetByIDWithReply(ctx context.Context, id string) (*m
 }
 
 // GetConversationMessages retrieves messages for a conversation with pagination
-func (r *MessageRepository) GetConversationMessages(ctx context.Context, conversationID string, limit, offset int) ([]models.Message, error) {
+func (r *MessageRepository) GetConversationMessages(ctx context.Context, conversationID string, queryStr string, limit, offset int) ([]models.Message, error) {
 	var messages []models.Message
-	err := r.db.WithContext(ctx).
-		Where("conversation_id = ? AND is_deleted = false", conversationID).
+	query := r.db.WithContext(ctx).
+		Where("conversation_id = ? AND is_deleted = false", conversationID)
+
+	if queryStr != "" {
+		query = query.Where("content ILIKE ?", "%"+queryStr+"%")
+	}
+
+	err := query.
 		Preload("ReplyTo").
 		Order("created_at DESC").
 		Limit(limit).
@@ -86,6 +92,17 @@ func (r *MessageRepository) GetMessagesAfter(ctx context.Context, conversationID
 // Update updates a message
 func (r *MessageRepository) Update(ctx context.Context, message *models.Message) error {
 	return r.db.WithContext(ctx).Save(message).Error
+}
+
+// UpdateContent updates the content of a message
+func (r *MessageRepository) UpdateContent(ctx context.Context, messageID, content string) error {
+	return r.db.WithContext(ctx).
+		Model(&models.Message{}).
+		Where("id = ?", messageID).
+		Updates(map[string]interface{}{
+			"content":    content,
+			"updated_at": gorm.Expr("NOW()"),
+		}).Error
 }
 
 // SoftDelete soft deletes a message

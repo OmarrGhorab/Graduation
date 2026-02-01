@@ -52,6 +52,9 @@ type Conversation struct {
 	CreatedAt   time.Time            `gorm:"autoCreateTime" json:"created_at"`
 	UpdatedAt   time.Time            `gorm:"autoUpdateTime" json:"updated_at"`
 	Members     []ConversationMember `gorm:"foreignKey:ConversationID" json:"members,omitempty"`
+
+	// Transient fields
+	UnreadCount int `gorm:"-" json:"unread_count"`
 }
 
 // TableName specifies the table name for GORM
@@ -68,6 +71,7 @@ type ConversationMember struct {
 	MemberRole     MemberRole `gorm:"type:varchar(20);not null;default:'MEMBER'" json:"member_role"`
 	JoinedAt       time.Time  `gorm:"autoCreateTime" json:"joined_at"`
 	LeftAt         *time.Time `json:"left_at,omitempty"`
+	LastReadAt     *time.Time `json:"last_read_at,omitempty"`
 }
 
 // TableName specifies the table name for GORM
@@ -83,13 +87,17 @@ type Message struct {
 	SenderRole     UserRole        `gorm:"type:varchar(20);not null" json:"sender_role"`
 	Type           MessageType     `gorm:"type:varchar(20);not null;default:'text'" json:"type"`
 	Content        string          `gorm:"type:text" json:"content,omitempty"`
-	MediaURL       string          `gorm:"type:text" json:"media_url,omitempty"`
+	MediaURLs      []string        `gorm:"type:text[]" json:"media_urls,omitempty"`
 	MediaMetadata  json.RawMessage `gorm:"type:jsonb" json:"media_metadata,omitempty"`
 	ReplyToID      *string         `gorm:"type:uuid" json:"reply_to_id,omitempty"`
 	ReplyTo        *Message        `gorm:"foreignKey:ReplyToID" json:"reply_to,omitempty"`
 	IsDeleted      bool            `gorm:"default:false" json:"is_deleted"`
 	CreatedAt      time.Time       `gorm:"autoCreateTime" json:"created_at"`
 	UpdatedAt      time.Time       `gorm:"autoUpdateTime" json:"updated_at"`
+
+	// Transient fields
+	SenderName  string `gorm:"-" json:"sender_name,omitempty"`
+	SenderImage string `gorm:"-" json:"sender_image,omitempty"`
 }
 
 // TableName specifies the table name for GORM

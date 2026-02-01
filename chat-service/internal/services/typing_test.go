@@ -55,6 +55,9 @@ func TestTypingUser_Struct(t *testing.T) {
 	if user.UserID != "user-123" {
 		t.Errorf("UserID = %v, want user-123", user.UserID)
 	}
+	if user.UserRole != "TEACHER" {
+		t.Errorf("UserRole = %v, want TEACHER", user.UserRole)
+	}
 }
 
 func TestPollService_NewPollService(t *testing.T) {

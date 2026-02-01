@@ -44,6 +44,21 @@ func TestChatNotificationPayload_Structure(t *testing.T) {
 	if payload.MessageType != "text" {
 		t.Errorf("MessageType = %v, want text", payload.MessageType)
 	}
+	if payload.SenderName != "John" {
+		t.Errorf("SenderName = %v, want John", payload.SenderName)
+	}
+	if payload.SenderRole != "TEACHER" {
+		t.Errorf("SenderRole = %v, want TEACHER", payload.SenderRole)
+	}
+	if payload.ConversationID != "conv-123" {
+		t.Errorf("ConversationID = %v, want conv-123", payload.ConversationID)
+	}
+	if payload.ConversationName != "Test Group" {
+		t.Errorf("ConversationName = %v, want Test Group", payload.ConversationName)
+	}
+	if payload.MessagePreview != "Hello world" {
+		t.Errorf("MessagePreview = %v, want Hello world", payload.MessagePreview)
+	}
 }
 
 func TestGetConversationName(t *testing.T) {

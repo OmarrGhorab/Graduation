@@ -7,19 +7,6 @@ import (
 	"github.com/graduation/chat-service/internal/models"
 )
 
-// Mock repositories for testing
-type mockConversationRepo struct {
-	conversations map[string]*models.Conversation
-	members       map[string][]models.ConversationMember
-}
-
-func newMockConversationRepo() *mockConversationRepo {
-	return &mockConversationRepo{
-		conversations: make(map[string]*models.Conversation),
-		members:       make(map[string][]models.ConversationMember),
-	}
-}
-
 func TestCanCreateGroup(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -115,9 +102,9 @@ func TestMediaService_ValidateSize(t *testing.T) {
 		{"Image under limit", MediaTypeImage, 4 * 1024 * 1024, false},
 		{"Image at limit", MediaTypeImage, 5 * 1024 * 1024, false},
 		{"Image over limit", MediaTypeImage, 6 * 1024 * 1024, true},
-		{"Voice under limit", MediaTypeVoice, 9 * 1024 * 1024, false},
-		{"Voice at limit", MediaTypeVoice, 10 * 1024 * 1024, false},
-		{"Voice over limit", MediaTypeVoice, 11 * 1024 * 1024, true},
+		{"Voice under limit", MediaTypeVoice, 14 * 1024 * 1024, false},
+		{"Voice at limit", MediaTypeVoice, 15 * 1024 * 1024, false},
+		{"Voice over limit", MediaTypeVoice, 16 * 1024 * 1024, true},
 	}
 
 	for _, tt := range tests {
@@ -165,9 +152,9 @@ func TestMediaService_GeneratePresignedURL_SizeValidation(t *testing.T) {
 	}
 
 	// Test voice too large
-	_, err = svc.GeneratePresignedURL(MediaTypeVoice, "audio/mp3", 15*1024*1024)
+	_, err = svc.GeneratePresignedURL(MediaTypeVoice, "audio/mp3", 16*1024*1024)
 	if err == nil {
-		t.Error("Expected error for voice size > 10MB")
+		t.Error("Expected error for voice size > 15MB")
 	}
 }
 

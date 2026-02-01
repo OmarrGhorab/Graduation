@@ -24,7 +24,7 @@ func NewMessageHandler(messageSvc *services.MessageService, pollSvc *services.Po
 type SendMessageRequest struct {
 	Type          models.MessageType     `json:"type"`
 	Content       string                 `json:"content"`
-	MediaURL      string                 `json:"media_url"`
+	MediaURLs     []string               `json:"media_urls"`
 	MediaMetadata map[string]interface{} `json:"media_metadata"`
 	ReplyToID     *string                `json:"reply_to_id"`
 }
@@ -52,7 +52,7 @@ func (h *MessageHandler) SendMessage(c *fiber.Ctx) error {
 		SenderRole:     userRole,
 		Type:           req.Type,
 		Content:        req.Content,
-		MediaURL:       req.MediaURL,
+		MediaURLs:      req.MediaURLs,
 		MediaMetadata:  req.MediaMetadata,
 		ReplyToID:      req.ReplyToID,
 	}
@@ -73,8 +73,12 @@ func (h *MessageHandler) GetMessages(c *fiber.Ctx) error {
 	conversationID := c.Params("id")
 	limit := c.QueryInt("limit", 50)
 	offset := c.QueryInt("offset", 0)
+	query := c.Query("search")
+	if query == "" {
+		query = c.Query("query")
+	}
 
-	messages, err := h.messageSvc.GetMessages(c.Context(), conversationID, userID, limit, offset)
+	messages, err := h.messageSvc.GetMessages(c.Context(), conversationID, userID, query, limit, offset)
 	if err != nil {
 		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
 			"error": fiber.Map{"code": "FORBIDDEN", "message": err.Error()},
@@ -120,6 +124,39 @@ func (h *MessageHandler) DeleteMessage(c *fiber.Ctx) error {
 	}
 
 	return c.JSON(fiber.Map{"message": "Message deleted successfully"})
+}
+
+// EditMessageRequest is the request body for editing a message
+type EditMessageRequest struct {
+	Content string `json:"content"`
+}
+
+// EditMessage edits a message
+func (h *MessageHandler) EditMessage(c *fiber.Ctx) error {
+	userID := c.Locals("user_id").(string)
+	messageID := c.Params("messageId")
+
+	var req EditMessageRequest
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": fiber.Map{"code": "BAD_REQUEST", "message": "Invalid request body"},
+		})
+	}
+
+	if req.Content == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": fiber.Map{"code": "BAD_REQUEST", "message": "Content is required"},
+		})
+	}
+
+	message, err := h.messageSvc.EditMessage(c.Context(), messageID, userID, req.Content)
+	if err != nil {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+			"error": fiber.Map{"code": "FORBIDDEN", "message": err.Error()},
+		})
+	}
+
+	return c.JSON(message)
 }
 
 // PinMessage pins a message

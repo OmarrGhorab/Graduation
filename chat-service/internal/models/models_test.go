@@ -121,6 +121,9 @@ func TestConversation_Struct(t *testing.T) {
 	if conv.Name != "Test Group" {
 		t.Errorf("Name = %v, want Test Group", conv.Name)
 	}
+	if conv.CreatedBy != "creator-id" {
+		t.Errorf("CreatedBy = %v, want creator-id", conv.CreatedBy)
+	}
 }
 
 func TestMessage_Struct(t *testing.T) {
@@ -145,6 +148,21 @@ func TestMessage_Struct(t *testing.T) {
 	if *msg.ReplyToID != replyID {
 		t.Errorf("ReplyToID = %v, want %v", *msg.ReplyToID, replyID)
 	}
+	if msg.ID != "msg-id" {
+		t.Errorf("ID = %v, want msg-id", msg.ID)
+	}
+	if msg.ConversationID != "conv-id" {
+		t.Errorf("ConversationID = %v, want conv-id", msg.ConversationID)
+	}
+	if msg.SenderID != "sender-id" {
+		t.Errorf("SenderID = %v, want sender-id", msg.SenderID)
+	}
+	if msg.Content != "Hello world" {
+		t.Errorf("Content = %v, want Hello world", msg.Content)
+	}
+	if msg.IsDeleted {
+		t.Error("IsDeleted should be false")
+	}
 }
 
 func TestConversationMember_Struct(t *testing.T) {
@@ -161,5 +179,14 @@ func TestConversationMember_Struct(t *testing.T) {
 	}
 	if member.MemberRole != MemberRoleMember {
 		t.Errorf("MemberRole = %v, want MEMBER", member.MemberRole)
+	}
+	if member.ID != "member-id" {
+		t.Errorf("ID = %v, want member-id", member.ID)
+	}
+	if member.ConversationID != "conv-id" {
+		t.Errorf("ConversationID = %v, want conv-id", member.ConversationID)
+	}
+	if member.UserID != "user-id" {
+		t.Errorf("UserID = %v, want user-id", member.UserID)
 	}
 }

@@ -3,6 +3,7 @@ package handlers
 import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/graduation/chat-service/internal/models"
+	"github.com/graduation/chat-service/internal/repositories"
 	"github.com/graduation/chat-service/internal/services"
 )
 
@@ -115,13 +116,36 @@ func (h *ConversationHandler) GetConversation(c *fiber.Ctx) error {
 	return c.JSON(conversation)
 }
 
+// MarkAsRead marks all messages in a conversation as read
+func (h *ConversationHandler) MarkAsRead(c *fiber.Ctx) error {
+	userID := c.Locals("user_id").(string)
+	conversationID := c.Params("id")
+
+	if err := h.conversationSvc.MarkAsRead(c.Context(), conversationID, userID); err != nil {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+			"error": fiber.Map{"code": "FORBIDDEN", "message": err.Error()},
+		})
+	}
+
+	return c.JSON(fiber.Map{"message": "Conversation marked as read"})
+}
+
 // GetUserConversations retrieves all conversations for the current user
 func (h *ConversationHandler) GetUserConversations(c *fiber.Ctx) error {
 	userID := c.Locals("user_id").(string)
 	limit := c.QueryInt("limit", 20)
 	offset := c.QueryInt("offset", 0)
 
-	conversations, err := h.conversationSvc.GetUserConversations(c.Context(), userID, limit, offset)
+	filter := repositories.ConversationFilter{
+		Role:  models.UserRole(c.Query("role")),
+		Type:  models.ConversationType(c.Query("type")),
+		Query: c.Query("q"),
+	}
+	if filter.Query == "" {
+		filter.Query = c.Query("query")
+	}
+
+	conversations, err := h.conversationSvc.GetUserConversations(c.Context(), userID, filter, limit, offset)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": fiber.Map{"code": "INTERNAL_ERROR", "message": err.Error()},

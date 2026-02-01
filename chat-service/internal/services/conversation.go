@@ -134,9 +134,20 @@ func (s *ConversationService) GetByID(ctx context.Context, id string) (*models.C
 	return s.repos.Conversation.GetByIDWithMembers(ctx, id)
 }
 
+// MarkAsRead marks all messages in a conversation as read for a user
+func (s *ConversationService) MarkAsRead(ctx context.Context, conversationID, userID string) error {
+	// Verify membership
+	isMember, err := s.repos.Member.IsMember(ctx, conversationID, userID)
+	if err != nil || !isMember {
+		return errors.New("you are not a member of this conversation")
+	}
+
+	return s.repos.Conversation.UpdateLastRead(ctx, conversationID, userID)
+}
+
 // GetUserConversations retrieves all conversations for a user
-func (s *ConversationService) GetUserConversations(ctx context.Context, userID string, limit, offset int) ([]models.Conversation, error) {
-	return s.repos.Conversation.GetUserConversations(ctx, userID, limit, offset)
+func (s *ConversationService) GetUserConversations(ctx context.Context, userID string, filter repositories.ConversationFilter, limit, offset int) ([]models.Conversation, error) {
+	return s.repos.Conversation.GetUserConversations(ctx, userID, filter, limit, offset)
 }
 
 // AddMember adds a member to a group conversation
@@ -163,7 +174,12 @@ func (s *ConversationService) AddMember(ctx context.Context, conversationID, req
 
 // RemoveMember removes a member from a group conversation
 func (s *ConversationService) RemoveMember(ctx context.Context, conversationID, requesterID, memberID string) error {
-	// Check requester is owner
+	// Check if user is leaving (removing themselves)
+	if requesterID == memberID {
+		return s.repos.Member.Remove(ctx, conversationID, memberID)
+	}
+
+	// Check requester is owner/admin for removing others
 	requester, err := s.repos.Member.GetByConversationAndUser(ctx, conversationID, requesterID)
 	if err != nil {
 		return errors.New("you are not a member of this conversation")

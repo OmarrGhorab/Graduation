@@ -45,12 +45,47 @@ func (r *ConversationRepository) GetByIDWithMembers(ctx context.Context, id stri
 	return &conversation, nil
 }
 
-// GetUserConversations retrieves all conversations for a user
-func (r *ConversationRepository) GetUserConversations(ctx context.Context, userID string, limit, offset int) ([]models.Conversation, error) {
+// ConversationFilter contains filters for querying conversations
+type ConversationFilter struct {
+	Role  models.UserRole
+	Type  models.ConversationType
+	Query string
+}
+
+// UpdateLastRead updates the last read timestamp for a user in a conversation
+func (r *ConversationRepository) UpdateLastRead(ctx context.Context, conversationID, userID string) error {
+	return r.db.WithContext(ctx).
+		Model(&models.ConversationMember{}).
+		Where("conversation_id = ? AND user_id = ?", conversationID, userID).
+		Update("last_read_at", gorm.Expr("NOW()")).Error
+}
+
+// GetUserConversations retrieves all conversations for a user with filters and unread counts
+func (r *ConversationRepository) GetUserConversations(ctx context.Context, userID string, filter ConversationFilter, limit, offset int) ([]models.Conversation, error) {
 	var conversations []models.Conversation
-	err := r.db.WithContext(ctx).
+	query := r.db.WithContext(ctx).
+		Table("conversations").
+		Select("conversations.*, "+
+			"(SELECT COUNT(*) FROM messages "+
+			"WHERE messages.conversation_id = conversations.id "+
+			"AND messages.created_at > COALESCE(conversation_members.last_read_at, conversation_members.joined_at) "+
+			"AND messages.sender_id != ?) as unread_count", userID).
 		Joins("JOIN conversation_members ON conversation_members.conversation_id = conversations.id").
-		Where("conversation_members.user_id = ? AND conversation_members.left_at IS NULL", userID).
+		Where("conversation_members.user_id = ? AND conversation_members.left_at IS NULL", userID)
+
+	if filter.Role != "" {
+		query = query.Where("conversation_members.user_role = ?", filter.Role)
+	}
+
+	if filter.Type != "" {
+		query = query.Where("conversations.type = ?", filter.Type)
+	}
+
+	if filter.Query != "" {
+		query = query.Where("conversations.name ILIKE ?", "%"+filter.Query+"%")
+	}
+
+	err := query.
 		Preload("Members", "left_at IS NULL").
 		Order("conversations.updated_at DESC").
 		Limit(limit).

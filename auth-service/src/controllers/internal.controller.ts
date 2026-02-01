@@ -97,3 +97,54 @@ export const validateTokenInternal = async (
     next(err);
   }
 };
+
+/**
+ * Get batch user details for internal services
+ * Used by chat-service to enrich messages
+ */
+export const getBatchUsersInternal = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const { userIds } = req.body;
+
+    if (!Array.isArray(userIds)) {
+      throw new BadRequestError("userIds must be an array");
+    }
+
+    if (userIds.length === 0) {
+      return res.status(200).json({});
+    }
+
+    const users = await prisma.user.findMany({
+      where: {
+        id: {
+          in: userIds,
+        },
+      },
+      select: {
+        id: true,
+        name: true,
+        profileImg: true,
+        role: true,
+      },
+    });
+
+    // Convert to map for easier lookup
+    const userMap = users.reduce((acc, user) => {
+      acc[user.id] = {
+        id: user.id,
+        name: user.name,
+        image: user.profileImg,
+        role: user.role,
+      };
+      return acc;
+    }, {} as Record<string, any>);
+
+    res.status(200).json(userMap);
+  } catch (err) {
+    next(err);
+  }
+};

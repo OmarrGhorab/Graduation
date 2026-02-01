@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strconv"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // MediaService handles media upload logic with Cloudinary
@@ -30,6 +32,7 @@ type PresignResponse struct {
 	Signature   string `json:"signature"`
 	Timestamp   int64  `json:"timestamp"`
 	APIKey      string `json:"api_key"`
+	Folder      string `json:"folder"`
 	PublicID    string `json:"public_id"`
 	DownloadURL string `json:"download_url"`
 }
@@ -45,28 +48,68 @@ const (
 // Size limits
 const (
 	MaxImageSize = 5 * 1024 * 1024  // 5 MB
-	MaxVoiceSize = 10 * 1024 * 1024 // 10 MB
+	MaxVoiceSize = 15 * 1024 * 1024 // 15 MB
+	MaxBatchSize = 20 * 1024 * 1024 // 20 MB (Total for multiple files)
 )
 
 // GeneratePresignedURL generates a presigned URL for Cloudinary upload
 func (s *MediaService) GeneratePresignedURL(mediaType MediaType, contentType string, fileSize int64) (*PresignResponse, error) {
 	// Validate file size
-	if mediaType == MediaTypeImage && fileSize > MaxImageSize {
-		return nil, fmt.Errorf("image size exceeds maximum of 5MB")
-	}
-	if mediaType == MediaTypeVoice && fileSize > MaxVoiceSize {
-		return nil, fmt.Errorf("voice size exceeds maximum of 10MB")
+	if err := s.ValidateMediaSize(mediaType, fileSize); err != nil {
+		return nil, err
 	}
 
-	// Generate unique public ID
+	return s.createPresignResponse(mediaType)
+}
+
+// GenerateBatchPresignedURLs generates multiple presigned URLs and validates total size
+func (s *MediaService) GenerateBatchPresignedURLs(requests []struct {
+	Type        MediaType
+	ContentType string
+	FileSize    int64
+}) ([]*PresignResponse, error) {
+	var totalSize int64
+	var responses []*PresignResponse
+
+	// First pass: validate sizes
+	for _, req := range requests {
+		if err := s.ValidateMediaSize(req.Type, req.FileSize); err != nil {
+			return nil, err
+		}
+		totalSize += req.FileSize
+	}
+
+	// Validate total batch size
+	if totalSize > MaxBatchSize {
+		return nil, fmt.Errorf("total batch size %s exceeds maximum of 20MB", formatBytes(totalSize))
+	}
+
+	// Second pass: generate URLs
+	for _, req := range requests {
+		resp, err := s.createPresignResponse(req.Type)
+		if err != nil {
+			return nil, err
+		}
+		responses = append(responses, resp)
+	}
+
+	return responses, nil
+}
+
+func (s *MediaService) createPresignResponse(mediaType MediaType) (*PresignResponse, error) {
+	// Generate unique public ID without folder (folder will be passed separately)
 	timestamp := time.Now().Unix()
 	folder := "chat/" + time.Now().Format("2006/01")
-	publicID := fmt.Sprintf("%s/%d", folder, timestamp)
+	fileName := fmt.Sprintf("%d_%s", timestamp, uuid.New().String()[:8])
 
 	// Generate signature for Cloudinary
-	signatureStr := fmt.Sprintf("public_id=%s&timestamp=%d%s", publicID, timestamp, s.apiSecret)
+	// Parameters must be sorted alphabetically: folder, public_id, timestamp
+	signatureStr := fmt.Sprintf("folder=%s&public_id=%s&timestamp=%d%s", folder, fileName, timestamp, s.apiSecret)
 	hash := sha1.Sum([]byte(signatureStr))
 	signature := hex.EncodeToString(hash[:])
+
+	// Full public ID for download URL
+	fullPublicID := folder + "/" + fileName
 
 	// Determine resource type
 	resourceType := "image"
@@ -75,14 +118,15 @@ func (s *MediaService) GeneratePresignedURL(mediaType MediaType, contentType str
 	}
 
 	uploadURL := fmt.Sprintf("https://api.cloudinary.com/v1_1/%s/%s/upload", s.cloudName, resourceType)
-	downloadURL := fmt.Sprintf("https://res.cloudinary.com/%s/%s/upload/%s", s.cloudName, resourceType, publicID)
+	downloadURL := fmt.Sprintf("https://res.cloudinary.com/%s/%s/upload/%s", s.cloudName, resourceType, fullPublicID)
 
 	return &PresignResponse{
 		UploadURL:   uploadURL,
 		Signature:   signature,
 		Timestamp:   timestamp,
 		APIKey:      s.apiKey,
-		PublicID:    publicID,
+		Folder:      folder,
+		PublicID:    fileName,
 		DownloadURL: downloadURL,
 	}, nil
 }
@@ -96,7 +140,7 @@ func (s *MediaService) ValidateMediaSize(mediaType MediaType, fileSize int64) er
 		}
 	case MediaTypeVoice:
 		if fileSize > MaxVoiceSize {
-			return fmt.Errorf("voice size %s exceeds maximum of 10MB", formatBytes(fileSize))
+			return fmt.Errorf("voice size %s exceeds maximum of 15MB", formatBytes(fileSize))
 		}
 	default:
 		return fmt.Errorf("unsupported media type: %s", mediaType)

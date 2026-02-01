@@ -27,11 +27,13 @@ func SetupRoutes(app *fiber.App, hdlrs *handlers.Handlers, authMiddleware *middl
 	conversations.Post("/:id/members", hdlrs.Conversation.AddMember)
 	conversations.Delete("/:id/members/:memberId", hdlrs.Conversation.RemoveMember)
 	conversations.Patch("/:id/members/:memberId/role", hdlrs.Conversation.UpdateMemberRole)
+	conversations.Post("/:id/read", hdlrs.Conversation.MarkAsRead)
 
 	// Message routes
 	conversations.Post("/:id/messages", hdlrs.Message.SendMessage)
 	conversations.Get("/:id/messages", hdlrs.Message.GetMessages)
 	conversations.Get("/:id/poll", hdlrs.Message.PollMessages)
+	conversations.Patch("/:id/messages/:messageId", hdlrs.Message.EditMessage)
 	conversations.Delete("/:id/messages/:messageId", hdlrs.Message.DeleteMessage)
 	conversations.Post("/:id/messages/:messageId/pin", hdlrs.Message.PinMessage)
 	conversations.Delete("/:id/messages/:messageId/pin", hdlrs.Message.UnpinMessage)
@@ -43,4 +45,5 @@ func SetupRoutes(app *fiber.App, hdlrs *handlers.Handlers, authMiddleware *middl
 
 	// Media routes
 	protected.Post("/media/presign", hdlrs.Media.Presign)
+	protected.Post("/media/batch-presign", hdlrs.Media.BatchPresign)
 }
