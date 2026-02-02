@@ -27,6 +27,7 @@ type SendMessageRequest struct {
 	MediaURLs     []string               `json:"media_urls"`
 	MediaMetadata map[string]interface{} `json:"media_metadata"`
 	ReplyToID     *string                `json:"reply_to_id"`
+	LocalID       string                 `json:"local_id"`
 }
 
 // SendMessage sends a message to a conversation
@@ -55,6 +56,7 @@ func (h *MessageHandler) SendMessage(c *fiber.Ctx) error {
 		MediaURLs:      req.MediaURLs,
 		MediaMetadata:  req.MediaMetadata,
 		ReplyToID:      req.ReplyToID,
+		LocalID:        req.LocalID,
 	}
 
 	message, err := h.messageSvc.SendMessage(c.Context(), input)
