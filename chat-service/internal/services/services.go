@@ -3,6 +3,7 @@ package services
 import (
 	"github.com/graduation/chat-service/internal/clients"
 	"github.com/graduation/chat-service/internal/config"
+	"github.com/graduation/chat-service/internal/kafka"
 	"github.com/graduation/chat-service/internal/repositories"
 	"github.com/graduation/chat-service/pkg/cache"
 )
@@ -19,7 +20,7 @@ type Services struct {
 }
 
 // NewServices creates a new Services instance with all services
-func NewServices(repos *repositories.Repositories, redis *cache.RedisClient, cfg *config.Config) *Services {
+func NewServices(repos *repositories.Repositories, redis *cache.RedisClient, cfg *config.Config, producer *kafka.Producer) *Services {
 	notificationSvc := NewNotificationService(cfg.NotificationServiceURL, cfg.InternalServiceSecret)
 	// Auth service URL is likely same as notification service URL base but different port or same cluster
 	// Assuming it's configured similar to notification service or hardcoded for now if config missing
@@ -36,7 +37,7 @@ func NewServices(repos *repositories.Repositories, redis *cache.RedisClient, cfg
 
 	return &Services{
 		Conversation: NewConversationService(repos, redis, notificationSvc, authClient, mediaSvc),
-		Message:      NewMessageService(repos, redis, notificationSvc, authClient, mediaSvc),
+		Message:      NewMessageService(repos, redis, notificationSvc, authClient, mediaSvc, producer),
 		Typing:       NewTypingService(redis),
 		Poll:         NewPollService(repos.Message, redis, cfg.PollTimeout, cfg.PollInterval),
 		Media:        mediaSvc,

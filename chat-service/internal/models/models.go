@@ -93,6 +93,7 @@ func (ConversationMember) TableName() string {
 // Message represents a chat message
 type Message struct {
 	ID             string          `gorm:"type:uuid;primaryKey" json:"id"`
+	LocalID        string          `gorm:"type:uuid;index" json:"local_id"` // Client-side ID for idempotency
 	ConversationID string          `gorm:"type:uuid;not null" json:"conversation_id"`
 	SenderID       string          `gorm:"type:uuid;not null" json:"sender_id"`
 	SenderRole     UserRole        `gorm:"type:varchar(20);not null" json:"sender_role"`

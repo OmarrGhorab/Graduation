@@ -15,6 +15,7 @@ import (
 
 	"github.com/graduation/chat-service/internal/config"
 	"github.com/graduation/chat-service/internal/handlers"
+	"github.com/graduation/chat-service/internal/kafka"
 	"github.com/graduation/chat-service/internal/middleware"
 	"github.com/graduation/chat-service/internal/repositories"
 	"github.com/graduation/chat-service/internal/router"
@@ -50,8 +51,12 @@ func main() {
 	// Initialize repositories
 	repos := repositories.NewRepositories(db)
 
-	// Initialize services
-	svcs := services.NewServices(repos, redisClient, cfg)
+	// Initialize Kafka Producer
+	producer := kafka.NewProducer(cfg.KafkaBrokers)
+	// Defer close? Usually producer lives for app lifetime.
+
+	// Initialize services (Updated signature)
+	svcs := services.NewServices(repos, redisClient, cfg, producer)
 
 	// Initialize handlers
 	hdlrs := handlers.NewHandlers(svcs)

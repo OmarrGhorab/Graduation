@@ -20,8 +20,12 @@ type Config struct {
 	// Redis
 	RedisURL string
 
+	// Kafka
+	KafkaBrokers []string
+
 	// JWT
 	JWTAccessSecret string
+	JWTSecret       string
 
 	// Internal Service Communication
 	InternalServiceSecret  string
@@ -51,7 +55,9 @@ func Load() (*Config, error) {
 		Env:                    getEnv("ENV", "development"),
 		DatabaseURL:            getEnv("DATABASE_URL", ""),
 		RedisURL:               getEnv("REDIS_URL", "redis://localhost:6379"),
+		KafkaBrokers:           []string{getEnv("KAFKA_BROKER", "localhost:9092")},
 		JWTAccessSecret:        getEnv("JWT_ACCESS_SECRET", ""),
+		JWTSecret:              getEnv("JWT_SECRET", "secret"),
 		InternalServiceSecret:  getEnv("INTERNAL_SERVICE_SECRET", ""),
 		NotificationServiceURL: getEnv("NOTIFICATION_SERVICE_URL", "http://localhost:6003"),
 		CloudinaryCloudName:    getEnv("CLOUDINARY_CLOUD_NAME", ""),

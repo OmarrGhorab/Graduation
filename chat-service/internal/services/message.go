@@ -8,6 +8,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/graduation/chat-service/internal/clients"
+	"github.com/graduation/chat-service/internal/events"
+	"github.com/graduation/chat-service/internal/kafka"
 	"github.com/graduation/chat-service/internal/models"
 	"github.com/graduation/chat-service/internal/repositories"
 	"github.com/graduation/chat-service/pkg/cache"
@@ -20,16 +22,18 @@ type MessageService struct {
 	notification *NotificationService
 	authClient   *clients.AuthClient
 	media        *MediaService
+	producer     *kafka.Producer
 }
 
 // NewMessageService creates a new MessageService
-func NewMessageService(repos *repositories.Repositories, redis *cache.RedisClient, notification *NotificationService, authClient *clients.AuthClient, media *MediaService) *MessageService {
+func NewMessageService(repos *repositories.Repositories, redis *cache.RedisClient, notification *NotificationService, authClient *clients.AuthClient, media *MediaService, producer *kafka.Producer) *MessageService {
 	return &MessageService{
 		repos:        repos,
 		redis:        redis,
 		notification: notification,
 		authClient:   authClient,
 		media:        media,
+		producer:     producer,
 	}
 }
 
@@ -37,6 +41,7 @@ func NewMessageService(repos *repositories.Repositories, redis *cache.RedisClien
 type SendMessageInput struct {
 	ConversationID string
 	SenderID       string
+	LocalID        string
 	SenderRole     models.UserRole
 	Type           models.MessageType
 	Content        string
@@ -56,6 +61,7 @@ func (s *MessageService) SendMessage(ctx context.Context, input SendMessageInput
 	// Create message
 	message := &models.Message{
 		ID:             uuid.New().String(),
+		LocalID:        input.LocalID,
 		ConversationID: input.ConversationID,
 		SenderID:       input.SenderID,
 		SenderRole:     input.SenderRole,
@@ -91,6 +97,27 @@ func (s *MessageService) SendMessage(ctx context.Context, input SendMessageInput
 	if user, ok := users[input.SenderID]; ok {
 		fullMessage.SenderName = user.Name
 		fullMessage.SenderImage = user.Image
+	}
+
+	// Produce Event to Kafka
+	if s.producer != nil {
+		event := events.MessageCreatedEvent{
+			ID:             fullMessage.ID,
+			LocalID:        fullMessage.LocalID,
+			ConversationID: fullMessage.ConversationID,
+			SenderID:       fullMessage.SenderID,
+			Content:        fullMessage.Content,
+			Type:           string(fullMessage.Type),
+			MediaURLs:      fullMessage.MediaURLs,
+			CreatedAt:      fullMessage.CreatedAt,
+		}
+		go func() {
+			if err := s.producer.PublishMessageCreated(context.Background(), event); err != nil {
+				fmt.Printf("[MessageService] Failed to publish event: %v\n", err)
+			} else {
+				fmt.Printf("[MessageService] Published event for message %s\n", fullMessage.ID)
+			}
+		}()
 	}
 
 	// Send notifications to offline members (async, non-blocking)
