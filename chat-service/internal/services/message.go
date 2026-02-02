@@ -19,15 +19,17 @@ type MessageService struct {
 	redis        *cache.RedisClient
 	notification *NotificationService
 	authClient   *clients.AuthClient
+	media        *MediaService
 }
 
 // NewMessageService creates a new MessageService
-func NewMessageService(repos *repositories.Repositories, redis *cache.RedisClient, notification *NotificationService, authClient *clients.AuthClient) *MessageService {
+func NewMessageService(repos *repositories.Repositories, redis *cache.RedisClient, notification *NotificationService, authClient *clients.AuthClient, media *MediaService) *MessageService {
 	return &MessageService{
 		repos:        repos,
 		redis:        redis,
 		notification: notification,
 		authClient:   authClient,
+		media:        media,
 	}
 }
 
@@ -180,10 +182,12 @@ func (s *MessageService) enrichMessages(ctx context.Context, messages []models.M
 		return messages, nil
 	}
 
-	// Collect unique sender IDs
+	// Collect unique sender IDs (excluding system)
 	senderIDs := make(map[string]bool)
 	for _, msg := range messages {
-		senderIDs[msg.SenderID] = true
+		if msg.SenderID != "00000000-0000-0000-0000-000000000000" && msg.SenderID != "" {
+			senderIDs[msg.SenderID] = true
+		}
 	}
 
 	ids := make([]string, 0, len(senderIDs))
@@ -201,8 +205,12 @@ func (s *MessageService) enrichMessages(ctx context.Context, messages []models.M
 
 	// Map details to messages
 	matches := 0
+	systemID := "00000000-0000-0000-0000-000000000000"
 	for i := range messages {
-		if user, ok := users[messages[i].SenderID]; ok {
+		if messages[i].SenderID == systemID {
+			messages[i].SenderName = "System"
+			matches++
+		} else if user, ok := users[messages[i].SenderID]; ok {
 			messages[i].SenderName = user.Name
 			messages[i].SenderImage = user.Image
 			matches++
@@ -220,12 +228,45 @@ func (s *MessageService) DeleteMessage(ctx context.Context, messageID, userID st
 		return errors.New("message not found")
 	}
 
-	// Only sender or admins can	// Check permission
+	// Only sender or admins can
 	if message.SenderID != userID && !canModerateGlobal(userRole) {
 		return errors.New("you don't have permission to delete this message")
 	}
 
-	return s.repos.Message.SoftDelete(ctx, messageID)
+	if err := s.repos.Message.SoftDelete(ctx, messageID); err != nil {
+		return err
+	}
+
+	// Delete media from Cloudinary if exists (async to not block response)
+	if len(message.MediaURLs) > 0 {
+		go func(urls []string) {
+			for _, mediaURL := range urls {
+				if err := s.media.DeleteMedia(context.Background(), mediaURL); err != nil {
+					fmt.Printf("[MessageService] Failed to delete media from Cloudinary (%s): %v\n", mediaURL, err)
+				}
+			}
+		}(message.MediaURLs)
+	}
+
+	// Automatically unpin if the message was pinned
+	_ = s.repos.Message.Unpin(ctx, messageID)
+
+	// Notify all members that the message was deleted (real-time removal)
+	go s.notifyDelete(context.Background(), message.ConversationID, messageID)
+
+	return nil
+}
+
+// notifyDelete sends real-time deletion events to all members
+func (s *MessageService) notifyDelete(ctx context.Context, conversationID, messageID string) {
+	memberIDs, err := s.repos.Member.GetConversationMemberIDs(ctx, conversationID)
+	if err != nil {
+		return
+	}
+
+	// We notify EVERYONE including the person who deleted it,
+	// so their other devices/tabs also update.
+	_ = s.notification.SendDeleteNotification(ctx, messageID, conversationID, memberIDs)
 }
 
 // EditMessage edits a message content
@@ -262,7 +303,7 @@ func (s *MessageService) PinMessage(ctx context.Context, conversationID, message
 	}
 
 	// Check permission
-	if !canPin(userRole, member.MemberRole) {
+	if !canPin(member.MemberRole) {
 		return errors.New("you don't have permission to pin messages")
 	}
 
@@ -299,7 +340,7 @@ func (s *MessageService) UnpinMessage(ctx context.Context, conversationID, messa
 	}
 
 	// Check permission
-	if !canPin(userRole, member.MemberRole) {
+	if !canPin(member.MemberRole) {
 		return errors.New("you don't have permission to unpin messages")
 	}
 
@@ -377,11 +418,7 @@ func canModerateGlobal(role models.UserRole) bool {
 }
 
 // canPin checks if a user can pin messages
-func canPin(userRole models.UserRole, memberRole models.MemberRole) bool {
-	// Check user role permissions
-	if userRole == models.UserRoleInstructor || userRole == models.UserRoleTeacher || userRole == models.UserRoleAssistant {
-		return true
-	}
-	// Check member role permissions
+func canPin(memberRole models.MemberRole) bool {
+	// Only Group Owner or Admin (assigned Assistant) can pin messages.
 	return memberRole == models.MemberRoleOwner || memberRole == models.MemberRoleAdmin
 }

@@ -15,7 +15,7 @@ func TestCanCreateGroup(t *testing.T) {
 	}{
 		{"Instructor can create group", models.UserRoleInstructor, true},
 		{"Teacher can create group", models.UserRoleTeacher, true},
-		{"Assistant can create group", models.UserRoleAssistant, true},
+		{"Assistant cannot create group", models.UserRoleAssistant, false},
 		{"Student cannot create group", models.UserRoleStudent, false},
 		{"Parent cannot create group", models.UserRoleParent, false},
 	}
@@ -56,23 +56,19 @@ func TestPermissions_CanModerateGlobal(t *testing.T) {
 func TestPermissions_CanPin(t *testing.T) {
 	tests := []struct {
 		name       string
-		userRole   models.UserRole
 		memberRole models.MemberRole
 		expected   bool
 	}{
-		{"Owner can pin", models.UserRoleStudent, models.MemberRoleOwner, true},
-		{"Admin can pin", models.UserRoleStudent, models.MemberRoleAdmin, true},
-		{"Member cannot pin", models.UserRoleStudent, models.MemberRoleMember, false},
-		{"Instructor can pin (any member role)", models.UserRoleInstructor, models.MemberRoleMember, true},
-		{"Teacher can pin (any member role)", models.UserRoleTeacher, models.MemberRoleMember, true},
-		{"Assistant can pin (any member role)", models.UserRoleAssistant, models.MemberRoleMember, true},
+		{"Owner can pin", models.MemberRoleOwner, true},
+		{"Admin can pin", models.MemberRoleAdmin, true},
+		{"Member cannot pin", models.MemberRoleMember, false},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := canPin(tt.userRole, tt.memberRole)
+			result := canPin(tt.memberRole)
 			if result != tt.expected {
-				t.Errorf("canPin(%v, %v) = %v, want %v", tt.userRole, tt.memberRole, result, tt.expected)
+				t.Errorf("canPin(%v) = %v, want %v", tt.memberRole, result, tt.expected)
 			}
 		})
 	}

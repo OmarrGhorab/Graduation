@@ -1,10 +1,14 @@
 package services
 
 import (
+	"context"
 	"crypto/sha1"
 	"encoding/hex"
 	"fmt"
+	"net/http"
+	"net/url"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -145,6 +149,63 @@ func (s *MediaService) ValidateMediaSize(mediaType MediaType, fileSize int64) er
 	default:
 		return fmt.Errorf("unsupported media type: %s", mediaType)
 	}
+	return nil
+}
+
+// DeleteMedia deletes an asset from Cloudinary given its download URL
+func (s *MediaService) DeleteMedia(ctx context.Context, mediaURL string) error {
+	if mediaURL == "" {
+		return nil
+	}
+
+	// Extract resource type and public ID from URL
+	// Format: https://res.cloudinary.com/<cloud_name>/<resource_type>/upload/<folder>/<public_id>
+	u, err := url.Parse(mediaURL)
+	if err != nil {
+		return err
+	}
+
+	parts := strings.Split(u.Path, "/")
+	if len(parts) < 5 {
+		return fmt.Errorf("invalid cloudinary URL format: %s", mediaURL)
+	}
+
+	// parts[0] is empty
+	// parts[1] is cloud_name
+	// parts[2] is resource_type (image/video)
+	// parts[3] is "upload"
+	// parts[4:] is the public_id (including folders)
+	resourceType := parts[2]
+	publicIDWithFolders := strings.Join(parts[4:], "/")
+
+	// Remove file extension if present
+	if idx := strings.LastIndex(publicIDWithFolders, "."); idx != -1 {
+		publicIDWithFolders = publicIDWithFolders[:idx]
+	}
+
+	timestamp := time.Now().Unix()
+	signatureStr := fmt.Sprintf("public_id=%s&timestamp=%d%s", publicIDWithFolders, timestamp, s.apiSecret)
+	hash := sha1.Sum([]byte(signatureStr))
+	signature := hex.EncodeToString(hash[:])
+
+	endpoint := fmt.Sprintf("https://api.cloudinary.com/v1_1/%s/%s/destroy", s.cloudName, resourceType)
+
+	data := url.Values{}
+	data.Set("public_id", publicIDWithFolders)
+	data.Set("timestamp", strconv.FormatInt(timestamp, 10))
+	data.Set("api_key", s.apiKey)
+	data.Set("signature", signature)
+
+	resp, err := http.PostForm(endpoint, data)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("cloudinary destroy failed with status: %d", resp.StatusCode)
+	}
+
 	return nil
 }
 

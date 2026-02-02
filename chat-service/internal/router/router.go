@@ -30,6 +30,7 @@ func SetupRoutes(app *fiber.App, hdlrs *handlers.Handlers, authMiddleware *middl
 	conversations.Delete("/:id/members/:memberId", hdlrs.Conversation.RemoveMember)
 	conversations.Patch("/:id/members/:memberId/role", hdlrs.Conversation.UpdateMemberRole)
 	conversations.Post("/:id/read", hdlrs.Conversation.MarkAsRead)
+	conversations.Delete("/:id", hdlrs.Conversation.DeleteConversation)
 
 	// Message routes
 	messages := conversations.Group("/:id/messages")

@@ -212,10 +212,11 @@ func (h *ConversationHandler) AddMember(c *fiber.Ctx) error {
 // RemoveMember removes a member from a conversation
 func (h *ConversationHandler) RemoveMember(c *fiber.Ctx) error {
 	userID := c.Locals("user_id").(string)
+	userRole := c.Locals("user_role").(models.UserRole)
 	conversationID := c.Params("id")
 	memberID := c.Params("memberId")
 
-	if err := h.conversationSvc.RemoveMember(c.Context(), conversationID, userID, memberID); err != nil {
+	if err := h.conversationSvc.RemoveMember(c.Context(), conversationID, userID, userRole, memberID); err != nil {
 		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
 			"error": fiber.Map{"code": "FORBIDDEN", "message": err.Error()},
 		})
@@ -282,4 +283,18 @@ func (h *ConversationHandler) UpdateImage(c *fiber.Ctx) error {
 	}
 
 	return c.JSON(fiber.Map{"message": "Group image updated successfully"})
+}
+
+// DeleteConversation deletes a conversation
+func (h *ConversationHandler) DeleteConversation(c *fiber.Ctx) error {
+	userID := c.Locals("user_id").(string)
+	conversationID := c.Params("id")
+
+	if err := h.conversationSvc.DeleteConversation(c.Context(), conversationID, userID); err != nil {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+			"error": fiber.Map{"code": "FORBIDDEN", "message": err.Error()},
+		})
+	}
+
+	return c.JSON(fiber.Map{"message": "Conversation deleted successfully"})
 }

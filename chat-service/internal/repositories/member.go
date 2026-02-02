@@ -123,3 +123,8 @@ func (r *MemberRepository) ResetUnreadCount(ctx context.Context, conversationID,
 		Where("conversation_id = ? AND user_id = ?", conversationID, userID).
 		Updates(updates).Error
 }
+
+// DeleteAllByConversation deletes all members in a conversation
+func (r *MemberRepository) DeleteAllByConversation(ctx context.Context, conversationID string) error {
+	return r.db.WithContext(ctx).Delete(&models.ConversationMember{}, "conversation_id = ?", conversationID).Error
+}

@@ -172,3 +172,39 @@ func (r *MessageRepository) GetMediaHistory(ctx context.Context, conversationID 
 
 	return messages, err
 }
+
+// GetAllMediaURLsInConversation retrieves all media URLs shared in a conversation
+func (r *MessageRepository) GetAllMediaURLsInConversation(ctx context.Context, conversationID string) ([]string, error) {
+	var results []struct {
+		MediaURLs []string `gorm:"type:text[]"`
+	}
+	err := r.db.WithContext(ctx).
+		Model(&models.Message{}).
+		Select("media_urls").
+		Where("conversation_id = ? AND media_urls IS NOT NULL AND cardinality(media_urls) > 0", conversationID).
+		Find(&results).Error
+	if err != nil {
+		return nil, err
+	}
+
+	var allURLs []string
+	for _, res := range results {
+		allURLs = append(allURLs, res.MediaURLs...)
+	}
+	return allURLs, nil
+}
+
+// DeleteAllByConversation deletes all messages and pins in a conversation
+func (r *MessageRepository) DeleteAllByConversation(ctx context.Context, conversationID string) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// Delete pins first
+		if err := tx.Delete(&models.PinnedMessage{}, "conversation_id = ?", conversationID).Error; err != nil {
+			return err
+		}
+		// Delete messages
+		if err := tx.Delete(&models.Message{}, "conversation_id = ?", conversationID).Error; err != nil {
+			return err
+		}
+		return nil
+	})
+}

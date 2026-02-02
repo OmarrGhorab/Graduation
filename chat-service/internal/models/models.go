@@ -37,9 +37,10 @@ const (
 type MessageType string
 
 const (
-	MessageTypeText  MessageType = "text"
-	MessageTypeImage MessageType = "image"
-	MessageTypeVoice MessageType = "voice"
+	MessageTypeText   MessageType = "text"
+	MessageTypeImage  MessageType = "image"
+	MessageTypeVoice  MessageType = "voice"
+	MessageTypeSystem MessageType = "system"
 )
 
 // Conversation represents a chat conversation (direct or group)

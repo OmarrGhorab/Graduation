@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 
 	"fmt"
@@ -19,15 +20,17 @@ type ConversationService struct {
 	redis        *cache.RedisClient
 	notification *NotificationService
 	authClient   *clients.AuthClient
+	media        *MediaService
 }
 
 // NewConversationService creates a new ConversationService
-func NewConversationService(repos *repositories.Repositories, redis *cache.RedisClient, notification *NotificationService, authClient *clients.AuthClient) *ConversationService {
+func NewConversationService(repos *repositories.Repositories, redis *cache.RedisClient, notification *NotificationService, authClient *clients.AuthClient, media *MediaService) *ConversationService {
 	return &ConversationService{
 		repos:        repos,
 		redis:        redis,
 		notification: notification,
 		authClient:   authClient,
+		media:        media,
 	}
 }
 
@@ -199,13 +202,16 @@ func (s *ConversationService) GetUserConversations(ctx context.Context, userID s
 
 	// Collected user IDs for enrichment
 	userIDsToFetch := make(map[string]bool)
+	systemID := "00000000-0000-0000-0000-000000000000"
 	for _, conv := range conversations {
-		if conv.LastMessageSenderID != "" {
+		if conv.LastMessageSenderID != "" && conv.LastMessageSenderID != systemID {
 			userIDsToFetch[conv.LastMessageSenderID] = true
 		}
 		// Collect IDs from ALL members to enrich their details (name, image)
 		for _, member := range conv.Members {
-			userIDsToFetch[member.UserID] = true
+			if member.UserID != systemID {
+				userIDsToFetch[member.UserID] = true
+			}
 		}
 	}
 
@@ -223,7 +229,9 @@ func (s *ConversationService) GetUserConversations(ctx context.Context, userID s
 				// Enrich Last Message Preview
 				senderID := conversations[i].LastMessageSenderID
 				senderName := "Unknown"
-				if senderID != "" {
+				if senderID == "00000000-0000-0000-0000-000000000000" {
+					senderName = "System"
+				} else if senderID != "" {
 					if user, ok := users[senderID]; ok {
 						senderName = user.Name
 					}
@@ -231,7 +239,11 @@ func (s *ConversationService) GetUserConversations(ctx context.Context, userID s
 
 				// Format preview text
 				if conversations[i].LastMessageContent != "" {
-					conversations[i].PreviewText = senderName + ": " + conversations[i].LastMessageContent
+					if senderID == "00000000-0000-0000-0000-000000000000" {
+						conversations[i].PreviewText = conversations[i].LastMessageContent
+					} else {
+						conversations[i].PreviewText = senderName + ": " + conversations[i].LastMessageContent
+					}
 				} else if senderID != "" {
 					conversations[i].PreviewText = senderName + ": sent a message"
 				} else {
@@ -289,22 +301,90 @@ func (s *ConversationService) AddMember(ctx context.Context, conversationID, req
 }
 
 // RemoveMember removes a member from a group conversation
-func (s *ConversationService) RemoveMember(ctx context.Context, conversationID, requesterID, memberID string) error {
+func (s *ConversationService) RemoveMember(ctx context.Context, conversationID, requesterID string, requesterRole models.UserRole, memberID string) error {
 	// Check if user is leaving (removing themselves)
 	if requesterID == memberID {
 		return s.repos.Member.Remove(ctx, conversationID, memberID)
 	}
 
-	// Check requester is owner/admin for removing others
+	// Check requester is owner/admin OR has global permission for removing others
 	requester, err := s.repos.Member.GetByConversationAndUser(ctx, conversationID, requesterID)
 	if err != nil {
 		return errors.New("you are not a member of this conversation")
 	}
-	if requester.MemberRole != models.MemberRoleOwner && requester.MemberRole != models.MemberRoleAdmin {
-		return errors.New("only owner or admin can remove members")
+
+	if !canModerateConversation(requester.MemberRole) {
+		return errors.New("only owner, admin, or assistants can remove members")
 	}
 
-	return s.repos.Member.Remove(ctx, conversationID, memberID)
+	// Perform removal
+	if err := s.repos.Member.Remove(ctx, conversationID, memberID); err != nil {
+		return err
+	}
+
+	// ---------------------------------------------------------
+	// Send System Message (Async)
+	// ---------------------------------------------------------
+	go func() {
+		// Fetch names
+		ids := []string{memberID}
+		if requesterID != memberID {
+			ids = append(ids, requesterID)
+		}
+
+		users, err := s.authClient.GetBatchUsers(context.Background(), ids)
+		if err != nil {
+			fmt.Printf("[RemoveMember] Failed to fetch names: %v\n", err)
+			return
+		}
+
+		memberName := "Unknown User"
+		if u, ok := users[memberID]; ok {
+			memberName = u.Name
+		}
+
+		var content string
+		if requesterID == memberID {
+			content = fmt.Sprintf("%s left the group", memberName)
+		} else {
+			requesterName := "Unknown User"
+			if u, ok := users[requesterID]; ok {
+				requesterName = u.Name
+			}
+			content = fmt.Sprintf("%s was removed by %s", memberName, requesterName)
+		}
+
+		// Create System Message
+		sysMsg := &models.Message{
+			ID:             uuid.New().String(),
+			ConversationID: conversationID,
+			SenderID:       "00000000-0000-0000-0000-000000000000", // Fix: Use valid UUID for system sender
+			SenderRole:     "SYSTEM",
+			Type:           models.MessageTypeSystem,
+			Content:        content,
+			MediaMetadata:  json.RawMessage("{}"),
+		}
+
+		if err := s.repos.Message.Create(context.Background(), sysMsg); err != nil {
+			fmt.Printf("[RemoveMember] Failed to create system message: %v\n", err)
+			return
+		}
+
+		// Notify members
+		// TODO: This logic duplicates MessageService.notifyMembers.
+		// Refactoring to a shared helper or using MessageService would be cleaner,
+		// but simplified here to avoid circular dependency for now.
+		conv, _ := s.repos.Conversation.GetByID(context.Background(), conversationID)
+		if conv != nil {
+			// Get remaining members
+			memberIDs, _ := s.repos.Member.GetConversationMemberIDs(context.Background(), conversationID)
+			if len(memberIDs) > 0 {
+				s.notification.SendChatNotification(context.Background(), sysMsg, conv, memberIDs)
+			}
+		}
+	}()
+
+	return nil
 }
 
 // UpdateMemberRole updates a member's role
@@ -330,7 +410,7 @@ func (s *ConversationService) UpdateImage(ctx context.Context, conversationID, u
 	}
 
 	// Check permission (Owner, Admin, or high-level global role)
-	if !canModerateConversation(userRole, member.MemberRole) {
+	if !canModerateConversation(member.MemberRole) {
 		return errors.New("only owner, admin, or assistants can update group profile image")
 	}
 
@@ -342,13 +422,52 @@ func (s *ConversationService) IsMember(ctx context.Context, conversationID, user
 	return s.repos.Member.IsMember(ctx, conversationID, userID)
 }
 
-func canModerateConversation(userRole models.UserRole, memberRole models.MemberRole) bool {
-	// Global roles with moderation powers
-	if userRole == models.UserRoleInstructor || userRole == models.UserRoleTeacher || userRole == models.UserRoleAssistant {
-		return true
-	}
-	// Group roles with moderation powers
+func canModerateConversation(memberRole models.MemberRole) bool {
+	// Moderation powers are strictly restricted to Group Owner and assigned Admins.
 	return memberRole == models.MemberRoleOwner || memberRole == models.MemberRoleAdmin
+}
+
+// DeleteConversation deletes a conversation and all its associated data (messages, members, pins)
+func (s *ConversationService) DeleteConversation(ctx context.Context, conversationID, userID string) error {
+	// Check if user is a member and get their role
+	member, err := s.repos.Member.GetByConversationAndUser(ctx, conversationID, userID)
+	if err != nil {
+		return errors.New("you are not a member of this conversation")
+	}
+
+	// Only Owner or Admin can delete the whole group
+	if member.MemberRole != models.MemberRoleOwner && member.MemberRole != models.MemberRoleAdmin {
+		return errors.New("only group owner or admin can delete the conversation")
+	}
+
+	// 0. Fetch all media URLs to delete from Cloudinary
+	mediaURLs, err := s.repos.Message.GetAllMediaURLsInConversation(ctx, conversationID)
+	if err == nil && len(mediaURLs) > 0 {
+		// Delete media from Cloudinary (sequentially for safety, or we could go routine it)
+		// Since the whole group is being deleted, we can do this in the background
+		go func(urls []string) {
+			for _, u := range urls {
+				_ = s.media.DeleteMedia(context.Background(), u)
+			}
+		}(mediaURLs)
+	}
+
+	// 1. Delete all messages and pins
+	if err := s.repos.Message.DeleteAllByConversation(ctx, conversationID); err != nil {
+		return fmt.Errorf("failed to delete messages: %v", err)
+	}
+
+	// 2. Delete all members
+	if err := s.repos.Member.DeleteAllByConversation(ctx, conversationID); err != nil {
+		return fmt.Errorf("failed to delete members: %v", err)
+	}
+
+	// 3. Delete the conversation itself
+	if err := s.repos.Conversation.Delete(ctx, conversationID); err != nil {
+		return fmt.Errorf("failed to delete conversation: %v", err)
+	}
+
+	return nil
 }
 
 // GetMember retrieves a member from a conversation
@@ -358,7 +477,7 @@ func (s *ConversationService) GetMember(ctx context.Context, conversationID, use
 
 // canCreateGroup checks if a user role can create group chats
 func canCreateGroup(role models.UserRole) bool {
-	return role == models.UserRoleInstructor || role == models.UserRoleTeacher || role == models.UserRoleAssistant
+	return role == models.UserRoleInstructor || role == models.UserRoleTeacher
 }
 
 func (s *ConversationService) enrichMembers(ctx context.Context, conv *models.Conversation) error {

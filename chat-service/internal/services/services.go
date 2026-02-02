@@ -32,13 +32,14 @@ func NewServices(repos *repositories.Repositories, redis *cache.RedisClient, cfg
 	}
 
 	authClient := clients.NewAuthClient(authSvcURL, cfg.InternalServiceSecret)
+	mediaSvc := NewMediaService(cfg.CloudinaryCloudName, cfg.CloudinaryAPIKey, cfg.CloudinaryAPISecret)
 
 	return &Services{
-		Conversation: NewConversationService(repos, redis, notificationSvc, authClient),
-		Message:      NewMessageService(repos, redis, notificationSvc, authClient),
+		Conversation: NewConversationService(repos, redis, notificationSvc, authClient, mediaSvc),
+		Message:      NewMessageService(repos, redis, notificationSvc, authClient, mediaSvc),
 		Typing:       NewTypingService(redis),
 		Poll:         NewPollService(repos.Message, redis, cfg.PollTimeout, cfg.PollInterval),
-		Media:        NewMediaService(cfg.CloudinaryCloudName, cfg.CloudinaryAPIKey, cfg.CloudinaryAPISecret),
+		Media:        mediaSvc,
 		Notification: notificationSvc,
 		Auth:         authClient,
 	}

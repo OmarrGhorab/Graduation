@@ -33,7 +33,9 @@ func NewNotificationService(serviceURL, internalSecret string) *NotificationServ
 type ChatNotificationPayload struct {
 	UserID           string `json:"userId"`
 	Type             string `json:"type"`
+	MessageID        string `json:"messageId,omitempty"`
 	SenderName       string `json:"senderName"`
+	SenderImage      string `json:"senderImage"`
 	SenderRole       string `json:"senderRole"`
 	ConversationID   string `json:"conversationId"`
 	ConversationName string `json:"conversationName"`
@@ -47,12 +49,29 @@ func (s *NotificationService) SendChatNotification(ctx context.Context, message 
 		payload := ChatNotificationPayload{
 			UserID:           recipientID,
 			Type:             "CHAT_MESSAGE",
-			SenderName:       message.SenderID, // TODO: Get actual name from auth service
+			MessageID:        message.ID,
+			SenderName:       message.SenderName,
+			SenderImage:      message.SenderImage,
 			SenderRole:       string(message.SenderRole),
 			ConversationID:   conversation.ID,
 			ConversationName: getConversationName(conversation),
 			MessagePreview:   truncate(message.Content, 100),
 			MessageType:      string(message.Type),
+		}
+
+		go s.sendNotification(ctx, payload)
+	}
+	return nil
+}
+
+// SendDeleteNotification sends a message deletion notification
+func (s *NotificationService) SendDeleteNotification(ctx context.Context, messageID, conversationID string, recipientIDs []string) error {
+	for _, recipientID := range recipientIDs {
+		payload := ChatNotificationPayload{
+			UserID:         recipientID,
+			Type:           "MESSAGE_DELETED",
+			MessageID:      messageID,
+			ConversationID: conversationID,
 		}
 
 		go s.sendNotification(ctx, payload)
