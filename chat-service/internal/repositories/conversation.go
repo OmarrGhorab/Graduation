@@ -111,6 +111,14 @@ func (r *ConversationRepository) Update(ctx context.Context, conversation *model
 	return r.db.WithContext(ctx).Save(conversation).Error
 }
 
+// UpdateImage updates the conversation's profile image
+func (r *ConversationRepository) UpdateImage(ctx context.Context, id string, imageURL string) error {
+	return r.db.WithContext(ctx).
+		Model(&models.Conversation{}).
+		Where("id = ?", id).
+		Update("image_url", imageURL).Error
+}
+
 // Delete deletes a conversation
 func (r *ConversationRepository) Delete(ctx context.Context, id string) error {
 	return r.db.WithContext(ctx).Delete(&models.Conversation{}, "id = ?", id).Error

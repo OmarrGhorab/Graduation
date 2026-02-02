@@ -180,7 +180,6 @@ func (s *ConversationService) GetMembers(ctx context.Context, conversationID, us
 }
 
 // MarkAsRead marks all messages in a conversation as read for a user
-// MarkAsRead marks all messages in a conversation as read for a user
 func (s *ConversationService) MarkAsRead(ctx context.Context, conversationID, userID string, messageID *string) error {
 	// Verify membership
 	isMember, err := s.repos.Member.IsMember(ctx, conversationID, userID)
@@ -199,17 +198,21 @@ func (s *ConversationService) GetUserConversations(ctx context.Context, userID s
 	}
 
 	// Collected user IDs for enrichment
-	senderIDs := make(map[string]bool)
+	userIDsToFetch := make(map[string]bool)
 	for _, conv := range conversations {
 		if conv.LastMessageSenderID != "" {
-			senderIDs[conv.LastMessageSenderID] = true
+			userIDsToFetch[conv.LastMessageSenderID] = true
+		}
+		// Collect IDs from ALL members to enrich their details (name, image)
+		for _, member := range conv.Members {
+			userIDsToFetch[member.UserID] = true
 		}
 	}
 
 	// Fetch user details if needed
-	if len(senderIDs) > 0 {
-		ids := make([]string, 0, len(senderIDs))
-		for id := range senderIDs {
+	if len(userIDsToFetch) > 0 {
+		ids := make([]string, 0, len(userIDsToFetch))
+		for id := range userIDsToFetch {
 			ids = append(ids, id)
 		}
 
@@ -217,24 +220,44 @@ func (s *ConversationService) GetUserConversations(ctx context.Context, userID s
 		if err == nil {
 			// Map names to conversations
 			for i := range conversations {
+				// Enrich Last Message Preview
 				senderID := conversations[i].LastMessageSenderID
-				if senderID == "" {
-					continue
-				}
-
 				senderName := "Unknown"
-				if user, ok := users[senderID]; ok {
-					senderName = user.Name
+				if senderID != "" {
+					if user, ok := users[senderID]; ok {
+						senderName = user.Name
+					}
 				}
 
-				// Format: "John Doe: Hello world"
-				// You can simply check if LastMessageContent is not empty
+				// Format preview text
 				if conversations[i].LastMessageContent != "" {
 					conversations[i].PreviewText = senderName + ": " + conversations[i].LastMessageContent
-				} else {
-					// Handle cases like images or files where content might be empty
-					// Since we didn't fetch Type, we'll genericize it or leave empty
+				} else if senderID != "" {
 					conversations[i].PreviewText = senderName + ": sent a message"
+				} else {
+					conversations[i].PreviewText = ""
+				}
+
+				// Enrich Member Details (for all members)
+				for j := range conversations[i].Members {
+					userID := conversations[i].Members[j].UserID
+					if u, ok := users[userID]; ok {
+						conversations[i].Members[j].UserName = u.Name
+						conversations[i].Members[j].UserImage = u.Image
+					}
+				}
+
+				// Enrich Direct Chat Details (Name & Image) using the OTHER member
+				if conversations[i].Type == models.ConversationTypeDirect {
+					for _, member := range conversations[i].Members {
+						if member.UserID != userID {
+							if u, ok := users[member.UserID]; ok {
+								conversations[i].Name = u.Name
+								conversations[i].ImageURL = u.Image
+							}
+							break
+						}
+					}
 				}
 			}
 		}
@@ -298,9 +321,34 @@ func (s *ConversationService) UpdateMemberRole(ctx context.Context, conversation
 	return s.repos.Member.UpdateRole(ctx, conversationID, memberID, newRole)
 }
 
+// UpdateImage updates the conversation's profile image
+func (s *ConversationService) UpdateImage(ctx context.Context, conversationID, userID string, userRole models.UserRole, imageURL string) error {
+	// Check if user is a member and get their role
+	member, err := s.repos.Member.GetByConversationAndUser(ctx, conversationID, userID)
+	if err != nil {
+		return errors.New("you are not a member of this conversation")
+	}
+
+	// Check permission (Owner, Admin, or high-level global role)
+	if !canModerateConversation(userRole, member.MemberRole) {
+		return errors.New("only owner, admin, or assistants can update group profile image")
+	}
+
+	return s.repos.Conversation.UpdateImage(ctx, conversationID, imageURL)
+}
+
 // IsMember checks if a user is a member of a conversation
 func (s *ConversationService) IsMember(ctx context.Context, conversationID, userID string) (bool, error) {
 	return s.repos.Member.IsMember(ctx, conversationID, userID)
+}
+
+func canModerateConversation(userRole models.UserRole, memberRole models.MemberRole) bool {
+	// Global roles with moderation powers
+	if userRole == models.UserRoleInstructor || userRole == models.UserRoleTeacher || userRole == models.UserRoleAssistant {
+		return true
+	}
+	// Group roles with moderation powers
+	return memberRole == models.MemberRoleOwner || memberRole == models.MemberRoleAdmin
 }
 
 // GetMember retrieves a member from a conversation

@@ -220,8 +220,8 @@ func (s *MessageService) DeleteMessage(ctx context.Context, messageID, userID st
 		return errors.New("message not found")
 	}
 
-	// Only sender or admins can delete
-	if message.SenderID != userID && !canModerate(userRole) {
+	// Only sender or admins can	// Check permission
+	if message.SenderID != userID && !canModerateGlobal(userRole) {
 		return errors.New("you don't have permission to delete this message")
 	}
 
@@ -349,8 +349,30 @@ func (s *MessageService) GetPinnedMessages(ctx context.Context, conversationID, 
 	return pinnedMsgs, nil
 }
 
-// canModerate checks if a role can moderate messages
-func canModerate(role models.UserRole) bool {
+// GetMediaHistory retrieves media (images, voice) and links for a conversation
+func (s *MessageService) GetMediaHistory(ctx context.Context, conversationID, userID string, limit, offset int) ([]models.Message, error) {
+	// Verify membership
+	isMember, err := s.repos.Member.IsMember(ctx, conversationID, userID)
+	if err != nil || !isMember {
+		return nil, errors.New("you are not a member of this conversation")
+	}
+
+	// Fetch images and voices
+	types := []models.MessageType{models.MessageTypeImage, models.MessageTypeVoice}
+	messages, err := s.repos.Message.GetMediaHistory(ctx, conversationID, types, true, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(messages) == 0 {
+		return messages, nil
+	}
+
+	return s.enrichMessages(ctx, messages)
+}
+
+// canModerateGlobal checks if a role can moderate messages globally
+func canModerateGlobal(role models.UserRole) bool {
 	return role == models.UserRoleInstructor || role == models.UserRoleTeacher || role == models.UserRoleAssistant
 }
 

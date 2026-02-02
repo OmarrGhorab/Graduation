@@ -250,3 +250,36 @@ func (h *ConversationHandler) UpdateMemberRole(c *fiber.Ctx) error {
 
 	return c.JSON(fiber.Map{"message": "Member role updated successfully"})
 }
+
+// UpdateImageRequest is the request body for updating group image
+type UpdateImageRequest struct {
+	ImageURL string `json:"image_url"`
+}
+
+// UpdateImage updates the conversation's profile image
+func (h *ConversationHandler) UpdateImage(c *fiber.Ctx) error {
+	userID := c.Locals("user_id").(string)
+	userRole := c.Locals("user_role").(models.UserRole)
+	conversationID := c.Params("id")
+
+	var req UpdateImageRequest
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": fiber.Map{"code": "BAD_REQUEST", "message": "Invalid request body"},
+		})
+	}
+
+	if req.ImageURL == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": fiber.Map{"code": "BAD_REQUEST", "message": "Image URL is required"},
+		})
+	}
+
+	if err := h.conversationSvc.UpdateImage(c.Context(), conversationID, userID, userRole, req.ImageURL); err != nil {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+			"error": fiber.Map{"code": "FORBIDDEN", "message": err.Error()},
+		})
+	}
+
+	return c.JSON(fiber.Map{"message": "Group image updated successfully"})
+}

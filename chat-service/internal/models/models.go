@@ -48,6 +48,7 @@ type Conversation struct {
 	Type        ConversationType     `gorm:"type:varchar(20);not null" json:"type"`
 	Name        string               `gorm:"type:varchar(255)" json:"name,omitempty"`
 	Description string               `gorm:"type:text" json:"description,omitempty"`
+	ImageURL    string               `gorm:"type:varchar(255)" json:"image_url,omitempty"`
 	CreatedBy   string               `gorm:"type:uuid;not null" json:"created_by"`
 	CreatedAt   time.Time            `gorm:"autoCreateTime" json:"created_at"`
 	UpdatedAt   time.Time            `gorm:"autoUpdateTime" json:"updated_at"`

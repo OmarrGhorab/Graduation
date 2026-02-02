@@ -30,7 +30,7 @@ func TestCanCreateGroup(t *testing.T) {
 	}
 }
 
-func TestPermissions_CanModerate(t *testing.T) {
+func TestPermissions_CanModerateGlobal(t *testing.T) {
 	tests := []struct {
 		name     string
 		role     models.UserRole
@@ -45,9 +45,9 @@ func TestPermissions_CanModerate(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := canModerate(tt.role)
+			result := canModerateGlobal(tt.role)
 			if result != tt.expected {
-				t.Errorf("canModerate(%v) = %v, want %v", tt.role, result, tt.expected)
+				t.Errorf("canModerateGlobal(%v) = %v, want %v", tt.role, result, tt.expected)
 			}
 		})
 	}

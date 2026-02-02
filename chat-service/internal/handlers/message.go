@@ -205,3 +205,20 @@ func (h *MessageHandler) GetPinnedMessages(c *fiber.Ctx) error {
 
 	return c.JSON(fiber.Map{"pinned_messages": pinnedMsgs})
 }
+
+// GetMediaHistory retrieves media and links history
+func (h *MessageHandler) GetMediaHistory(c *fiber.Ctx) error {
+	userID := c.Locals("user_id").(string)
+	conversationID := c.Params("id")
+	limit := c.QueryInt("limit", 20)
+	offset := c.QueryInt("offset", 0)
+
+	messages, err := h.messageSvc.GetMediaHistory(c.Context(), conversationID, userID, limit, offset)
+	if err != nil {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+			"error": fiber.Map{"code": "FORBIDDEN", "message": err.Error()},
+		})
+	}
+
+	return c.JSON(fiber.Map{"messages": messages})
+}

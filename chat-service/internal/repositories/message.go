@@ -148,3 +148,27 @@ func (r *MessageRepository) IsPinned(ctx context.Context, messageID string) (boo
 func (r *MessageRepository) UnpinAllInConversation(ctx context.Context, conversationID string) error {
 	return r.db.WithContext(ctx).Delete(&models.PinnedMessage{}, "conversation_id = ?", conversationID).Error
 }
+
+// GetMediaHistory retrieves messages with media (image, voice) or links for a conversation
+func (r *MessageRepository) GetMediaHistory(ctx context.Context, conversationID string, types []models.MessageType, includeLinks bool, limit, offset int) ([]models.Message, error) {
+	var messages []models.Message
+	query := r.db.WithContext(ctx).
+		Where("conversation_id = ? AND is_deleted = false", conversationID)
+
+	if len(types) > 0 && includeLinks {
+		// Matches specified types OR contains links (using regex for links)
+		query = query.Where("(type IN ? OR content ~* 'https?://[^\\s]+')", types)
+	} else if len(types) > 0 {
+		query = query.Where("type IN ?", types)
+	} else if includeLinks {
+		query = query.Where("content ~* 'https?://[^\\s]+'")
+	}
+
+	err := query.
+		Order("created_at DESC").
+		Limit(limit).
+		Offset(offset).
+		Find(&messages).Error
+
+	return messages, err
+}
