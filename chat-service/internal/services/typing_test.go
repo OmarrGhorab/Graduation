@@ -16,31 +16,10 @@ func TestTypingService_Constants(t *testing.T) {
 	}
 }
 
-func TestPollService_Constants(t *testing.T) {
-	if PollKeyPrefix != "poll" {
-		t.Errorf("PollKeyPrefix = %v, want poll", PollKeyPrefix)
-	}
-}
-
-func TestPollResponse_EmptyMessages(t *testing.T) {
-	resp := &PollResponse{
-		Messages: nil,
-		HasMore:  false,
-	}
-
-	if len(resp.Messages) != 0 {
-		t.Error("Expected empty messages slice")
-	}
-
-	if resp.HasMore {
-		t.Error("HasMore should be false")
-	}
-}
-
 // Test GetTypingUsers without Redis (unit test)
 func TestTypingService_NewTypingService(t *testing.T) {
 	// Without redis client (nil is acceptable for unit test setup)
-	svc := NewTypingService(nil)
+	svc := NewTypingService(nil, nil)
 	if svc == nil {
 		t.Error("NewTypingService returned nil")
 	}
@@ -57,22 +36,6 @@ func TestTypingUser_Struct(t *testing.T) {
 	}
 	if user.UserRole != "TEACHER" {
 		t.Errorf("UserRole = %v, want TEACHER", user.UserRole)
-	}
-}
-
-func TestPollService_NewPollService(t *testing.T) {
-	timeout := 30 * time.Second
-	interval := 500 * time.Millisecond
-
-	svc := NewPollService(nil, nil, timeout, interval)
-	if svc == nil {
-		t.Error("NewPollService returned nil")
-	}
-	if svc.pollTimeout != timeout {
-		t.Errorf("pollTimeout = %v, want %v", svc.pollTimeout, timeout)
-	}
-	if svc.pollInterval != interval {
-		t.Errorf("pollInterval = %v, want %v", svc.pollInterval, interval)
 	}
 }
 

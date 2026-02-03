@@ -18,8 +18,7 @@ func NewProducer(brokers []string) *Producer {
 	return &Producer{
 		Writer: &kafka.Writer{
 			Addr:     kafka.TCP(brokers...),
-			Topic:    events.TopicMessageCreated, // Default topic, but can be overridden per message
-			Balancer: &kafka.Hash{},              // Important for ordering by Key (ConversationID)
+			Balancer: &kafka.Hash{}, // Important for ordering by Key (ConversationID)
 			// Async writes for performance
 			Async:        true,
 			BatchSize:    100,
@@ -41,6 +40,20 @@ func (p *Producer) PublishMessageCreated(ctx context.Context, event events.Messa
 
 	return p.Writer.WriteMessages(ctx, kafka.Message{
 		Topic: events.TopicMessageCreated,
+		Key:   []byte(event.ConversationID), // Partition by ConversationID
+		Value: payload,
+	})
+}
+
+// PublishTyping sends a typing indicator event
+func (p *Producer) PublishTyping(ctx context.Context, event events.TypingEvent) error {
+	payload, err := json.Marshal(event)
+	if err != nil {
+		return fmt.Errorf("failed to marshal event: %w", err)
+	}
+
+	return p.Writer.WriteMessages(ctx, kafka.Message{
+		Topic: events.TopicTyping,
 		Key:   []byte(event.ConversationID), // Partition by ConversationID
 		Value: payload,
 	})

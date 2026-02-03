@@ -80,3 +80,18 @@ func (r *RedisClient) Expire(ctx context.Context, key string, expiration time.Du
 func (r *RedisClient) Client() *redis.Client {
 	return r.client
 }
+
+// SAdd adds members to a Redis set
+func (r *RedisClient) SAdd(ctx context.Context, key string, members ...interface{}) error {
+	return r.client.SAdd(ctx, key, members...).Err()
+}
+
+// SMembers returns all members of a Redis set
+func (r *RedisClient) SMembers(ctx context.Context, key string) ([]string, error) {
+	return r.client.SMembers(ctx, key).Result()
+}
+
+// SRem removes members from a Redis set
+func (r *RedisClient) SRem(ctx context.Context, key string, members ...interface{}) error {
+	return r.client.SRem(ctx, key, members...).Err()
+}

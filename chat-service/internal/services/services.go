@@ -13,7 +13,7 @@ type Services struct {
 	Conversation *ConversationService
 	Message      *MessageService
 	Typing       *TypingService
-	Poll         *PollService
+
 	Media        *MediaService
 	Notification *NotificationService
 	Auth         *clients.AuthClient
@@ -27,7 +27,10 @@ func NewServices(repos *repositories.Repositories, redis *cache.RedisClient, cfg
 	// TODO: Add AuthServiceURL to config. For now, we reuse NotificationServiceURL if similar, or assume localhost:6002
 	// Actually, looking at .env, we don't have AUTH_SERVICE_URL.
 	// Auth Service is on port 6002 usually.
-	authSvcURL := "http://localhost:6001" // Default fallback
+	authSvcURL := cfg.AuthServiceURL
+	if authSvcURL == "" {
+		authSvcURL = "http://localhost:6001"
+	}
 	if cfg.NotificationServiceURL != "" {
 		// Just a hack if we don't have separate config
 	}
@@ -38,8 +41,7 @@ func NewServices(repos *repositories.Repositories, redis *cache.RedisClient, cfg
 	return &Services{
 		Conversation: NewConversationService(repos, redis, notificationSvc, authClient, mediaSvc),
 		Message:      NewMessageService(repos, redis, notificationSvc, authClient, mediaSvc, producer),
-		Typing:       NewTypingService(redis),
-		Poll:         NewPollService(repos.Message, redis, cfg.PollTimeout, cfg.PollInterval),
+		Typing:       NewTypingService(redis, producer, repos),
 		Media:        mediaSvc,
 		Notification: notificationSvc,
 		Auth:         authClient,

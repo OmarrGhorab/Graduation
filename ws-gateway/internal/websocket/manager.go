@@ -13,9 +13,10 @@ import (
 
 // Client represents a connected WebSocket client
 type Client struct {
-	UserID string
-	Conn   *websocket.Conn
-	Send   chan []byte
+	UserID   string
+	UserRole string
+	Conn     *websocket.Conn
+	Send     chan []byte
 }
 
 // Manager maintains the set of active clients and broadcasts messages
@@ -94,6 +95,49 @@ func (m *Manager) SendToUser(userID string, message interface{}) {
 			log.Printf("Failed to send to user %s, channel full", userID)
 			close(client.Send)
 			delete(m.Clients, userID)
+		}
+	}
+}
+
+// StartRedisSubscriber starts a subscriber to listen for broadcast messages from Redis
+func (m *Manager) StartRedisSubscriber(ctx context.Context) {
+	pubsub := m.Redis.Subscribe(ctx, "chat.live.updates")
+	defer pubsub.Close()
+
+	log.Println("[Manager] Redis subscriber started for channel: chat.live.updates")
+
+	for {
+		select {
+		case <-ctx.Done():
+			log.Println("[Manager] Redis subscriber shutting down")
+			return
+		default:
+			msg, err := pubsub.ReceiveMessage(ctx)
+			if err != nil {
+				log.Printf("[Manager] Redis receive error: %v", err)
+				continue
+			}
+
+			// Parse the routing envelope
+			var envelope struct {
+				RecipientIDs []string    `json:"recipient_ids"`
+				Payload      interface{} `json:"payload"`
+			}
+
+			if err := json.Unmarshal([]byte(msg.Payload), &envelope); err != nil {
+				log.Printf("[Manager] Failed to unmarshal envelope: %v", err)
+				continue
+			}
+
+			log.Printf("[Manager] Received Redis message for %d recipients", len(envelope.RecipientIDs))
+
+			// Send to all recipients
+			sentCount := 0
+			for _, userID := range envelope.RecipientIDs {
+				m.SendToUser(userID, envelope.Payload)
+				sentCount++
+			}
+			log.Printf("[Manager] Sent WebSocket message to %d/%d connected recipients", sentCount, len(envelope.RecipientIDs))
 		}
 	}
 }

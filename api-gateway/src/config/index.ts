@@ -54,6 +54,7 @@ export interface ServicesConfig {
   auth: ServiceEndpoint[];
   notification: ServiceEndpoint[];
   chat: ServiceEndpoint[];
+  ws: ServiceEndpoint[];
 }
 
 /**
@@ -215,6 +216,7 @@ export function loadConfig(): AppConfig {
       auth: parseServiceUrls(authServiceUrls, "auth-service"),
       notification: parseServiceUrls(notificationServiceUrls, "notification-service"),
       chat: parseServiceUrls(chatServiceUrls, "chat-service"),
+      ws: parseServiceUrls(process.env.WS_GATEWAY_URLS || "http://localhost:8001", "ws-gateway"),
     },
     security: {
       arcjetKey: process.env.ARCJET_KEY,

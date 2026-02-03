@@ -30,15 +30,14 @@ type Config struct {
 	// Internal Service Communication
 	InternalServiceSecret  string
 	NotificationServiceURL string
+	AuthServiceURL         string
 
 	// Cloudinary
 	CloudinaryCloudName string
 	CloudinaryAPIKey    string
 	CloudinaryAPISecret string
-
-	// Long Polling
-	PollTimeout  time.Duration
-	PollInterval time.Duration
+	PollTimeout         time.Duration
+	PollInterval        time.Duration
 
 	// Rate Limiting
 	RateLimitRequests int
@@ -50,16 +49,23 @@ func Load() (*Config, error) {
 	// Load .env file if it exists
 	_ = godotenv.Load()
 
+	// Support both KAFKA_BROKERS (comma-separated) and KAFKA_BROKER (single)
+	kafkaBrokers := getEnv("KAFKA_BROKERS", "")
+	if kafkaBrokers == "" {
+		kafkaBrokers = getEnv("KAFKA_BROKER", "localhost:9092")
+	}
+	
 	cfg := &Config{
 		Port:                   getEnv("PORT", "6004"),
 		Env:                    getEnv("ENV", "development"),
 		DatabaseURL:            getEnv("DATABASE_URL", ""),
 		RedisURL:               getEnv("REDIS_URL", "redis://localhost:6379"),
-		KafkaBrokers:           []string{getEnv("KAFKA_BROKER", "localhost:9092")},
+		KafkaBrokers:           []string{kafkaBrokers},
 		JWTAccessSecret:        getEnv("JWT_ACCESS_SECRET", ""),
 		JWTSecret:              getEnv("JWT_SECRET", "secret"),
 		InternalServiceSecret:  getEnv("INTERNAL_SERVICE_SECRET", ""),
 		NotificationServiceURL: getEnv("NOTIFICATION_SERVICE_URL", "http://localhost:6003"),
+		AuthServiceURL:         getEnv("AUTH_SERVICE_URL", "http://localhost:6001"),
 		CloudinaryCloudName:    getEnv("CLOUDINARY_CLOUD_NAME", ""),
 		CloudinaryAPIKey:       getEnv("CLOUDINARY_API_KEY", ""),
 		CloudinaryAPISecret:    getEnv("CLOUDINARY_API_SECRET", ""),

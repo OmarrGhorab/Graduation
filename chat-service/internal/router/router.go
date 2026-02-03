@@ -37,7 +37,7 @@ func SetupRoutes(app *fiber.App, hdlrs *handlers.Handlers, authMiddleware *middl
 	messages.Post("/", hdlrs.Message.SendMessage)
 	messages.Get("/", hdlrs.Message.GetMessages)
 	messages.Get("/media", hdlrs.Message.GetMediaHistory)
-	messages.Get("/poll", hdlrs.Message.PollMessages)
+
 	messages.Get("/pinned", hdlrs.Message.GetPinnedMessages)
 	conversations.Patch("/:id/messages/:messageId", hdlrs.Message.EditMessage)
 	conversations.Delete("/:id/messages/:messageId", hdlrs.Message.DeleteMessage)

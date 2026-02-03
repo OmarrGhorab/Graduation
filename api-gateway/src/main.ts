@@ -1,3 +1,4 @@
+import http from "http";
 import { loadConfig } from "./config/index.js";
 import { createApp } from "./app.js";
 
@@ -25,30 +26,47 @@ async function main(): Promise<void> {
     // Load and validate configuration
     const config = loadConfig();
 
-    // Create Express app with configuration
-    const app = createApp(config);
+    // Create and configure the Express application
+    const { app, wsProxy } = createApp(config);
 
-    // Start HTTP server
-    const server = app.listen(config.server.port, () => {
+    // Create HTTP server explicitly
+    const server = http.createServer(app);
+
+    // Start server
+    server.listen(config.server.port, () => {
       console.log(
         `api-gateway is running on port ${config.server.port} (${config.server.nodeEnv})`
       );
     });
 
-    // Handle graceful shutdown
-    process.on("SIGTERM", () => {
-      console.log("SIGTERM signal received: closing HTTP server");
-      server.close(() => {
-        console.log("HTTP server closed");
-      });
+    // Handle WebSocket upgrade manually for the proxy
+    server.on("upgrade", (req, socket, head) => {
+      const url = req.url || "";
+      console.log(`[Server] Upgrade request received: ${url}`);
+
+      if (url.startsWith("/ws")) {
+        console.log(`[Server] Routing upgrade to wsProxy`);
+        wsProxy.upgrade(req, socket, head);
+      } else {
+        console.log(`[Server] Unknown upgrade path: ${url}`);
+        socket.destroy();
+      }
     });
 
-    process.on("SIGINT", () => {
-      console.log("SIGINT signal received: closing HTTP server");
+    // Keep process alive if it tries to exit
+    process.stdin.resume();
+
+    // Handle graceful shutdown
+    const shutdown = () => {
+      console.log("Shutting down API Gateway...");
       server.close(() => {
         console.log("HTTP server closed");
+        process.exit(0);
       });
-    });
+    };
+
+    process.on("SIGTERM", shutdown);
+    process.on("SIGINT", shutdown);
   } catch (error) {
     console.error("Failed to start API Gateway:", error);
     process.exit(1);

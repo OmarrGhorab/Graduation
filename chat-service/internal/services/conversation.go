@@ -75,6 +75,9 @@ func (s *ConversationService) CreateGroup(ctx context.Context, input CreateGroup
 		return nil, err
 	}
 
+	// Collect all member IDs for caching
+	allMemberIDs := []string{input.CreatorID}
+
 	// Add other members
 	for _, memberID := range input.MemberIDs {
 		if memberID == input.CreatorID {
@@ -90,7 +93,11 @@ func (s *ConversationService) CreateGroup(ctx context.Context, input CreateGroup
 		if err := s.repos.Member.Create(ctx, member); err != nil {
 			return nil, err
 		}
+		allMemberIDs = append(allMemberIDs, memberID)
 	}
+
+	// Cache members in Redis for quick access by typing service
+	s.cacheConversationMembers(ctx, conversation.ID, allMemberIDs)
 
 	conv, err := s.repos.Conversation.GetByIDWithMembers(ctx, conversation.ID)
 	if err != nil {
@@ -123,6 +130,7 @@ func (s *ConversationService) CreateDirectChat(ctx context.Context, userID, reci
 	}
 
 	// Add both users as members
+	memberIDs := []string{userID, recipientID}
 	for _, memberData := range []struct {
 		userID string
 		role   models.UserRole
@@ -141,6 +149,9 @@ func (s *ConversationService) CreateDirectChat(ctx context.Context, userID, reci
 			return nil, err
 		}
 	}
+
+	// Cache members in Redis
+	s.cacheConversationMembers(ctx, conversation.ID, memberIDs)
 
 	conv, err := s.repos.Conversation.GetByIDWithMembers(ctx, conversation.ID)
 	if err != nil {
@@ -161,6 +172,16 @@ func (s *ConversationService) GetByID(ctx context.Context, id string) (*models.C
 	if err := s.enrichMembers(ctx, conv); err != nil {
 		fmt.Printf("[ConversationService] Failed to enrich members: %v\n", err)
 	}
+	
+	// Cache members in Redis for typing indicator service
+	if len(conv.Members) > 0 {
+		memberIDs := make([]string, 0, len(conv.Members))
+		for _, m := range conv.Members {
+			memberIDs = append(memberIDs, m.UserID)
+		}
+		s.cacheConversationMembers(ctx, conv.ID, memberIDs)
+	}
+	
 	return conv, nil
 }
 
@@ -503,4 +524,31 @@ func (s *ConversationService) enrichMembers(ctx context.Context, conv *models.Co
 	}
 
 	return nil
+}
+
+// cacheConversationMembers stores member IDs in Redis for quick access
+// This is used by the typing service to get recipients for typing events
+func (s *ConversationService) cacheConversationMembers(ctx context.Context, conversationID string, memberIDs []string) {
+	if s.redis == nil || len(memberIDs) == 0 {
+		return
+	}
+
+	membersKey := fmt.Sprintf("conv:members:%s", conversationID)
+	
+	// Convert []string to []interface{} for Redis SAdd
+	members := make([]interface{}, len(memberIDs))
+	for i, id := range memberIDs {
+		members[i] = id
+	}
+
+	// Add members to set
+	if err := s.redis.SAdd(ctx, membersKey, members...); err != nil {
+		fmt.Printf("[ConversationService] Failed to cache members: %v\n", err)
+		return
+	}
+
+	// Set expiration (30 days)
+	if err := s.redis.Expire(ctx, membersKey, 30*24*60*60); err != nil {
+		fmt.Printf("[ConversationService] Failed to set expiration on members cache: %v\n", err)
+	}
 }

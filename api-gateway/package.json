@@ -8,7 +8,8 @@
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
     "start": "tsx src/main.ts",
-    "dev": "nodemon --exec tsx src/main.ts"
+    "dev": "nodemon --exec tsx src/main.ts",
+    "build": "tsc"
   },
   "keywords": [],
   "author": "",
@@ -33,11 +34,13 @@
   "dependencies": {
     "@arcjet/inspect": "^1.0.0-beta.13",
     "@arcjet/node": "^1.0.0-beta.13",
+    "@types/http-proxy-middleware": "^0.19.3",
     "compression": "^1.8.1",
     "connect-timeout": "^1.9.1",
     "cors": "^2.8.5",
     "dotenv": "^17.2.3",
     "express": "^5.1.0",
-    "express-http-proxy": "^2.1.2"
+    "express-http-proxy": "^2.1.2",
+    "http-proxy-middleware": "^3.0.5"
   }
 }

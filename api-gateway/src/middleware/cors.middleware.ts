@@ -25,10 +25,11 @@ import { CorsConfig } from "../config/index.js";
  */
 export function createCorsMiddleware(config: CorsConfig) {
   return (req: Request, res: Response, next: NextFunction) => {
-    const origin = req.headers.origin;
+    const origin = req.headers.origin as string | undefined;
 
     // Allow requests with no origin (mobile apps, Postman, curl)
-    if (!origin) {
+    // Also bypass CORS for the WebSocket path which uses Token-based auth
+    if (!origin || req.path === "/ws") {
       res.setHeader("Access-Control-Allow-Origin", "*");
       res.setHeader("Access-Control-Allow-Credentials", "true");
       res.setHeader(
@@ -91,6 +92,7 @@ export function createCorsMiddleware(config: CorsConfig) {
     }
 
     // Origin not allowed
+    console.log(`[CORS] Rejected origin: ${origin} for ${req.method} ${req.path}`);
     return res.status(403).json({
       error: "Forbidden",
       message: "Origin not allowed",

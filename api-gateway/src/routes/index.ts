@@ -1,5 +1,6 @@
 import { Express, Request, Response } from "express";
 import proxy from "express-http-proxy";
+import { createProxyMiddleware } from "http-proxy-middleware";
 import { AppConfig, ServiceEndpoint } from "../config/index.js";
 import { checkAllServices } from "../services/health.service.js";
 
@@ -21,17 +22,33 @@ const serviceIndexes: Record<string, number> = {
   auth: 0,
   notification: 0,
   chat: 0,
+  ws: 0,
 };
 
 /**
  * Gets the next service URL using round-robin load balancing
  */
 function getNextServiceUrl(services: ServiceEndpoint[], serviceKey: string): string {
-  if (services.length === 0) {
+  if (!services || services.length === 0) {
+    console.error(`[LoadBalancer] No services configured for: ${serviceKey}`);
     throw new Error(`No ${serviceKey} services configured`);
   }
-  const url = services[serviceIndexes[serviceKey]].url;
-  serviceIndexes[serviceKey] = (serviceIndexes[serviceKey] + 1) % services.length;
+
+  const index = serviceIndexes[serviceKey] ?? 0;
+  const service = services[index];
+
+  if (!service) {
+    console.error(`[LoadBalancer] Service at index ${index} is undefined for: ${serviceKey}`, {
+      servicesCount: services.length,
+      index
+    });
+    // Fallback to first instance
+    return services[0].url;
+  }
+
+  const url = service.url;
+  serviceIndexes[serviceKey] = (index + 1) % services.length;
+  console.log(`[LoadBalancer] Routing ${serviceKey} to: ${url}`);
   return url;
 }
 
@@ -54,7 +71,7 @@ function getNextServiceUrl(services: ServiceEndpoint[], serviceKey: string): str
  * @param config - Application configuration containing service endpoints
  * @returns void
  */
-export function setupRoutes(app: Express, config: AppConfig): void {
+export function setupRoutes(app: Express, config: AppConfig): { wsProxy: any } {
   // Health check endpoint (not proxied)
   app.get("/health", async (req: Request, res: Response) => {
     try {
@@ -116,6 +133,43 @@ export function setupRoutes(app: Express, config: AppConfig): void {
     })
   );
 
+  // WebSocket Gateway routes (WS Upgrade + HTTP)
+  console.log(`[Routes] Initializing WS Proxy for path /ws`);
+  const wsProxy = createProxyMiddleware({
+    target: getNextServiceUrl(config.services.ws, "ws"),
+    ws: true,
+    changeOrigin: true,
+    secure: false, // For local development
+    on: {
+      proxyReqWs: (proxyReq, req, socket, options, head) => {
+        console.log(`[WS Proxy] Proxying upgrade request for: ${req.url}`);
+        // Ensure some headers are set correctly for the internal gateway
+        proxyReq.setHeader('X-Forwarded-Proto', 'http');
+      },
+      error: (err, req: any, res: any) => {
+        // Handle both HTTP and WS errors
+        console.error(`[WS Proxy] Error:`, err.message);
+        if (res.writeHead && !res.headersSent) {
+          res.writeHead(502);
+          res.end("Bad Gateway (WS Proxy Error)");
+        }
+      },
+      open: (proxySocket) => {
+        console.log(`[WS Proxy] Connection opened to target`);
+      },
+      close: (res, socket, head) => {
+        console.log(`[WS Proxy] Connection closed`);
+      },
+    }
+  });
+
+  // Verify route hits
+  app.get("/ws-test", (req, res) => {
+    res.send("WS Path is reachable");
+  });
+
+  app.use("/ws", wsProxy);
+
   // Auth service catch-all (load balanced, must be last)
   app.use(
     "/",
@@ -123,4 +177,6 @@ export function setupRoutes(app: Express, config: AppConfig): void {
       proxyReqPathResolver: (req) => req.originalUrl,
     })
   );
+
+  return { wsProxy };
 }

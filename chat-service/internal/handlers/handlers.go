@@ -17,7 +17,7 @@ type Handlers struct {
 func NewHandlers(svcs *services.Services) *Handlers {
 	return &Handlers{
 		Conversation: NewConversationHandler(svcs.Conversation),
-		Message:      NewMessageHandler(svcs.Message, svcs.Poll),
+		Message:      NewMessageHandler(svcs.Message),
 		Typing:       NewTypingHandler(svcs.Typing),
 		Media:        NewMediaHandler(svcs.Media),
 		Health:       NewHealthHandler(),

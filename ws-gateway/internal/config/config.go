@@ -6,17 +6,23 @@ import (
 
 type Config struct {
 	Port           string
-	RedisAddr      string
+	RedisURL       string
 	KafkaBrokers   []string
 	ChatServiceUrl string
 	JwtSecret      string
 }
 
 func Load() *Config {
+	// Support both KAFKA_BROKERS (comma-separated) and KAFKA_BROKER (single)
+	kafkaBrokers := getEnv("KAFKA_BROKERS", "")
+	if kafkaBrokers == "" {
+		kafkaBrokers = getEnv("KAFKA_BROKER", "localhost:9092")
+	}
+	
 	return &Config{
 		Port:           getEnv("PORT", "8001"),
-		RedisAddr:      getEnv("REDIS_ADDR", "localhost:6379"),
-		KafkaBrokers:   []string{getEnv("KAFKA_BROKER", "localhost:9092")},
+		RedisURL:       getEnv("REDIS_URL", "redis://localhost:6379"),
+		KafkaBrokers:   []string{kafkaBrokers},
 		ChatServiceUrl: getEnv("CHAT_SERVICE_URL", "http://localhost:8000"),
 		JwtSecret:      getEnv("JWT_SECRET", "secret"),
 	}

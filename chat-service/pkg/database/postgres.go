@@ -31,7 +31,7 @@ func NewPostgresConnection(databaseURL string) (*gorm.DB, error) {
 	// Open database connection
 	db, err := gorm.Open(postgres.Open(databaseURL), &gorm.Config{
 		Logger:                 gormLogger,
-		PrepareStmt:            true,
+		PrepareStmt:            false, // Disable prepared statements to avoid cached plan errors
 		SkipDefaultTransaction: true,
 	})
 	if err != nil {

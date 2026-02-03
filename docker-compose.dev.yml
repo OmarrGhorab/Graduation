@@ -23,6 +23,29 @@ services:
     volumes:
       - redis_data:/data
 
+  # Kafka
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "2181:2181"
+
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+
   # Single instances for development
   api-gateway:
     build: ./api-gateway
@@ -75,9 +98,32 @@ services:
       - ENV=development
       - DATABASE_URL=postgresql://graduation:graduation_secret@postgres:5432/graduation?sslmode=disable
       - REDIS_URL=redis://redis:6379
+      - JWT_ACCESS_SECRET=47079cb745e7b5c1ebaa8106cabc00f43d6356ce3b0d4b725156742f4084280b
+      - INTERNAL_SERVICE_SECRET=1262c8c0eab801906cf8c1a0493897ff194f4948fde08cb453ad939578123b8596606d1d4871c4e0d1a46d5ecbd5dbcd09491cb0831fa808fcff4b98c9d67403
+      - NOTIFICATION_SERVICE_URL=http://notification-service:6003
+      - AUTH_SERVICE_URL=http://auth-service:6001
+      - KAFKA_BROKERS=kafka:29092
     depends_on:
       - postgres
       - redis
+      - kafka
+
+  # WS Gateway - WebSocket server on port 3001
+  ws-gateway:
+    build: ./ws-gateway
+    ports:
+      - "3001:3001"
+    environment:
+      - PORT=3001
+      - REDIS_URL=redis://redis:6379
+      - KAFKA_BROKERS=kafka:29092
+      - CHAT_SERVICE_URL=http://chat-service:6004
+      - JWT_SECRET=47079cb745e7b5c1ebaa8106cabc00f43d6356ce3b0d4b725156742f4084280b
+      - INTERNAL_SERVICE_SECRET=1262c8c0eab801906cf8c1a0493897ff194f4948fde08cb453ad939578123b8596606d1d4871c4e0d1a46d5ecbd5dbcd09491cb0831fa808fcff4b98c9d67403
+    depends_on:
+      - redis
+      - kafka
+      - chat-service
 
 volumes:
   postgres_data:

@@ -152,6 +152,10 @@ services:
       - ENV=production
       - DATABASE_URL=postgresql://graduation:graduation_secret@postgres:5432/graduation?sslmode=disable
       - REDIS_URL=redis://redis:6379
+      - JWT_ACCESS_SECRET=47079cb745e7b5c1ebaa8106cabc00f43d6356ce3b0d4b725156742f4084280b
+      - INTERNAL_SERVICE_SECRET=1262c8c0eab801906cf8c1a0493897ff194f4948fde08cb453ad939578123b8596606d1d4871c4e0d1a46d5ecbd5dbcd09491cb0831fa808fcff4b98c9d67403
+      - NOTIFICATION_SERVICE_URL=http://host.docker.internal:6003
+      - AUTH_SERVICE_URL=http://host.docker.internal:6001
     depends_on:
       postgres:
         condition: service_healthy
@@ -167,6 +171,10 @@ services:
       - ENV=production
       - DATABASE_URL=postgresql://graduation:graduation_secret@postgres:5432/graduation?sslmode=disable
       - REDIS_URL=redis://redis:6379
+      - JWT_ACCESS_SECRET=47079cb745e7b5c1ebaa8106cabc00f43d6356ce3b0d4b725156742f4084280b
+      - INTERNAL_SERVICE_SECRET=1262c8c0eab801906cf8c1a0493897ff194f4948fde08cb453ad939578123b8596606d1d4871c4e0d1a46d5ecbd5dbcd09491cb0831fa808fcff4b98c9d67403
+      - NOTIFICATION_SERVICE_URL=http://host.docker.internal:6003
+      - AUTH_SERVICE_URL=http://host.docker.internal:6001
     depends_on:
       postgres:
         condition: service_healthy
@@ -182,6 +190,10 @@ services:
       - ENV=production
       - DATABASE_URL=postgresql://graduation:graduation_secret@postgres:5432/graduation?sslmode=disable
       - REDIS_URL=redis://redis:6379
+      - JWT_ACCESS_SECRET=47079cb745e7b5c1ebaa8106cabc00f43d6356ce3b0d4b725156742f4084280b
+      - INTERNAL_SERVICE_SECRET=1262c8c0eab801906cf8c1a0493897ff194f4948fde08cb453ad939578123b8596606d1d4871c4e0d1a46d5ecbd5dbcd09491cb0831fa808fcff4b98c9d67403
+      - NOTIFICATION_SERVICE_URL=http://host.docker.internal:6003
+      - AUTH_SERVICE_URL=http://host.docker.internal:6001
     depends_on:
       postgres:
         condition: service_healthy
@@ -218,10 +230,11 @@ services:
       - "8001:8001"
     environment:
       - PORT=8001
-      - REDIS_ADDR=redis:6379
+      - REDIS_URL=redis://redis:6379
       - KAFKA_BROKER=kafka:29092
       - CHAT_SERVICE_URL=http://chat-service-1:6004
-      - JWT_SECRET=secret
+      - JWT_SECRET=47079cb745e7b5c1ebaa8106cabc00f43d6356ce3b0d4b725156742f4084280b
+      - INTERNAL_SERVICE_SECRET=1262c8c0eab801906cf8c1a0493897ff194f4948fde08cb453ad939578123b8596606d1d4871c4e0d1a46d5ecbd5dbcd09491cb0831fa808fcff4b98c9d67403
     depends_on:
       redis:
         condition: service_healthy

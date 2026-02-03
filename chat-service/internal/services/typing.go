@@ -6,7 +6,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/graduation/chat-service/internal/events"
+	"github.com/graduation/chat-service/internal/kafka"
 	"github.com/graduation/chat-service/internal/models"
+	"github.com/graduation/chat-service/internal/repositories"
 	"github.com/graduation/chat-service/pkg/cache"
 )
 
@@ -19,12 +22,18 @@ const (
 
 // TypingService handles typing indicator logic
 type TypingService struct {
-	redis *cache.RedisClient
+	redis    *cache.RedisClient
+	producer *kafka.Producer
+	repos    *repositories.Repositories
 }
 
 // NewTypingService creates a new TypingService
-func NewTypingService(redis *cache.RedisClient) *TypingService {
-	return &TypingService{redis: redis}
+func NewTypingService(redis *cache.RedisClient, producer *kafka.Producer, repos *repositories.Repositories) *TypingService {
+	return &TypingService{
+		redis:    redis,
+		producer: producer,
+		repos:    repos,
+	}
 }
 
 // TypingUser represents a user who is typing
@@ -37,7 +46,74 @@ type TypingUser struct {
 func (s *TypingService) SetTyping(ctx context.Context, conversationID, userID string, userRole models.UserRole) error {
 	key := fmt.Sprintf("%s:%s:%s", TypingKeyPrefix, conversationID, userID)
 	value := string(userRole) // Store the role with the typing indicator
+
+	fmt.Printf("[TypingService] SetTyping called: user=%s conversation=%s\n", userID, conversationID)
+
+	// Get conversation members for the event
+	memberIDs, err := s.getConversationMemberIDs(ctx, conversationID)
+	if err != nil {
+		// Log but don't fail - typing indicator is non-critical
+		fmt.Printf("[TypingService] Failed to get members for typing event: %v\n", err)
+	} else {
+		fmt.Printf("[TypingService] Found %d members for typing event\n", len(memberIDs))
+	}
+
+	// Publish to Kafka
+	if s.producer != nil {
+		event := events.TypingEvent{
+			UserID:         userID,
+			ConversationID: conversationID,
+			IsTyping:       true,
+			RecipientIDs:   memberIDs, // Include recipients for routing
+		}
+		go func() {
+			fmt.Printf("[TypingService] Publishing typing event to Kafka for %d recipients\n", len(memberIDs))
+			if err := s.producer.PublishTyping(context.Background(), event); err != nil {
+				fmt.Printf("[TypingService] Failed to publish event: %v\n", err)
+			} else {
+				fmt.Printf("[TypingService] Successfully published typing event\n")
+			}
+		}()
+	} else {
+		fmt.Printf("[TypingService] Producer is nil, skipping Kafka publish\n")
+	}
+
 	return s.redis.Set(ctx, key, value, TypingTTL)
+}
+
+// getConversationMemberIDs retrieves member IDs from cache or database
+func (s *TypingService) getConversationMemberIDs(ctx context.Context, conversationID string) ([]string, error) {
+	// Query Redis first for cached members
+	membersKey := fmt.Sprintf("conv:members:%s", conversationID)
+	members, err := s.redis.SMembers(ctx, membersKey)
+	if err == nil && len(members) > 0 {
+		fmt.Printf("[TypingService] Found %d cached members for conversation %s\n", len(members), conversationID)
+		return members, nil
+	}
+
+	// If not in cache, fetch from database
+	fmt.Printf("[TypingService] Cache miss for conversation %s, fetching from DB...\n", conversationID)
+	memberIDs, err := s.repos.Member.GetConversationMemberIDs(ctx, conversationID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get members from DB: %w", err)
+	}
+
+	// Cache the results for future use
+	if len(memberIDs) > 0 {
+		members := make([]interface{}, len(memberIDs))
+		for i, id := range memberIDs {
+			members[i] = id
+		}
+		if err := s.redis.SAdd(ctx, membersKey, members...); err != nil {
+			fmt.Printf("[TypingService] Failed to cache members: %v\n", err)
+		} else {
+			// Set expiration (30 days)
+			s.redis.Expire(ctx, membersKey, 30*24*60*60)
+			fmt.Printf("[TypingService] Cached %d members for conversation %s\n", len(memberIDs), conversationID)
+		}
+	}
+
+	return memberIDs, nil
 }
 
 // GetTypingUsers gets all users currently typing in a conversation

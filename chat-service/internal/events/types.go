@@ -5,7 +5,7 @@ import "time"
 // MessageCreatedEvent represents a new message event
 type MessageCreatedEvent struct {
 	ID             string    `json:"id"`
-	LocalID        string    `json:"local_id"`
+	LocalID        *string   `json:"local_id"`
 	ConversationID string    `json:"conversation_id"`
 	SenderID       string    `json:"sender_id"`
 	Content        string    `json:"content"`
@@ -33,7 +33,8 @@ type ReadReceiptEvent struct {
 
 // TypingEvent represents a typing indicator
 type TypingEvent struct {
-	UserID         string `json:"user_id"`
-	ConversationID string `json:"conversation_id"`
-	IsTyping       bool   `json:"is_typing"`
+	UserID         string   `json:"user_id"`
+	ConversationID string   `json:"conversation_id"`
+	IsTyping       bool     `json:"is_typing"`
+	RecipientIDs   []string `json:"recipient_ids,omitempty"` // List of user IDs to receive this event
 }

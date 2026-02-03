@@ -30,9 +30,12 @@ import { createArcjetMiddleware } from "./arcjet.middleware.js";
  * ```
  */
 export function setupMiddleware(app: Express, config: AppConfig): void {
-  // Middleware ordering is critical for correct request processing
-  // Each middleware is positioned to maximize efficiency and security
-  
+  // 0. Request Logging (for debugging)
+  app.use((req, res, next) => {
+    console.log(`[Gateway] ${req.method} ${req.path} - Origin: ${req.headers.origin || 'none'}`);
+    next();
+  });
+
   // 1. Compression (should be early to compress all responses)
   // Applied first so all subsequent responses can be compressed
   app.use(createCompressionMiddleware());
@@ -46,7 +49,7 @@ export function setupMiddleware(app: Express, config: AppConfig): void {
   // Parse JSON bodies (up to 10MB)
   app.use(json({ limit: "10mb" }));
   app.use(haltOnTimeout); // Check timeout after JSON parsing to prevent processing timed-out requests
-  
+
   // Parse URL-encoded bodies (up to 10MB)
   app.use(urlencoded({ extended: true, limit: "10mb" }));
   app.use(haltOnTimeout); // Check timeout after URL-encoded parsing

@@ -9,14 +9,13 @@ import (
 // MessageHandler handles message-related HTTP requests
 type MessageHandler struct {
 	messageSvc *services.MessageService
-	pollSvc    *services.PollService
 }
 
 // NewMessageHandler creates a new MessageHandler
-func NewMessageHandler(messageSvc *services.MessageService, pollSvc *services.PollService) *MessageHandler {
+// NewMessageHandler creates a new MessageHandler
+func NewMessageHandler(messageSvc *services.MessageService) *MessageHandler {
 	return &MessageHandler{
 		messageSvc: messageSvc,
-		pollSvc:    pollSvc,
 	}
 }
 
@@ -88,29 +87,6 @@ func (h *MessageHandler) GetMessages(c *fiber.Ctx) error {
 	}
 
 	return c.JSON(fiber.Map{"messages": messages})
-}
-
-// PollMessages long polls for new messages
-func (h *MessageHandler) PollMessages(c *fiber.Ctx) error {
-	userID := c.Locals("user_id").(string)
-	conversationID := c.Params("id")
-	afterMessageID := c.Query("after", "")
-
-	response, err := h.pollSvc.PollMessages(c.Context(), userID, conversationID, afterMessageID)
-	if err != nil {
-		if err.Error() == "context canceled" {
-			return c.Status(fiber.StatusNoContent).Send(nil)
-		}
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": fiber.Map{"code": "INTERNAL_ERROR", "message": err.Error()},
-		})
-	}
-
-	if len(response.Messages) == 0 {
-		return c.Status(fiber.StatusNoContent).Send(nil)
-	}
-
-	return c.JSON(response)
 }
 
 // DeleteMessage deletes a message

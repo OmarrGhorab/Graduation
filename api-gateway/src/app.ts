@@ -25,17 +25,17 @@ import { errorHandler } from "./middleware/error.middleware.js";
  * app.listen(config.server.port);
  * ```
  */
-export function createApp(config: AppConfig): Express {
+export function createApp(config: AppConfig): { app: Express, wsProxy: any } {
   const app = express();
 
   // Set up middleware (compression, timeout, body parsing, CORS, Arcjet)
   setupMiddleware(app, config);
 
   // Set up routes (health check, proxy routes)
-  setupRoutes(app, config);
+  const routes = setupRoutes(app, config);
 
   // Add error handler (must be last)
   app.use(errorHandler);
 
-  return app;
+  return { app, wsProxy: routes.wsProxy };
 }

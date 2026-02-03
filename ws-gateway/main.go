@@ -23,25 +23,36 @@ func main() {
 	cfg := config.Load()
 
 	// Initialize Redis
-	redisClient := redis.NewClient(&redis.Options{
-		Addr: cfg.RedisAddr,
-	})
+	opt, err := redis.ParseURL(cfg.RedisURL)
+	if err != nil {
+		log.Panicf("Failed to parse Redis URL: %v", err)
+	}
+	redisClient := redis.NewClient(opt)
 
 	if err := redisClient.Ping(context.Background()).Err(); err != nil {
-		log.Printf("Warning: Failed to connect to Redis at %s: %v", cfg.RedisAddr, err)
+		log.Printf("Warning: Failed to connect to Redis at %s: %v", cfg.RedisURL, err)
 	} else {
-		log.Printf("Connected to Redis at %s", cfg.RedisAddr)
+		log.Printf("Connected to Redis successfully")
 	}
 
 	// Initialize WebSocket Manager
 	handlers.Manager = wsCore.NewManager(redisClient)
 	go handlers.Manager.Run()
+	
+	// Start Redis subscriber for broadcasting messages to clients
+	go handlers.Manager.StartRedisSubscriber(context.Background())
 
-	// Initialize Kafka Consumer
+	// Initialize Kafka Consumers
 	// Note: consumer logic uses "internal/events" which defines the topics.
 	// We use the internal/kafka package for the consumer implementation.
+	
+	// Message consumer for new messages
 	consumer := kafka.NewConsumer(cfg.KafkaBrokers, "ws-gateway-group", redisClient)
 	go consumer.Start(context.Background())
+	
+	// Typing consumer for typing indicators
+	typingConsumer := kafka.NewTypingConsumer(cfg.KafkaBrokers, "ws-gateway-group", redisClient)
+	go typingConsumer.Start(context.Background())
 
 	// Initialize Fiber app
 	app := fiber.New(fiber.Config{

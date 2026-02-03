@@ -61,7 +61,6 @@ func (s *MessageService) SendMessage(ctx context.Context, input SendMessageInput
 	// Create message
 	message := &models.Message{
 		ID:             uuid.New().String(),
-		LocalID:        input.LocalID,
 		ConversationID: input.ConversationID,
 		SenderID:       input.SenderID,
 		SenderRole:     input.SenderRole,
@@ -69,6 +68,11 @@ func (s *MessageService) SendMessage(ctx context.Context, input SendMessageInput
 		Content:        input.Content,
 		MediaURLs:      input.MediaURLs,
 		ReplyToID:      input.ReplyToID,
+	}
+
+	if input.LocalID != "" {
+		localID := input.LocalID
+		message.LocalID = &localID
 	}
 
 	// Handle media metadata
@@ -154,15 +158,9 @@ func (s *MessageService) notifyMembers(ctx context.Context, conversationID, send
 		if memberID == senderID {
 			continue
 		}
-		// Check if member has active poll connection
-		isPolling, _ := s.redis.Exists(ctx, "poll:"+memberID+":"+conversationID)
-		fmt.Printf("[DEBUG] Member %s isPolling: %v\n", memberID, isPolling)
-
-		// FIXME: For debugging, we can temporarily disable this check or invert it if needed.
-		// For now, let's keep it but logging is key.
-		if !isPolling {
-			offlineMembers = append(offlineMembers, memberID)
-		}
+		// Assume offline for now, or check presence via Redis
+		// For now, simpler logic: if not sender, notify.
+		offlineMembers = append(offlineMembers, memberID)
 	}
 
 	fmt.Printf("[DEBUG] Offline members to notify: %d\n", len(offlineMembers))

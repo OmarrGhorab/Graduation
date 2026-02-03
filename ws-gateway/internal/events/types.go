@@ -33,7 +33,8 @@ type ReadReceiptEvent struct {
 
 // TypingEvent represents a typing indicator
 type TypingEvent struct {
-	UserID         string `json:"user_id"`
-	ConversationID string `json:"conversation_id"`
-	IsTyping       bool   `json:"is_typing"`
+	UserID         string   `json:"user_id"`
+	ConversationID string   `json:"conversation_id"`
+	IsTyping       bool     `json:"is_typing"`
+	RecipientIDs   []string `json:"recipient_ids,omitempty"` // List of user IDs to receive this event
 }
