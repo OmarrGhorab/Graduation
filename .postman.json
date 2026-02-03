@@ -1,0 +1,33 @@
+{
+  "workspace": {
+    "id": "b3e30592-a4db-415a-87ff-0ec638355d4b",
+    "name": "Graduation"
+  },
+  "collections": {
+    "test": {
+      "id": "50e9e342-a9d6-4e1d-8b7f-f79620944cc1",
+      "uid": "36851052-50e9e342-a9d6-4e1d-8b7f-f79620944cc1",
+      "name": "Test API Collection"
+    },
+    "chat_service": {
+      "file": "chat-service-postman-collection.json",
+      "name": "Chat Service - Complete Testing",
+      "description": "Complete testing suite with WebSocket support"
+    }
+  },
+  "environment": {
+    "id": "6c867035-1d30-482b-a7bf-696848517200",
+    "uid": "36851052-6c867035-1d30-482b-a7bf-696848517200",
+    "name": "Test Environment"
+  },
+  "test_credentials": {
+    "teacher": {
+      "email": "omarghorab05@gmail.com",
+      "password": "Raven2002@$"
+    },
+    "student": {
+      "email": "pubgraven75@gmail.com",
+      "password": "Raven2002@$"
+    }
+  }
+}

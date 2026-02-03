@@ -2,104 +2,50 @@ package config
 
 import (
 	"os"
-	"strconv"
-	"time"
+	"strings"
 
 	"github.com/joho/godotenv"
 )
 
-// Config holds all configuration for the application
 type Config struct {
-	// Server
-	Port string
-	Env  string
-
-	// Database
-	DatabaseURL string
-
-	// Redis
-	RedisURL string
-
-	// Kafka
-	KafkaBrokers []string
-
-	// JWT
-	JWTAccessSecret string
-	JWTSecret       string
-
-	// Internal Service Communication
+	Port                   string
+	DatabaseURL            string
+	RedisURL               string
+	KafkaBrokers           []string
+	JWTSecret              string
 	InternalServiceSecret  string
-	NotificationServiceURL string
-	AuthServiceURL         string
+	NotificationServiceURL string // For offline push notifications
+	AuthServiceURL         string // For fetching user profiles
 
 	// Cloudinary
 	CloudinaryCloudName string
 	CloudinaryAPIKey    string
 	CloudinaryAPISecret string
-	PollTimeout         time.Duration
-	PollInterval        time.Duration
-
-	// Rate Limiting
-	RateLimitRequests int
-	RateLimitWindow   time.Duration
 }
 
-// Load loads configuration from environment variables
-func Load() (*Config, error) {
-	// Load .env file if it exists
+func Load() *Config {
+	// Attempt to load from .env file, but don't fail if it doesn't exist (prod might use real env vars)
 	_ = godotenv.Load()
 
-	// Support both KAFKA_BROKERS (comma-separated) and KAFKA_BROKER (single)
-	kafkaBrokers := getEnv("KAFKA_BROKERS", "")
-	if kafkaBrokers == "" {
-		kafkaBrokers = getEnv("KAFKA_BROKER", "localhost:9092")
-	}
-	
-	cfg := &Config{
+	return &Config{
 		Port:                   getEnv("PORT", "6004"),
-		Env:                    getEnv("ENV", "development"),
-		DatabaseURL:            getEnv("DATABASE_URL", ""),
+		DatabaseURL:            getEnv("DATABASE_URL", "postgresql://user:pass@localhost:5432/db"),
 		RedisURL:               getEnv("REDIS_URL", "redis://localhost:6379"),
-		KafkaBrokers:           []string{kafkaBrokers},
-		JWTAccessSecret:        getEnv("JWT_ACCESS_SECRET", ""),
-		JWTSecret:              getEnv("JWT_SECRET", "secret"),
-		InternalServiceSecret:  getEnv("INTERNAL_SERVICE_SECRET", ""),
+		KafkaBrokers:           strings.Split(getEnv("KAFKA_BROKERS", "localhost:9092"), ","),
+		JWTSecret:              getEnv("JWT_ACCESS_SECRET", "secret"),
+		InternalServiceSecret:  getEnv("INTERNAL_SERVICE_SECRET", "internal_secret"),
 		NotificationServiceURL: getEnv("NOTIFICATION_SERVICE_URL", "http://localhost:6003"),
 		AuthServiceURL:         getEnv("AUTH_SERVICE_URL", "http://localhost:6001"),
-		CloudinaryCloudName:    getEnv("CLOUDINARY_CLOUD_NAME", ""),
-		CloudinaryAPIKey:       getEnv("CLOUDINARY_API_KEY", ""),
-		CloudinaryAPISecret:    getEnv("CLOUDINARY_API_SECRET", ""),
-		PollTimeout:            time.Duration(getEnvAsInt("POLL_TIMEOUT_SECONDS", 30)) * time.Second,
-		PollInterval:           time.Duration(getEnvAsInt("POLL_INTERVAL_MS", 500)) * time.Millisecond,
-		RateLimitRequests:      getEnvAsInt("RATE_LIMIT_REQUESTS", 100),
-		RateLimitWindow:        time.Duration(getEnvAsInt("RATE_LIMIT_WINDOW_SECONDS", 60)) * time.Second,
+
+		CloudinaryCloudName: getEnv("CLOUDINARY_CLOUD_NAME", ""),
+		CloudinaryAPIKey:    getEnv("CLOUDINARY_API_KEY", ""),
+		CloudinaryAPISecret: getEnv("CLOUDINARY_API_SECRET", ""),
 	}
-
-	return cfg, nil
 }
 
-// IsDevelopment returns true if running in development mode
-func (c *Config) IsDevelopment() bool {
-	return c.Env == "development"
-}
-
-// IsProduction returns true if running in production mode
-func (c *Config) IsProduction() bool {
-	return c.Env == "production"
-}
-
-func getEnv(key, defaultValue string) string {
+func getEnv(key, fallback string) string {
 	if value, exists := os.LookupEnv(key); exists {
 		return value
 	}
-	return defaultValue
-}
-
-func getEnvAsInt(key string, defaultValue int) int {
-	if value, exists := os.LookupEnv(key); exists {
-		if intVal, err := strconv.Atoi(value); err == nil {
-			return intVal
-		}
-	}
-	return defaultValue
+	return fallback
 }

@@ -1,0 +1,688 @@
+{
+  "info": {
+    "name": "Chat Service - Complete API Testing",
+    "description": "Complete testing suite for Chat Service with all endpoints including member management, WebSocket real-time testing",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "auth_base_url",
+      "value": "http://localhost:6001/api/v1",
+      "type": "string"
+    },
+    {
+      "key": "chat_base_url",
+      "value": "http://localhost:6004/api/v1",
+      "type": "string"
+    },
+    {
+      "key": "ws_url",
+      "value": "ws://localhost:8001/ws",
+      "type": "string"
+    },
+    {
+      "key": "teacher_email",
+      "value": "omarghorab05@gmail.com",
+      "type": "string"
+    },
+    {
+      "key": "teacher_password",
+      "value": "Raven2002@$",
+      "type": "string"
+    },
+    {
+      "key": "student_email",
+      "value": "pubgraven75@gmail.com",
+      "type": "string"
+    },
+    {
+      "key": "student_password",
+      "value": "Raven2002@$",
+      "type": "string"
+    },
+    {
+      "key": "teacher_token",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "student_token",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "teacher_user_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "student_user_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "conversation_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "message_id",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "1. Authentication",
+      "item": [
+        {
+          "name": "Login Teacher",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test('Response has access token', function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.accessToken).to.exist;",
+                  "    pm.collectionVariables.set('teacher_token', jsonData.accessToken);",
+                  "    pm.collectionVariables.set('teacher_user_id', jsonData.user.id);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"emailOrUsername\": \"{{teacher_email}}\",\n  \"password\": \"{{teacher_password}}\"\n}"
+            },
+            "url": {
+              "raw": "{{auth_base_url}}/auth/login",
+              "host": ["{{auth_base_url}}"],
+              "path": ["auth", "login"]
+            }
+          }
+        },
+        {
+          "name": "Login Student",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test('Response has access token', function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.accessToken).to.exist;",
+                  "    pm.collectionVariables.set('student_token', jsonData.accessToken);",
+                  "    pm.collectionVariables.set('student_user_id', jsonData.user.id);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"emailOrUsername\": \"{{student_email}}\",\n  \"password\": \"{{student_password}}\"\n}"
+            },
+            "url": {
+              "raw": "{{auth_base_url}}/auth/login",
+              "host": ["{{auth_base_url}}"],
+              "path": ["auth", "login"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. Conversations",
+      "item": [
+        {
+          "name": "Create Group Chat (Teacher)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test('Group created successfully', function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.id).to.exist;",
+                  "    pm.expect(jsonData.type).to.eql('GROUP');",
+                  "    pm.collectionVariables.set('conversation_id', jsonData.id);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{teacher_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Test Study Group\",\n  \"member_ids\": []\n}"
+            },
+            "url": {
+              "raw": "{{chat_base_url}}/conversations",
+              "host": ["{{chat_base_url}}"],
+              "path": ["conversations"]
+            }
+          }
+        },
+        {
+          "name": "Create Direct Chat",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test('Direct chat created', function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.id).to.exist;",
+                  "    pm.expect(jsonData.type).to.eql('DIRECT');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{teacher_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"peer_id\": \"{{student_user_id}}\"\n}"
+            },
+            "url": {
+              "raw": "{{chat_base_url}}/conversations/direct",
+              "host": ["{{chat_base_url}}"],
+              "path": ["conversations", "direct"]
+            }
+          }
+        },
+        {
+          "name": "Get User Conversations (Teacher)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{teacher_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{chat_base_url}}/conversations",
+              "host": ["{{chat_base_url}}"],
+              "path": ["conversations"]
+            }
+          }
+        },
+        {
+          "name": "Get Single Conversation",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{teacher_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{chat_base_url}}/conversations/{{conversation_id}}",
+              "host": ["{{chat_base_url}}"],
+              "path": ["conversations", "{{conversation_id}}"]
+            }
+          }
+        },
+        {
+          "name": "Delete Conversation (Owner Only)",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{teacher_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{chat_base_url}}/conversations/{{conversation_id}}",
+              "host": ["{{chat_base_url}}"],
+              "path": ["conversations", "{{conversation_id}}"]
+            }
+          }
+        },
+        {
+          "name": "Leave Conversation",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{student_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{chat_base_url}}/conversations/{{conversation_id}}/leave",
+              "host": ["{{chat_base_url}}"],
+              "path": ["conversations", "{{conversation_id}}", "leave"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. Member Management",
+      "item": [
+        {
+          "name": "Get Members",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{teacher_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{chat_base_url}}/conversations/{{conversation_id}}/members",
+              "host": ["{{chat_base_url}}"],
+              "path": ["conversations", "{{conversation_id}}", "members"]
+            }
+          }
+        },
+        {
+          "name": "Add Member",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{teacher_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"{{student_user_id}}\"\n}"
+            },
+            "url": {
+              "raw": "{{chat_base_url}}/conversations/{{conversation_id}}/members",
+              "host": ["{{chat_base_url}}"],
+              "path": ["conversations", "{{conversation_id}}", "members"]
+            }
+          }
+        },
+        {
+          "name": "Remove Member",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{teacher_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"{{student_user_id}}\"\n}"
+            },
+            "url": {
+              "raw": "{{chat_base_url}}/conversations/{{conversation_id}}/members",
+              "host": ["{{chat_base_url}}"],
+              "path": ["conversations", "{{conversation_id}}", "members"]
+            }
+          }
+        },
+        {
+          "name": "Update Member Role (Assign Admin/Assistant)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{teacher_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"{{student_user_id}}\",\n  \"role\": \"ADMIN\"\n}"
+            },
+            "url": {
+              "raw": "{{chat_base_url}}/conversations/{{conversation_id}}/members/role",
+              "host": ["{{chat_base_url}}"],
+              "path": ["conversations", "{{conversation_id}}", "members", "role"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "4. Messages",
+      "item": [
+        {
+          "name": "Send Text Message",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test('Message sent successfully', function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.id).to.exist;",
+                  "    pm.expect(jsonData.content).to.exist;",
+                  "    pm.collectionVariables.set('message_id', jsonData.id);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{teacher_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"text\",\n  \"content\": \"Hello everyone! This is a test message from Postman.\",\n  \"media_urls\": []\n}"
+            },
+            "url": {
+              "raw": "{{chat_base_url}}/conversations/{{conversation_id}}/messages",
+              "host": ["{{chat_base_url}}"],
+              "path": ["conversations", "{{conversation_id}}", "messages"]
+            }
+          }
+        },
+        {
+          "name": "Get Messages",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{teacher_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{chat_base_url}}/conversations/{{conversation_id}}/messages?limit=50&offset=0",
+              "host": ["{{chat_base_url}}"],
+              "path": ["conversations", "{{conversation_id}}", "messages"],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "50"
+                },
+                {
+                  "key": "offset",
+                  "value": "0"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Send Image Message",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{teacher_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"image\",\n  \"content\": \"Check out this image!\",\n  \"media_urls\": [\"https://res.cloudinary.com/demo/image/upload/sample.jpg\"]\n}"
+            },
+            "url": {
+              "raw": "{{chat_base_url}}/conversations/{{conversation_id}}/messages",
+              "host": ["{{chat_base_url}}"],
+              "path": ["conversations", "{{conversation_id}}", "messages"]
+            }
+          }
+        },
+        {
+          "name": "Pin Message",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{teacher_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{chat_base_url}}/conversations/{{conversation_id}}/messages/{{message_id}}/pin",
+              "host": ["{{chat_base_url}}"],
+              "path": ["conversations", "{{conversation_id}}", "messages", "{{message_id}}", "pin"]
+            }
+          }
+        },
+        {
+          "name": "Get Pinned Messages",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{teacher_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{chat_base_url}}/conversations/{{conversation_id}}/messages/pinned",
+              "host": ["{{chat_base_url}}"],
+              "path": ["conversations", "{{conversation_id}}", "messages", "pinned"]
+            }
+          }
+        },
+        {
+          "name": "Unpin Message",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{teacher_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{chat_base_url}}/conversations/{{conversation_id}}/messages/{{message_id}}/pin",
+              "host": ["{{chat_base_url}}"],
+              "path": ["conversations", "{{conversation_id}}", "messages", "{{message_id}}", "pin"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "5. Typing Indicators",
+      "item": [
+        {
+          "name": "Start Typing",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{teacher_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"conversation_id\": \"{{conversation_id}}\",\n  \"is_typing\": true\n}"
+            },
+            "url": {
+              "raw": "{{chat_base_url}}/typing",
+              "host": ["{{chat_base_url}}"],
+              "path": ["typing"]
+            }
+          }
+        },
+        {
+          "name": "Stop Typing",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{teacher_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"conversation_id\": \"{{conversation_id}}\",\n  \"is_typing\": false\n}"
+            },
+            "url": {
+              "raw": "{{chat_base_url}}/typing",
+              "host": ["{{chat_base_url}}"],
+              "path": ["typing"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "6. Media Upload",
+      "item": [
+        {
+          "name": "Get Presigned URL",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{teacher_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"folder\": \"chat/images\"\n}"
+            },
+            "url": {
+              "raw": "{{chat_base_url}}/media/presign",
+              "host": ["{{chat_base_url}}"],
+              "path": ["media", "presign"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "7. Health Checks",
+      "item": [
+        {
+          "name": "Chat Service Health",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:6004/health",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "6004",
+              "path": ["health"]
+            }
+          }
+        },
+        {
+          "name": "Auth Service Health",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:6001/health",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "6001",
+              "path": ["health"]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

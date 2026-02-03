@@ -6,49 +6,37 @@ import (
 	"github.com/graduation/chat-service/internal/middleware"
 )
 
-// SetupRoutes configures all API routes
-func SetupRoutes(app *fiber.App, hdlrs *handlers.Handlers, authMiddleware *middleware.AuthMiddleware) {
-	// Health routes (no auth required)
-	app.Get("/health", hdlrs.Health.Health)
-	app.Get("/ready", hdlrs.Health.Ready)
-
-	// API v1 routes
+func SetupRoutes(app *fiber.App, h *handlers.Handler, auth *middleware.AuthMiddleware) {
 	api := app.Group("/api/v1")
 
-	// Protected routes (require authentication)
-	protected := api.Group("", authMiddleware.GetMiddleware())
+	// Conversations
+	conversations := api.Group("/conversations", auth.Protected())
+	conversations.Post("/", h.CreateGroupConversation)
+	conversations.Post("/direct", h.CreateDirectConversation)
+	conversations.Get("/", h.GetUserConversations)
+	conversations.Get("/:id", h.GetConversation)
+	conversations.Delete("/:id", h.DeleteConversation)
+	conversations.Post("/:id/leave", h.LeaveConversation)
 
-	// Conversation routes
-	conversations := protected.Group("/conversations")
-	conversations.Post("/", hdlrs.Conversation.CreateGroup)
-	conversations.Post("/direct", hdlrs.Conversation.CreateDirect)
-	conversations.Get("/", hdlrs.Conversation.GetUserConversations)
-	conversations.Get("/:id", hdlrs.Conversation.GetConversation)
-	conversations.Get("/:id/members", hdlrs.Conversation.GetMembers)
-	conversations.Patch("/:id/image", hdlrs.Conversation.UpdateImage)
-	conversations.Post("/:id/members", hdlrs.Conversation.AddMember)
-	conversations.Delete("/:id/members/:memberId", hdlrs.Conversation.RemoveMember)
-	conversations.Patch("/:id/members/:memberId/role", hdlrs.Conversation.UpdateMemberRole)
-	conversations.Post("/:id/read", hdlrs.Conversation.MarkAsRead)
-	conversations.Delete("/:id", hdlrs.Conversation.DeleteConversation)
+	// Members
+	conversations.Get("/:id/members", h.GetMembers)
+	conversations.Post("/:id/members", h.AddMember)
+	conversations.Delete("/:id/members", h.RemoveMember)
+	conversations.Put("/:id/members/role", h.UpdateMemberRole)
 
-	// Message routes
+	// Messages
 	messages := conversations.Group("/:id/messages")
-	messages.Post("/", hdlrs.Message.SendMessage)
-	messages.Get("/", hdlrs.Message.GetMessages)
-	messages.Get("/media", hdlrs.Message.GetMediaHistory)
+	messages.Post("/", h.SendMessage)
+	messages.Get("/", h.GetMessages)
 
-	messages.Get("/pinned", hdlrs.Message.GetPinnedMessages)
-	conversations.Patch("/:id/messages/:messageId", hdlrs.Message.EditMessage)
-	conversations.Delete("/:id/messages/:messageId", hdlrs.Message.DeleteMessage)
-	conversations.Post("/:id/messages/:messageId/pin", hdlrs.Message.PinMessage)
-	conversations.Delete("/:id/messages/:messageId/pin", hdlrs.Message.UnpinMessage)
+	// Message Actions (Pinning)
+	messages.Get("/pinned", h.GetPinnedMessages)
+	conversations.Post("/:id/messages/:messageId/pin", h.PinMessage)
+	conversations.Delete("/:id/messages/:messageId/pin", h.UnpinMessage)
 
-	// Typing indicator routes
-	protected.Post("/typing", hdlrs.Typing.SetTyping)
-	protected.Get("/typing", hdlrs.Typing.GetTypingUsers)
+	// Typing
+	api.Post("/typing", auth.Protected(), h.SetTyping)
 
-	// Media routes
-	protected.Post("/media/presign", hdlrs.Media.Presign)
-	protected.Post("/media/batch-presign", hdlrs.Media.BatchPresign)
+	// Media
+	api.Post("/media/presign", auth.Protected(), h.PresignMedia)
 }

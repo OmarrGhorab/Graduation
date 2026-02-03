@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+  },
+  "powers": {
+    "mcpServers": {
+      "power-postman-postman": {
+        "url": "https://mcp.postman.com/minimal",
+        "headers": {
+          "Authorization": "Bearer PMAK-6981b90ffe3a8b0001b965b6-5e404e91d2ee15a477de98334f2ebbf8cd"
+        }
+      }
+    }
+  }
+}

@@ -5,139 +5,94 @@ import (
 	"encoding/json"
 	"log"
 	"sync"
-	"time"
 
-	"github.com/gofiber/contrib/websocket"
+	"github.com/graduation/ws-gateway/internal/events"
 	"github.com/redis/go-redis/v9"
 )
 
-// Client represents a connected WebSocket client
-type Client struct {
-	UserID   string
-	UserRole string
-	Conn     *websocket.Conn
-	Send     chan []byte
-}
-
-// Manager maintains the set of active clients and broadcasts messages
 type Manager struct {
-	Clients    map[string]*Client // UserID -> Client
+	Clients    map[string][]*Client // UserID -> List of Connections (Tabs)
 	Register   chan *Client
 	Unregister chan *Client
 	Redis      *redis.Client
 	mu         sync.RWMutex
 }
 
-// NewManager creates a new key-based Manager
 func NewManager(redisClient *redis.Client) *Manager {
 	return &Manager{
-		Clients:    make(map[string]*Client),
+		Clients:    make(map[string][]*Client),
 		Register:   make(chan *Client),
 		Unregister: make(chan *Client),
 		Redis:      redisClient,
 	}
 }
 
-// Run starts the manager loop
 func (m *Manager) Run() {
+	// Start Redis Subscriber
+	go m.subscribeToRedis()
+
 	for {
 		select {
 		case client := <-m.Register:
 			m.mu.Lock()
-			m.Clients[client.UserID] = client
+			m.Clients[client.UserID] = append(m.Clients[client.UserID], client)
 			m.mu.Unlock()
-
-			// Set presence in Redis
-			go m.SetPresence(client.UserID, true)
-
 			log.Printf("User registered: %s", client.UserID)
 
 		case client := <-m.Unregister:
 			m.mu.Lock()
-			if _, ok := m.Clients[client.UserID]; ok {
-				delete(m.Clients, client.UserID)
-				close(client.Send)
+			if clients, ok := m.Clients[client.UserID]; ok {
+				// Remove specific client
+				for i, c := range clients {
+					if c == client {
+						m.Clients[client.UserID] = append(clients[:i], clients[i+1:]...)
+						break
+					}
+				}
+				if len(m.Clients[client.UserID]) == 0 {
+					delete(m.Clients, client.UserID)
+				}
 			}
 			m.mu.Unlock()
-
-			// Remove presence (or let TTL expire)
-			go m.SetPresence(client.UserID, false)
-
-			log.Printf("User unregistered: %s", client.UserID)
-		}
-	}
-}
-
-// SetPresence updates the user's presence in Redis
-func (m *Manager) SetPresence(userID string, online bool) {
-	ctx := context.Background()
-	key := "presence:" + userID
-
-	if online {
-		// Set online with short TTL (will be refreshed by heartbeat)
-		m.Redis.Set(ctx, key, "online", 60*time.Second)
-	} else {
-		m.Redis.Del(ctx, key)
-	}
-}
-
-// SendToUser sends a message to a specific user if connected
-func (m *Manager) SendToUser(userID string, message interface{}) {
-	m.mu.RLock()
-	client, ok := m.Clients[userID]
-	m.mu.RUnlock()
-
-	if ok {
-		payload, _ := json.Marshal(message)
-		select {
-		case client.Send <- payload:
-		default:
-			log.Printf("Failed to send to user %s, channel full", userID)
 			close(client.Send)
-			delete(m.Clients, userID)
 		}
 	}
 }
 
-// StartRedisSubscriber starts a subscriber to listen for broadcast messages from Redis
-func (m *Manager) StartRedisSubscriber(ctx context.Context) {
+func (m *Manager) subscribeToRedis() {
+	ctx := context.Background()
 	pubsub := m.Redis.Subscribe(ctx, "chat.live.updates")
 	defer pubsub.Close()
 
-	log.Println("[Manager] Redis subscriber started for channel: chat.live.updates")
-
-	for {
-		select {
-		case <-ctx.Done():
-			log.Println("[Manager] Redis subscriber shutting down")
-			return
-		default:
-			msg, err := pubsub.ReceiveMessage(ctx)
-			if err != nil {
-				log.Printf("[Manager] Redis receive error: %v", err)
-				continue
-			}
-
-			// Parse the routing envelope
-			var envelope struct {
-				RecipientIDs []string    `json:"recipient_ids"`
-				Payload      interface{} `json:"payload"`
-			}
-
-			if err := json.Unmarshal([]byte(msg.Payload), &envelope); err != nil {
-				log.Printf("[Manager] Failed to unmarshal envelope: %v", err)
-				continue
-			}
-
-			log.Printf("[Manager] Received Redis message for %d recipients", len(envelope.RecipientIDs))
-
-			// Send to all recipients
-			sentCount := 0
-			for _, userID := range envelope.RecipientIDs {
-				m.SendToUser(userID, envelope.Payload)
-				sentCount++
-			}
-			log.Printf("[Manager] Sent WebSocket message to %d/%d connected recipients", sentCount, len(envelope.RecipientIDs))
+	ch := pubsub.Channel()
+	for msg := range ch {
+		var envelope events.RedisEnvelope
+		if err := json.Unmarshal([]byte(msg.Payload), &envelope); err != nil {
+			log.Printf("Error unmarshalling redis update: %v", err)
+			continue
 		}
+
+		// Find local Targets
+		m.mu.RLock()
+		for _, targetID := range envelope.Targets {
+			if clients, ok := m.Clients[targetID]; ok {
+				// Send to all connections for this user
+				wsPayload := CreateWSPayload(envelope.Type, envelope.Payload)
+				for _, client := range clients {
+					select {
+					case client.Send <- wsPayload:
+					default:
+						close(client.Send)
+					}
+				}
+			}
+		}
+		m.mu.RUnlock()
 	}
+}
+
+// BroadcastToRedis is called by Kafka Consumer to push logic to all Gateways
+func (m *Manager) BroadcastToRedis(envelope events.RedisEnvelope) error {
+	bytes, _ := json.Marshal(envelope)
+	return m.Redis.Publish(context.Background(), "chat.live.updates", bytes).Err()
 }

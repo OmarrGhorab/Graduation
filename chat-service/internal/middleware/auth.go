@@ -1,79 +1,62 @@
 package middleware
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/graduation/chat-service/internal/models"
+	"github.com/graduation/chat-service/internal/config"
 )
 
-// AuthMiddleware handles JWT authentication
 type AuthMiddleware struct {
-	jwtSecret string
+	config *config.Config
 }
 
-// NewAuthMiddleware creates a new AuthMiddleware
-func NewAuthMiddleware(jwtSecret string) *AuthMiddleware {
-	return &AuthMiddleware{jwtSecret: jwtSecret}
+func NewAuthMiddleware(cfg *config.Config) *AuthMiddleware {
+	return &AuthMiddleware{config: cfg}
 }
 
-// Authenticate validates JWT token and sets user info in context
-func (m *AuthMiddleware) Authenticate() fiber.Handler {
+func (m *AuthMiddleware) Protected() fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		authHeader := c.Get("Authorization")
 		if authHeader == "" {
-			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
-				"error": fiber.Map{"code": "UNAUTHORIZED", "message": "Authorization header is required"},
-			})
+			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "Missing authorization header"})
 		}
 
-		// Extract token from "Bearer <token>"
 		parts := strings.Split(authHeader, " ")
 		if len(parts) != 2 || parts[0] != "Bearer" {
-			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
-				"error": fiber.Map{"code": "UNAUTHORIZED", "message": "Invalid authorization header format"},
-			})
+			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "Invalid authorization header format"})
 		}
-		tokenString := parts[1]
 
-		// Parse and validate token
-		token, err := jwt.Parse(tokenString, func(t *jwt.Token) (interface{}, error) {
-			if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
-				return nil, fiber.NewError(fiber.StatusUnauthorized, "Invalid signing method")
+		tokenString := parts[1]
+		token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+				return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 			}
-			return []byte(m.jwtSecret), nil
+			return []byte(m.config.JWTSecret), nil
 		})
 
 		if err != nil || !token.Valid {
-			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
-				"error": fiber.Map{"code": "UNAUTHORIZED", "message": "Invalid or expired token"},
-			})
+			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "Invalid or expired token"})
 		}
 
-		// Extract claims
 		claims, ok := token.Claims.(jwt.MapClaims)
 		if !ok {
-			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
-				"error": fiber.Map{"code": "UNAUTHORIZED", "message": "Invalid token claims"},
-			})
+			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "Invalid token claims"})
 		}
 
-		// Set user info in context
-		c.Locals("user_id", claims["sub"].(string))
-		
-		// Handle role - could be in "role" field
-		if role, ok := claims["role"].(string); ok {
-			c.Locals("user_role", models.UserRole(role))
-		} else {
-			c.Locals("user_role", models.UserRoleStudent) // Default role
+		// Extract User ID (sub or id)
+		userID, ok := claims["sub"].(string)
+		if !ok {
+			if id, ok := claims["id"].(string); ok {
+				userID = id
+			} else {
+				return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "Token missing user id"})
+			}
 		}
 
+		c.Locals("user_id", userID)
 		return c.Next()
 	}
-}
-
-// GetMiddleware returns the authentication middleware function
-func (m *AuthMiddleware) GetMiddleware() fiber.Handler {
-	return m.Authenticate()
 }

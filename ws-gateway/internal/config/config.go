@@ -2,6 +2,9 @@ package config
 
 import (
 	"os"
+	"strings"
+
+	"github.com/joho/godotenv"
 )
 
 type Config struct {
@@ -13,18 +16,14 @@ type Config struct {
 }
 
 func Load() *Config {
-	// Support both KAFKA_BROKERS (comma-separated) and KAFKA_BROKER (single)
-	kafkaBrokers := getEnv("KAFKA_BROKERS", "")
-	if kafkaBrokers == "" {
-		kafkaBrokers = getEnv("KAFKA_BROKER", "localhost:9092")
-	}
-	
+	_ = godotenv.Load()
+
 	return &Config{
 		Port:           getEnv("PORT", "8001"),
 		RedisURL:       getEnv("REDIS_URL", "redis://localhost:6379"),
-		KafkaBrokers:   []string{kafkaBrokers},
-		ChatServiceUrl: getEnv("CHAT_SERVICE_URL", "http://localhost:8000"),
-		JwtSecret:      getEnv("JWT_SECRET", "secret"),
+		KafkaBrokers:   strings.Split(getEnv("KAFKA_BROKERS", "localhost:9092"), ","),
+		ChatServiceUrl: getEnv("CHAT_SERVICE_URL", "http://localhost:6004"),
+		JwtSecret:      getEnv("JWT_ACCESS_SECRET", "secret"),
 	}
 }
 
