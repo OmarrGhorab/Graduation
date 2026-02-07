@@ -9,8 +9,40 @@ import {
 import { addConnection, removeConnection, getConnectionCount } from "../libs/sse";
 
 /**
+ * Notification category definitions
+ * Maps category names to notification type prefixes
+ */
+const NOTIFICATION_CATEGORIES: Record<string, string[]> = {
+  chat: ["chat.message"],
+  security: [
+    "security_new_device_blocked",
+    "security_device_verified",
+    "security_password_changed",
+    "security_account_locked",
+  ],
+  parent_link: [
+    "parent_link_request",
+    "parent_link_accepted",
+    "parent_link_declined",
+    "parent_link_request_accepted",
+    "parent_link_request_declined",
+  ],
+  unlink: [
+    "unlink_request",
+    "unlink_request_accepted",
+    "unlink_request_declined",
+  ],
+};
+
+/**
  * Get paginated notifications for the authenticated user
  * Supports pagination with default 10 notifications per page
+ * 
+ * Query Parameters:
+ * - page: Page number (default: 1)
+ * - limit: Items per page (default: 10, max: 50)
+ * - unreadOnly: Filter to unread only (default: false)
+ * - category: Filter by category - 'chat', 'security', 'parent_link', 'unlink', or 'all' (default: all)
  */
 export const getNotifications = async (
   req: AuthenticatedRequest,
@@ -23,7 +55,12 @@ export const getNotifications = async (
     }
 
     const userId = req.user!.id;
-    const { page = "1", limit = "10", unreadOnly = "false" } = (req as any).query;
+    const {
+      page = "1",
+      limit = "10",
+      unreadOnly = "false",
+      category = "all"
+    } = (req as any).query;
 
     const pageNum = parseInt(page as string, 10);
     const limitNum = parseInt(limit as string, 10);
@@ -31,6 +68,14 @@ export const getNotifications = async (
 
     if (pageNum < 1 || limitNum < 1 || limitNum > 50) {
       throw new BadRequestError("Invalid pagination parameters");
+    }
+
+    // Validate category
+    const validCategories = ["all", ...Object.keys(NOTIFICATION_CATEGORIES)];
+    if (!validCategories.includes(category as string)) {
+      throw new BadRequestError(
+        `Invalid category. Must be one of: ${validCategories.join(", ")}`
+      );
     }
 
     const skip = (pageNum - 1) * limitNum;
@@ -41,8 +86,16 @@ export const getNotifications = async (
       whereClause.read = false;
     }
 
+    // Add category filter
+    if (category !== "all") {
+      const types = NOTIFICATION_CATEGORIES[category as string];
+      if (types && types.length > 0) {
+        whereClause.type = { in: types };
+      }
+    }
+
     // Get notifications and total count in parallel
-    const [notifications, total] = await Promise.all([
+    const [notifications, total, unreadCount] = await Promise.all([
       prisma.notification.findMany({
         where: whereClause,
         select: {
@@ -60,6 +113,10 @@ export const getNotifications = async (
       }),
       prisma.notification.count({
         where: whereClause,
+      }),
+      // Also get unread count for current filter
+      prisma.notification.count({
+        where: { ...whereClause, read: false },
       }),
     ]);
 
@@ -79,11 +136,18 @@ export const getNotifications = async (
         hasNext: pageNum < totalPages,
         hasPrevious: pageNum > 1,
       },
+      filter: {
+        category: category,
+        unreadOnly: unreadOnlyBool,
+        unreadCount: unreadCount,
+      },
+      availableCategories: validCategories,
     });
   } catch (err) {
     next(err);
   }
 };
+
 
 /**
  * Mark notifications as read
