@@ -12,13 +12,13 @@ export async function publishNotification(
   }
 ): Promise<void> {
   const startTime = Date.now();
-  
+
   // Debug logging
   console.log(`[Notification Client] Starting notification publish for user ${userId}`);
   console.log(`[Notification Client] URL: ${NOTIFICATION_SERVICE_URL}`);
   console.log(`[Notification Client] Secret configured: ${!!process.env.INTERNAL_SERVICE_SECRET}`);
   console.log(`[Notification Client] Data type: ${data.type}`);
-  
+
   try {
     if (!process.env.INTERNAL_SERVICE_SECRET) {
       console.warn(`[Notification Client] INTERNAL_SERVICE_SECRET not configured, notification may fail for user ${userId}`);
@@ -29,7 +29,7 @@ export async function publishNotification(
       headers: {
         'Content-Type': 'application/json',
         ...(process.env.INTERNAL_SERVICE_SECRET && {
-          'x-internal-secret': process.env.INTERNAL_SERVICE_SECRET,
+          'x-internal-service-secret': process.env.INTERNAL_SERVICE_SECRET,
         }),
       },
       body: JSON.stringify({
@@ -84,7 +84,7 @@ export async function updateNotifications(
       headers: {
         'Content-Type': 'application/json',
         ...(process.env.INTERNAL_SERVICE_SECRET && {
-          'x-internal-secret': process.env.INTERNAL_SERVICE_SECRET,
+          'x-internal-service-secret': process.env.INTERNAL_SERVICE_SECRET,
         }),
       },
       body: JSON.stringify({

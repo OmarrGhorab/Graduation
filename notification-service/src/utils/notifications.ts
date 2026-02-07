@@ -239,17 +239,17 @@ export async function publishNotification(
       },
     });
 
-    // Prepare notification payload for real-time delivery
-    const notificationPayload = {
+    // Enrich for UI delivery
+    const enriched = enrichNotification({
       id: notification.id,
       type: data.type,
       data: data,
       read: false,
-      createdAt: notification.createdAt.toISOString(),
-    };
+      createdAt: notification.createdAt,
+    });
 
     // Always send via SSE for real-time in-app delivery
-    const sseSent = sendToUser(userId, notificationPayload);
+    const sseSent = sendToUser(userId, enriched);
     console.log(`[Notification] SSE delivery for user ${userId}: ${sseSent ? "sent" : "no active connections"}`);
 
     // Check user's notification preference before sending FCM
@@ -550,3 +550,90 @@ function getNotificationBody(
       return "You have a new notification";
   }
 }
+
+/**
+ * Get notification image/icon based on type and data
+ */
+function getNotificationImage(
+  type: string,
+  data: Record<string, any>
+): string | null {
+  switch (type) {
+    case "chat.message":
+      return data.sender_image || null;
+    case "parent_link_request":
+    case "unlink_request":
+      return data.child?.profileImg || null;
+    case "parent_link_accepted":
+    case "parent_link_request_accepted":
+    case "parent_link_declined":
+    case "parent_link_request_declined":
+      return data.parent?.profileImg || null;
+    // Security types get a specific icon or flag in UI usually
+    case "security_new_device_blocked":
+    case "security_device_verified":
+    case "security_password_changed":
+    case "security_account_locked":
+      return "security-shield-icon";
+    default:
+      return null;
+  }
+}
+
+/**
+ * Get notification action (Deep link info)
+ */
+function getNotificationAction(
+  type: string,
+  data: Record<string, any>
+): { type: string; target: string; params?: Record<string, any> } | null {
+  switch (type) {
+    case "chat.message":
+      return {
+        type: "navigate",
+        target: "chat-detail",
+        params: { conversationId: data.conversation_id },
+      };
+    case "parent_link_request":
+      return {
+        type: "navigate",
+        target: "link-requests",
+        params: { requestId: data.requestId },
+      };
+    case "unlink_request":
+      return {
+        type: "navigate",
+        target: "unlink-requests",
+        params: { requestId: data.requestId },
+      };
+    case "security_new_device_blocked":
+      return {
+        type: "navigate",
+        target: "security-settings",
+      };
+    default:
+      return null;
+  }
+}
+
+/**
+ * Enriches notification with UI-ready fields
+ */
+export function enrichNotification(notification: any) {
+  const data = typeof notification.data === 'string'
+    ? JSON.parse(notification.data)
+    : (notification.data || {});
+
+  return {
+    id: notification.id,
+    type: notification.type,
+    title: getNotificationTitle(notification.type, data),
+    body: getNotificationBody(notification.type, data),
+    image: getNotificationImage(notification.type, data),
+    action: getNotificationAction(notification.type, data),
+    data: data, // Keep raw data for backward compatibility
+    read: notification.read,
+    createdAt: notification.createdAt,
+  };
+}
+

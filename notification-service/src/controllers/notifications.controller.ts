@@ -65,8 +65,12 @@ export const getNotifications = async (
 
     const totalPages = Math.ceil(total / limitNum);
 
+    // Enrich notifications for the UI
+    const { enrichNotification } = await import("../utils/notifications");
+    const enrichedNotifications = notifications.map(n => enrichNotification(n));
+
     res.status(200).json({
-      data: notifications,
+      data: enrichedNotifications,
       pagination: {
         page: pageNum,
         limit: limitNum,
@@ -264,7 +268,7 @@ export const publishNotificationEndpoint = async (
   try {
     console.log(`[Notification Controller] Received request body:`, JSON.stringify(req.body));
     console.log(`[Notification Controller] Headers:`, JSON.stringify(req.headers));
-    
+
     const { userId, type, ...data } = req.body;
 
     if (!userId || !type) {
