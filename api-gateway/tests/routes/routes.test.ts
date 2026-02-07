@@ -32,7 +32,7 @@ describe("Proxy Routes", () => {
     jest.clearAllMocks();
     app = express();
     config = mockConfig();
-    
+
     // Get reference to the mocked proxy function
     proxy = require("express-http-proxy") as jest.Mock;
   });
@@ -54,20 +54,20 @@ describe("Proxy Routes", () => {
             // Reset mocks
             proxy.mockClear();
             app = express();
-            
+
             // Create config with random URLs
             const testConfig = mockConfig({
               services: {
-                auth: {
+                auth: [{
                   name: "auth-service",
                   url: authUrl,
                   healthPath: "/health",
-                },
-                notification: {
+                }],
+                notification: [{
                   name: "notification-service",
                   url: notificationUrl,
                   healthPath: "/health",
-                },
+                }],
               },
             });
 
@@ -110,13 +110,13 @@ describe("Proxy Routes", () => {
       const calls = proxy.mock.calls;
 
       // First call: /api/v1/notifications -> notification service
-      expect(calls[0][0]).toBe(config.services.notification.url);
+      expect(calls[0][0]).toBe(config.services.notification[0].url);
 
       // Second call: /api/v1/location/request -> notification service
-      expect(calls[1][0]).toBe(config.services.notification.url);
+      expect(calls[1][0]).toBe(config.services.notification[0].url);
 
       // Third call: / -> auth service (catch-all)
-      expect(calls[2][0]).toBe(config.services.auth.url);
+      expect(calls[2][0]).toBe(config.services.auth[0].url);
     });
 
     it("should configure path preservation for all proxy routes", () => {
@@ -151,7 +151,7 @@ describe("Proxy Routes", () => {
     /**
      * Requirements: 5.1, 5.2, 5.3, 5.5
      */
-    
+
     it("should not proxy the /health route", () => {
       setupRoutes(app, config);
 
@@ -161,13 +161,13 @@ describe("Proxy Routes", () => {
       // Verify the routes that were proxied
       const calls = proxy.mock.calls;
       const targets = calls.map(call => call[0]);
-      
+
       // None of the proxy targets should be for /health
       // (health is handled directly by the gateway, not proxied)
       expect(targets).toEqual([
-        config.services.notification.url,
-        config.services.notification.url,
-        config.services.auth.url,
+        config.services.notification[0].url,
+        config.services.notification[0].url,
+        config.services.auth[0].url,
       ]);
     });
 
@@ -177,8 +177,8 @@ describe("Proxy Routes", () => {
       const calls = proxy.mock.calls;
 
       // First proxy call should be for /api/v1/notifications
-      expect(calls[0][0]).toBe(config.services.notification.url);
-      
+      expect(calls[0][0]).toBe(config.services.notification[0].url);
+
       // Verify it has path preservation configured
       expect(calls[0][1]).toHaveProperty("proxyReqPathResolver");
       expect(typeof calls[0][1].proxyReqPathResolver).toBe("function");
@@ -190,8 +190,8 @@ describe("Proxy Routes", () => {
       const calls = proxy.mock.calls;
 
       // Second proxy call should be for /api/v1/location/request
-      expect(calls[1][0]).toBe(config.services.notification.url);
-      
+      expect(calls[1][0]).toBe(config.services.notification[0].url);
+
       // Verify it has path preservation configured
       expect(calls[1][1]).toHaveProperty("proxyReqPathResolver");
       expect(typeof calls[1][1].proxyReqPathResolver).toBe("function");
@@ -203,8 +203,8 @@ describe("Proxy Routes", () => {
       const calls = proxy.mock.calls;
 
       // Third proxy call should be the catch-all to auth service
-      expect(calls[2][0]).toBe(config.services.auth.url);
-      
+      expect(calls[2][0]).toBe(config.services.auth[0].url);
+
       // Verify it has path preservation configured
       expect(calls[2][1]).toHaveProperty("proxyReqPathResolver");
       expect(typeof calls[2][1].proxyReqPathResolver).toBe("function");
@@ -219,16 +219,16 @@ describe("Proxy Routes", () => {
       // 1. /api/v1/notifications (specific)
       // 2. /api/v1/location/request (specific)
       // 3. / (catch-all, must be last)
-      
+
       expect(calls.length).toBe(3);
-      
+
       // First two should be notification service (specific routes)
-      expect(calls[0][0]).toBe(config.services.notification.url);
-      expect(calls[1][0]).toBe(config.services.notification.url);
-      
+      expect(calls[0][0]).toBe(config.services.notification[0].url);
+      expect(calls[1][0]).toBe(config.services.notification[0].url);
+
       // Last should be auth service (catch-all)
-      expect(calls[2][0]).toBe(config.services.auth.url);
-      
+      expect(calls[2][0]).toBe(config.services.auth[0].url);
+
       // This order ensures that:
       // - /api/v1/notifications requests go to notification service
       // - /api/v1/location/request requests go to notification service
@@ -277,7 +277,7 @@ describe("Proxy Routes", () => {
                 fc.constantFrom("/api/v1/notifications/", "/api/v1/location/request/", "/auth/", "/users/"),
                 fc.uuid()
               ).map(([base, id]) => `${base}${id}`),
-              
+
               // Paths with query parameters
               fc.tuple(
                 fc.constantFrom("/api/v1/notifications", "/api/v1/location/request", "/auth/login", "/users/profile"),
@@ -286,7 +286,7 @@ describe("Proxy Routes", () => {
                   value: fc.string({ minLength: 1, maxLength: 20 })
                 })
               ).map(([path, param]) => `${path}?${param.key}=${param.value}`),
-              
+
               // Simple paths
               fc.constantFrom(
                 "/api/v1/notifications",
@@ -296,7 +296,7 @@ describe("Proxy Routes", () => {
                 "/users/profile",
                 "/users/settings"
               ),
-              
+
               // Nested paths
               fc.tuple(
                 fc.constantFrom("/api/v1/", "/auth/", "/users/"),
@@ -350,14 +350,14 @@ describe("Proxy Routes", () => {
               errorCode: fc.constantFrom("ECONNREFUSED", "ENOTFOUND", "EHOSTUNREACH"),
               message: fc.string({ minLength: 5, maxLength: 50 }),
             }),
-            
+
             // Scenario 2: Timeout error
             fc.record({
               type: fc.constant("timeout" as const),
               errorCode: fc.constant("ETIMEDOUT"),
               message: fc.constant("Request timeout"),
             }),
-            
+
             // Scenario 3: Upstream returns error status
             fc.record({
               type: fc.constant("error_response" as const),

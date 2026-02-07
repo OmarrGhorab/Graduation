@@ -5,7 +5,7 @@ import { Request, Response, NextFunction } from 'express';
  */
 export function mockRequest(overrides: Partial<Request> = {}): Partial<Request> {
   const listeners: { [event: string]: Function[] } = {};
-  
+
   const req: Partial<Request> = {
     body: {},
     params: {},
@@ -142,16 +142,26 @@ export function mockConfig(overrides: any = {}) {
       allowedHeaders: ['Content-Type', 'Authorization'],
     },
     services: {
-      auth: {
+      auth: [{
         name: 'auth-service',
         url: 'http://localhost:3001',
         healthPath: '/health',
-      },
-      notification: {
+      }],
+      notification: [{
         name: 'notification-service',
         url: 'http://localhost:3002',
         healthPath: '/health',
-      },
+      }],
+      chat: [{
+        name: 'chat-service',
+        url: 'http://localhost:3003',
+        healthPath: '/health',
+      }],
+      ws: [{
+        name: 'ws-gateway',
+        url: 'http://localhost:8001',
+        healthPath: '/health',
+      }],
     },
     security: {
       arcjetKey: 'test-key',

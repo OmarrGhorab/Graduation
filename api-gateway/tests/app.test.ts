@@ -21,7 +21,7 @@ describe("Application Bootstrap Integration Tests", () => {
   describe("App Creation", () => {
     it("should create app successfully with valid config", () => {
       const config = mockConfig();
-      const app = createApp(config);
+      const { app } = createApp(config);
 
       expect(app).toBeDefined();
       expect(typeof app).toBe("function"); // Express app is a function
@@ -52,7 +52,8 @@ describe("Application Bootstrap Integration Tests", () => {
 
     beforeEach(() => {
       const config = mockConfig();
-      app = createApp(config);
+      const result = createApp(config);
+      app = result.app;
     });
 
     it("should apply compression middleware", async () => {
@@ -95,7 +96,8 @@ describe("Application Bootstrap Integration Tests", () => {
           allowedHeaders: ["Content-Type", "Authorization"],
         },
       });
-      app = createApp(config);
+      const result = createApp(config);
+      app = result.app;
 
       const response = await request(app)
         .get("/health")
@@ -121,7 +123,8 @@ describe("Application Bootstrap Integration Tests", () => {
           arcjetEnabled: false, // Disabled for testing
         },
       });
-      app = createApp(config);
+      const result = createApp(config);
+      app = result.app;
 
       const response = await request(app).get("/health");
 
@@ -135,7 +138,8 @@ describe("Application Bootstrap Integration Tests", () => {
 
     beforeEach(() => {
       const config = mockConfig();
-      app = createApp(config);
+      const result = createApp(config);
+      app = result.app;
     });
 
     it("should register /health route", async () => {
@@ -186,7 +190,8 @@ describe("Application Bootstrap Integration Tests", () => {
 
     beforeEach(() => {
       const config = mockConfig();
-      app = createApp(config);
+      const result = createApp(config);
+      app = result.app;
     });
 
     it("should have error handler as last middleware", async () => {
@@ -231,7 +236,7 @@ describe("Application Bootstrap Integration Tests", () => {
           allowedHeaders: ["Content-Type"],
         },
       });
-      const app = createApp(config);
+      const { app } = createApp(config);
 
       const response = await request(app)
         .get("/health")
@@ -246,7 +251,7 @@ describe("Application Bootstrap Integration Tests", () => {
 
     it("should maintain middleware order", async () => {
       const config = mockConfig();
-      const app = createApp(config);
+      const { app } = createApp(config);
 
       // Health endpoint should work, demonstrating middleware order is correct
       const response = await request(app).get("/health");
