@@ -267,7 +267,7 @@ export async function publishNotification(
     console.log(`[Notification] Published notification for user ${userId}, type: ${data.type}, duration: ${duration}ms`);
   } catch (error) {
     const duration = Date.now() - startTime;
-    console.error(`[Notification] Error publishing notification for user ${userId}, type: ${data.type}, duration: ${duration}ms`, error);
+    console.error(`[Notification] Error publishing notification for user ${userId}, type: ${incomingData.type}, duration: ${duration}ms`, error);
     if (error instanceof Error) {
       console.error(`[Notification] Error details: ${error.message}`, error.stack);
     }
