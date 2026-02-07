@@ -24,14 +24,16 @@ type CreateDirectRequest struct {
 }
 
 type CreateGroupRequest struct {
-	Name      string   `json:"name"`
-	MemberIDs []string `json:"member_ids"`
+	Name        string   `json:"name"`
+	Description string   `json:"description"`
+	MemberIDs   []string `json:"member_ids"`
 }
 
 type SendMessageRequest struct {
 	Content   string             `json:"content"`
 	Type      models.MessageType `json:"type"`
 	MediaURLs []string           `json:"media_urls"`
+	ReplyToID *string            `json:"reply_to_id"`
 }
 
 type TypingRequest struct {
@@ -76,7 +78,7 @@ func (h *Handler) CreateGroupConversation(c *fiber.Ctx) error {
 		return c.Status(400).JSON(fiber.Map{"error": "Invalid request"})
 	}
 
-	conv, err := h.svc.CreateGroupConversation(userID, req.Name, req.MemberIDs)
+	conv, err := h.svc.CreateGroupConversation(userID, req.Name, req.Description, req.MemberIDs)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 	}
@@ -85,7 +87,25 @@ func (h *Handler) CreateGroupConversation(c *fiber.Ctx) error {
 
 func (h *Handler) GetUserConversations(c *fiber.Ctx) error {
 	userID := c.Locals("user_id").(string)
-	convs, err := h.svc.GetUserConversations(userID)
+	
+	// Parse query params
+	convType := c.Query("type")      // "DIRECT" or "GROUP"
+	search := c.Query("q")           // Search query
+	limit := 50
+	offset := 0
+	
+	if l := c.Query("limit"); l != "" {
+		if val, err := strconv.Atoi(l); err == nil && val > 0 {
+			limit = val
+		}
+	}
+	if o := c.Query("offset"); o != "" {
+		if val, err := strconv.Atoi(o); err == nil && val >= 0 {
+			offset = val
+		}
+	}
+	
+	convs, err := h.svc.GetUserConversations(userID, convType, search, limit, offset)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 	}
@@ -112,11 +132,19 @@ func (h *Handler) SendMessage(c *fiber.Ctx) error {
 		return c.Status(400).JSON(fiber.Map{"error": "Invalid request"})
 	}
 
-	msg, err := h.svc.SendMessage(conversationID, userID, req.Content, req.Type, pq.StringArray(req.MediaURLs))
+	msg, err := h.svc.SendMessage(conversationID, userID, req.Content, req.Type, pq.StringArray(req.MediaURLs), req.ReplyToID)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 	}
-	return c.JSON(msg)
+	
+	// Enrich the response with sender and reply_to details
+	enrichedMsg, err := h.svc.EnrichMessageResponse(msg)
+	if err != nil {
+		// If enrichment fails, return basic message
+		return c.JSON(msg)
+	}
+	
+	return c.JSON(enrichedMsg)
 }
 
 func (h *Handler) GetMessages(c *fiber.Ctx) error {
@@ -125,6 +153,7 @@ func (h *Handler) GetMessages(c *fiber.Ctx) error {
 
 	limit := 50
 	offset := 0
+	search := c.Query("search")
 
 	if l := c.Query("limit"); l != "" {
 		if val, err := strconv.Atoi(l); err == nil {
@@ -137,7 +166,7 @@ func (h *Handler) GetMessages(c *fiber.Ctx) error {
 		}
 	}
 
-	msgs, err := h.svc.GetMessages(conversationID, userID, limit, offset)
+	msgs, err := h.svc.GetMessages(conversationID, userID, search, limit, offset)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 	}
@@ -166,10 +195,16 @@ func (h *Handler) PinMessage(c *fiber.Ctx) error {
 	conversationID := c.Params("id")
 	messageID := c.Params("messageId")
 
-	if err := h.svc.PinMessage(conversationID, messageID, userID); err != nil {
+	fmt.Printf("PIN MESSAGE REQUEST - ConvID: %s, MsgID: %s, UserID: %s\n", conversationID, messageID, userID)
+
+	pinnedMsg, err := h.svc.PinMessage(conversationID, messageID, userID)
+	if err != nil {
+		fmt.Printf("PIN MESSAGE ERROR: %v\n", err)
 		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 	}
-	return c.SendStatus(200)
+	
+	fmt.Printf("PIN MESSAGE SUCCESS - Response: %+v\n", pinnedMsg)
+	return c.JSON(pinnedMsg)
 }
 
 func (h *Handler) UnpinMessage(c *fiber.Ctx) error {
@@ -185,16 +220,24 @@ func (h *Handler) UnpinMessage(c *fiber.Ctx) error {
 
 func (h *Handler) GetPinnedMessages(c *fiber.Ctx) error {
 	userID := c.Locals("user_id").(string)
-	conversationID := c.Params("id") // Note: Route structure might be messages/pinned or conversation/:id/pinned
-
-	// Based on Router: messages.Get("/pinned", hdlrs.Message.GetPinnedMessages)
-	// Which is /api/v1/conversations/:id/messages/pinned
+	conversationID := c.Params("id")
 
 	pins, err := h.svc.GetPinnedMessages(conversationID, userID)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 	}
 	return c.JSON(pins)
+}
+
+func (h *Handler) GetMediaCollection(c *fiber.Ctx) error {
+	userID := c.Locals("user_id").(string)
+	conversationID := c.Params("id")
+
+	media, err := h.svc.GetMediaCollection(conversationID, userID)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.JSON(media)
 }
 
 func (h *Handler) PresignMedia(c *fiber.Ctx) error {
@@ -285,4 +328,49 @@ func (h *Handler) DeleteConversation(c *fiber.Ctx) error {
 		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 	}
 	return c.JSON(fiber.Map{"message": "Conversation deleted successfully"})
+}
+
+func (h *Handler) DeleteMessage(c *fiber.Ctx) error {
+	userID := c.Locals("user_id").(string)
+	conversationID := c.Params("id")
+	messageID := c.Params("messageId")
+
+	if err := h.svc.DeleteMessage(conversationID, messageID, userID); err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.JSON(fiber.Map{"message": "Message deleted successfully"})
+}
+
+// --- Read Receipts ---
+
+func (h *Handler) MarkAsRead(c *fiber.Ctx) error {
+	userID := c.Locals("user_id").(string)
+	conversationID := c.Params("id")
+
+	if err := h.svc.MarkAsRead(conversationID, userID); err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.JSON(fiber.Map{"message": "Marked as read"})
+}
+
+func (h *Handler) GetUnreadCount(c *fiber.Ctx) error {
+	userID := c.Locals("user_id").(string)
+	conversationID := c.Params("id")
+
+	count, err := h.svc.GetUnreadCount(conversationID, userID)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.JSON(fiber.Map{"unread_count": count})
+}
+
+func (h *Handler) MarkMessageAsRead(c *fiber.Ctx) error {
+	userID := c.Locals("user_id").(string)
+	conversationID := c.Params("id")
+	messageID := c.Params("messageId")
+
+	if err := h.svc.MarkMessageAsRead(conversationID, messageID, userID); err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.JSON(fiber.Map{"message": "Message marked as read"})
 }

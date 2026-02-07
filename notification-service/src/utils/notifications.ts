@@ -154,7 +154,7 @@ export async function updateNotificationsByType(
 
     for (const notification of notifications) {
       const data = notification.data as Record<string, any>;
-      
+
       // Check if notification matches the criteria
       const matches = Object.entries(matchCriteria).every(([key, value]) => {
         // Handle nested keys like "child.id"
@@ -191,13 +191,20 @@ export async function updateNotificationsByType(
  */
 export async function publishNotification(
   userId: string,
-  data: {
+  incomingData: {
     type: string;
     [key: string]: any;
   }
 ): Promise<void> {
   const startTime = Date.now();
   try {
+    // Flatten data if it contains a nested 'data' property (common from other services like chat-service)
+    let data = { ...incomingData };
+    if (data.data && typeof data.data === 'object' && !Array.isArray(data.data)) {
+      const nested = data.data;
+      delete data.data;
+      data = { ...data, ...nested };
+    }
     // Check for duplicate notification in the last 30 seconds
     // This prevents duplicate notifications from rapid retries or double-clicks
     const thirtySecondsAgo = new Date(Date.now() - 30 * 1000);
@@ -216,7 +223,7 @@ export async function publishNotification(
       const isSameDevice = data.newDevice && existingData.newDevice &&
         data.newDevice.name === existingData.newDevice?.name &&
         data.newDevice.platform === existingData.newDevice?.platform;
-      
+
       if (isSameDevice || data.type === recentDuplicate.type) {
         console.log(`[Notification] Skipping duplicate notification for user ${userId}, type: ${data.type} (sent ${Math.round((Date.now() - recentDuplicate.createdAt.getTime()) / 1000)}s ago)`);
         return; // Skip duplicate
@@ -247,7 +254,7 @@ export async function publishNotification(
 
     // Check user's notification preference before sending FCM
     const notificationsEnabled = await getUserNotificationPreference(userId);
-    
+
     if (notificationsEnabled) {
       // User has notifications enabled - send FCM push
       await sendFcmNotification(userId, data);
@@ -308,11 +315,12 @@ async function sendFcmNotification(
       }
     });
 
-    const title = data.title || getNotificationTitle(data.type);
+    const title = data.title || getNotificationTitle(data.type, data);
     const body = data.body || getNotificationBody(data.type, data);
-    
-    // Extract image URL if available (for profile images from child or parent)
-    const imageUrl = data.child?.profileImg || data.parent?.profileImg || data.profileImg || data.imageUrl || null;
+
+    // Extract image URL if available
+    // For chat messages, use sender_image; for other notifications, use child/parent profile images
+    const imageUrl = data.sender_image || data.child?.profileImg || data.parent?.profileImg || data.profileImg || data.imageUrl || null;
 
     // Prepare data payload (all values must be strings)
     const dataPayload: Record<string, string> = {
@@ -350,7 +358,7 @@ async function sendFcmNotification(
           payload: {
             aps: {
               sound: "default",
-              badge: 1,
+              badge: parseInt(data.unread_count) || 1,
               contentAvailable: true,
             },
           },
@@ -467,7 +475,12 @@ async function sendFcmNotification(
 /**
  * Get notification title based on type
  */
-function getNotificationTitle(type: string): string {
+function getNotificationTitle(type: string, data?: Record<string, any>): string {
+  // For chat messages, use conversation name as title
+  if (type === "chat.message" && data) {
+    return data.conversation_name || data.sender_name || "New Message";
+  }
+
   const titles: Record<string, string> = {
     parent_link_request: "New Parent Link Request",
     parent_link_accepted: "Parent Link Accepted",
@@ -482,6 +495,8 @@ function getNotificationTitle(type: string): string {
     security_device_verified: "New Device Added",
     security_password_changed: "Password Changed",
     security_account_locked: "Account Locked",
+    // Chat notifications
+    "chat.message": "New Message",
   };
 
   return titles[type] || "New Notification";
@@ -518,6 +533,19 @@ function getNotificationBody(
       return "Your password was recently changed. If you didn't do this, please contact support immediately.";
     case "security_account_locked":
       return "Your account has been locked due to suspicious activity. Please verify your identity to unlock.";
+    // Chat notifications
+    case "chat.message":
+      const senderName = data.sender_name || "Someone";
+      const body = data.body || data.content || "sent you a message";
+
+      // If it's a group chat, show "Sender: Message"
+      // In chat-service, for direct chats, conversation_name is set to sender_name
+      if (data.conversation_name && data.conversation_name !== data.sender_name) {
+        return `${senderName}: ${body}`;
+      }
+
+      // For direct chats, conversation title is already the sender name, so just show body
+      return body;
     default:
       return "You have a new notification";
   }

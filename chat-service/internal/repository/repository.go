@@ -1,6 +1,8 @@
 package repository
 
 import (
+	"time"
+	
 	"github.com/graduation/chat-service/internal/models"
 	"gorm.io/gorm"
 )
@@ -131,23 +133,60 @@ func (r *Repository) DeleteConversation(conversationID string) error {
 // --- Messages ---
 
 func (r *Repository) CreateMessage(m *models.Message) error {
-	return r.db.Create(m).Error
+	// Start a transaction to create message and update conversation
+	tx := r.db.Begin()
+	
+	// Create the message
+	if err := tx.Create(m).Error; err != nil {
+		tx.Rollback()
+		return err
+	}
+	
+	// Update the conversation's updated_at timestamp
+	if err := tx.Model(&models.Conversation{}).
+		Where("id = ?", m.ConversationID).
+		Update("updated_at", time.Now()).Error; err != nil {
+		tx.Rollback()
+		return err
+	}
+	
+	return tx.Commit().Error
 }
 
-func (r *Repository) GetMessages(conversationID string, limit, offset int) ([]models.Message, error) {
+func (r *Repository) GetMessages(conversationID string, search string, limit, offset int) ([]models.Message, error) {
 	var messages []models.Message
-	err := r.db.Where("conversation_id = ?", conversationID).
-		Order("created_at desc").
+	query := r.db.Where("conversation_id = ? AND is_deleted = ?", conversationID, false)
+	
+	// Apply search filter if provided
+	if search != "" {
+		query = query.Where("content ILIKE ?", "%"+search+"%")
+	}
+	
+	err := query.Order("created_at desc").
+		Limit(limit).
+		Offset(offset).
 		Find(&messages).Error
 	return messages, err
 }
 
+func (r *Repository) GetMessageByID(messageID string) (*models.Message, error) {
+	var message models.Message
+	err := r.db.Where("id = ?", messageID).First(&message).Error
+	if err != nil {
+		return nil, err
+	}
+	return &message, nil
+}
+
+func (r *Repository) DeleteMessage(messageID string) error {
+	// Soft delete - set is_deleted to true
+	return r.db.Model(&models.Message{}).
+		Where("id = ?", messageID).
+		Update("is_deleted", true).Error
+}
+
 func (r *Repository) PinMessage(pm *models.PinnedMessage) error {
-	// 1. Unpin any existing pins (if we enforce 1 pin per conv, or just let it exist)
-	// Requirement: "same functionality" often implies single pin or list.
-	// Original code (Step 24) showed "UnpinAllInConversation".
-	// So we enforce single pin.
-	r.db.Where("conversation_id = ?", pm.ConversationID).Delete(&models.PinnedMessage{})
+	// Allow multiple pinned messages per conversation
 	return r.db.Create(pm).Error
 }
 
@@ -158,6 +197,87 @@ func (r *Repository) UnpinMessage(conversationID, messageID string) error {
 
 func (r *Repository) GetPinnedMessages(conversationID string) ([]models.PinnedMessage, error) {
 	var pins []models.PinnedMessage
-	err := r.db.Preload("Message").Where("conversation_id = ?", conversationID).Find(&pins).Error
+	err := r.db.Preload("Message").Where("conversation_id = ?", conversationID).Order("pinned_at desc").Find(&pins).Error
 	return pins, err
+}
+
+// Get messages by type for media collection
+func (r *Repository) GetMessagesByType(conversationID string, messageType models.MessageType) ([]models.Message, error) {
+	var messages []models.Message
+	err := r.db.Where("conversation_id = ? AND type = ? AND is_deleted = ?", conversationID, messageType, false).
+		Order("created_at desc").
+		Find(&messages).Error
+	return messages, err
+}
+
+// Get messages with links (text messages containing URLs)
+func (r *Repository) GetMessagesWithLinks(conversationID string) ([]models.Message, error) {
+	var messages []models.Message
+	// Match messages containing http:// or https://
+	err := r.db.Where("conversation_id = ? AND type = ? AND is_deleted = ? AND (content LIKE ? OR content LIKE ?)", 
+		conversationID, models.Text, false, "%http://%", "%https://%").
+		Order("created_at desc").
+		Find(&messages).Error
+	return messages, err
+}
+
+// --- Read Receipts ---
+
+// MarkAsRead updates the last_read_at timestamp for a user in a conversation
+func (r *Repository) MarkAsRead(conversationID, userID string) error {
+	return r.db.Model(&models.ConversationMember{}).
+		Where("conversation_id = ? AND user_id = ?", conversationID, userID).
+		Update("last_read_at", time.Now()).Error
+}
+
+// GetUnreadCount returns the number of unread messages for a user in a conversation
+func (r *Repository) GetUnreadCount(conversationID, userID string) (int64, error) {
+	var member models.ConversationMember
+	if err := r.db.Where("conversation_id = ? AND user_id = ?", conversationID, userID).
+		First(&member).Error; err != nil {
+		return 0, err
+	}
+
+	var count int64
+	err := r.db.Model(&models.Message{}).
+		Where("conversation_id = ? AND sender_id != ? AND created_at > ? AND is_deleted = ?",
+			conversationID, userID, member.LastReadAt, false).
+		Count(&count).Error
+	
+	return count, err
+}
+
+// CreateReadReceipt creates a read receipt for a message
+func (r *Repository) CreateReadReceipt(messageID, userID string) error {
+	receipt := &models.ReadReceipt{
+		MessageID: messageID,
+		UserID:    userID,
+	}
+	// Use FirstOrCreate to avoid duplicates
+	return r.db.Where("message_id = ? AND user_id = ?", messageID, userID).
+		FirstOrCreate(receipt).Error
+}
+
+// GetReadReceipts returns all read receipts for a message
+func (r *Repository) GetReadReceipts(messageID string) ([]models.ReadReceipt, error) {
+	var receipts []models.ReadReceipt
+	err := r.db.Where("message_id = ?", messageID).Find(&receipts).Error
+	return receipts, err
+}
+
+// GetReadReceiptsForMessages returns read receipts for multiple messages
+func (r *Repository) GetReadReceiptsForMessages(messageIDs []string) (map[string][]models.ReadReceipt, error) {
+	var receipts []models.ReadReceipt
+	err := r.db.Where("message_id IN ?", messageIDs).Find(&receipts).Error
+	if err != nil {
+		return nil, err
+	}
+
+	// Group by message ID
+	result := make(map[string][]models.ReadReceipt)
+	for _, receipt := range receipts {
+		result[receipt.MessageID] = append(result[receipt.MessageID], receipt)
+	}
+	
+	return result, nil
 }

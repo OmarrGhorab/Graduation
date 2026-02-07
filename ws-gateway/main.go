@@ -31,8 +31,17 @@ func main() {
 	// 4. Fiber App
 	app := fiber.New()
 
+	// WebSocket Route
 	app.Use("/ws", handlers.WebSocketHandler(manager, cfg))
 	app.Get("/ws", websocket.New(handlers.WebSocketConnection(manager)))
+
+	// Presence Check Endpoint
+	app.Post("/api/presence", handlers.CheckPresenceHandler(manager, cfg))
+
+	// Health Check
+	app.Get("/health", func(c *fiber.Ctx) error {
+		return c.SendString("OK")
+	})
 
 	log.Printf("WS Gateway starting on port %s", cfg.Port)
 	if err := app.Listen(":" + cfg.Port); err != nil {

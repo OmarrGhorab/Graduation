@@ -31,7 +31,9 @@ func main() {
 	repo := repository.NewRepository(db)
 	mediaSvc := service.NewMediaService(cfg)
 	userSvc := service.NewUserService(cfg.AuthServiceURL, cfg.InternalServiceSecret)
-	svc := service.NewService(repo, producer, mediaSvc, userSvc)
+	presenceSvc := service.NewPresenceService(cfg.WSGatewayURL)
+	notificationSvc := service.NewNotificationService(cfg.NotificationServiceURL, cfg.InternalServiceSecret)
+	svc := service.NewService(repo, producer, mediaSvc, userSvc, presenceSvc, notificationSvc)
 	h := handlers.NewHandler(svc)
 	auth := middleware.NewAuthMiddleware(cfg)
 

@@ -43,8 +43,10 @@ func (c *Client) ReadPump() {
 
 func (c *Client) WritePump() {
 	ticker := time.NewTicker(50 * time.Second)
+	heartbeat := time.NewTicker(2 * time.Minute) // Refresh presence every 2 minutes
 	defer func() {
 		ticker.Stop()
+		heartbeat.Stop()
 		c.Conn.Close()
 	}()
 
@@ -63,6 +65,10 @@ func (c *Client) WritePump() {
 			if err := c.Conn.WriteMessage(websocket.PingMessage, nil); err != nil {
 				return
 			}
+
+		case <-heartbeat.C:
+			// Refresh user's online status in Redis
+			c.Manager.KeepAlive(c.UserID)
 		}
 	}
 }

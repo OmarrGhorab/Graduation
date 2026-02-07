@@ -17,11 +17,11 @@ func NewProducer(brokers []string) *Producer {
 	w := &kafka.Writer{
 		Addr:         kafka.TCP(brokers...),
 		Balancer:     &kafka.Hash{}, // Ensure ordering by Key (ConversationID)
-		Async:        false,          // Synchronous for immediate delivery
-		BatchSize:    1,              // Send immediately, don't batch
-		BatchTimeout: 1,              // 1ms timeout
-		RequiredAcks: 1,              // Wait for leader acknowledgment only
-		Compression:  kafka.Snappy,   // Fast compression
+		Async:        false,         // Synchronous for immediate delivery
+		BatchSize:    1,             // Send immediately, don't batch
+		BatchTimeout: 1,             // 1ms timeout
+		RequiredAcks: 1,             // Wait for leader acknowledgment only
+		Compression:  kafka.Snappy,  // Fast compression
 	}
 	return &Producer{writer: w}
 }
@@ -55,6 +55,21 @@ func (p *Producer) PublishTyping(event events.TypingEvent) error {
 
 	msg := kafka.Message{
 		Topic: events.TopicTyping,
+		Key:   []byte(event.ConversationID),
+		Value: payload,
+	}
+
+	return p.writer.WriteMessages(context.Background(), msg)
+}
+
+func (p *Producer) PublishConversationRead(event events.ConversationReadEvent) error {
+	payload, err := json.Marshal(event)
+	if err != nil {
+		return err
+	}
+
+	msg := kafka.Message{
+		Topic: events.TopicConversationRead,
 		Key:   []byte(event.ConversationID),
 		Value: payload,
 	}

@@ -62,3 +62,28 @@ func WebSocketConnection(manager *wsCore.Manager) func(*websocket.Conn) {
 		client.ReadPump()
 	}
 }
+
+// CheckPresence returns online status for multiple users
+func CheckPresenceHandler(manager *wsCore.Manager, cfg *config.Config) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		// Parse user IDs from query or body
+		var req struct {
+			UserIDs []string `json:"user_ids"`
+		}
+		
+		if err := c.BodyParser(&req); err != nil {
+			return c.Status(400).JSON(fiber.Map{"error": "Invalid request"})
+		}
+
+		if len(req.UserIDs) == 0 {
+			return c.Status(400).JSON(fiber.Map{"error": "user_ids is required"})
+		}
+
+		// Get online status for all requested users
+		onlineStatus := manager.GetOnlineUsers(req.UserIDs)
+
+		return c.JSON(fiber.Map{
+			"presence": onlineStatus,
+		})
+	}
+}

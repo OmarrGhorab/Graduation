@@ -28,11 +28,20 @@ func SetupRoutes(app *fiber.App, h *handlers.Handler, auth *middleware.AuthMiddl
 	messages := conversations.Group("/:id/messages")
 	messages.Post("/", h.SendMessage)
 	messages.Get("/", h.GetMessages)
+	messages.Delete("/:messageId", h.DeleteMessage)
+
+	// Read Receipts
+	conversations.Post("/:id/read", h.MarkAsRead)
+	conversations.Get("/:id/unread", h.GetUnreadCount)
+	conversations.Post("/:id/messages/:messageId/read", h.MarkMessageAsRead)
 
 	// Message Actions (Pinning)
 	messages.Get("/pinned", h.GetPinnedMessages)
 	conversations.Post("/:id/messages/:messageId/pin", h.PinMessage)
 	conversations.Delete("/:id/messages/:messageId/pin", h.UnpinMessage)
+
+	// Media Collection
+	conversations.Get("/:id/media", h.GetMediaCollection)
 
 	// Typing
 	api.Post("/typing", auth.Protected(), h.SetTyping)
