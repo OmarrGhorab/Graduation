@@ -23,9 +23,10 @@ func (h *CourseHandler) RegisterRoutes(router fiber.Router) {
 	courses := router.Group("/courses")
 	courses.Post("/", h.CreateCourse)
 	courses.Get("/", h.ListCourses)
-	courses.Get("/:id", h.GetCourse)
+	// Specific routes MUST come before parameterized routes
 	courses.Get("/my", h.GetMyCourses)
 	courses.Get("/my-subjects", h.GetMySubjects)
+	courses.Get("/:id", h.GetCourse)
 	courses.Patch("/:id", h.UpdateCourse)
 	courses.Post("/:id/enroll", h.EnrollStudent)
 	courses.Post("/:id/assistants", h.AddAssistant)
