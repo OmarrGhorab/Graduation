@@ -1,8 +1,6 @@
 # Docker Compose for Graduation Project - All Microservices
 # Supports multiple instances per service for load balancing
 
-version: "3.8"
-
 services:
   # ============ DATABASES ============
   postgres:
@@ -46,11 +44,13 @@ services:
       - NOTIFICATION_SERVICE_URLS=http://notification-service-1:6003,http://notification-service-2:6013,http://notification-service-3:6023
       - CHAT_SERVICE_URLS=http://chat-service-1:6004,http://chat-service-2:6014,http://chat-service-3:6024
       - WS_GATEWAY_URLS=http://ws-gateway-1:6005,http://ws-gateway-2:6015,http://ws-gateway-3:6025
+      - COURSES_SERVICE_URLS=http://courses-service-1:8085,http://courses-service-2:8085
     depends_on:
       - auth-service-1
       - notification-service-1
       - chat-service-1
       - ws-gateway-1
+      - courses-service-1
 
   # ============ AUTH SERVICE (3 instances) ============
   auth-service-1:
@@ -114,6 +114,8 @@ services:
       - FIREBASE_PROJECT_ID=${FIREBASE_PROJECT_ID}
       - FIREBASE_PRIVATE_KEY=${FIREBASE_PRIVATE_KEY}
       - FIREBASE_CLIENT_EMAIL=${FIREBASE_CLIENT_EMAIL}
+      - COURSES_SERVICE_URL=http://courses-service-1:8085
+      - KAFKA_BROKERS=kafka:29092
     depends_on:
       postgres:
         condition: service_healthy
@@ -135,6 +137,8 @@ services:
       - FIREBASE_PROJECT_ID=${FIREBASE_PROJECT_ID}
       - FIREBASE_PRIVATE_KEY=${FIREBASE_PRIVATE_KEY}
       - FIREBASE_CLIENT_EMAIL=${FIREBASE_CLIENT_EMAIL}
+      - COURSES_SERVICE_URL=http://courses-service-1:8085
+      - KAFKA_BROKERS=kafka:29092
     depends_on:
       postgres:
         condition: service_healthy
@@ -156,6 +160,8 @@ services:
       - FIREBASE_PROJECT_ID=${FIREBASE_PROJECT_ID}
       - FIREBASE_PRIVATE_KEY=${FIREBASE_PRIVATE_KEY}
       - FIREBASE_CLIENT_EMAIL=${FIREBASE_CLIENT_EMAIL}
+      - COURSES_SERVICE_URL=http://courses-service-1:8085
+      - KAFKA_BROKERS=kafka:29092
     depends_on:
       postgres:
         condition: service_healthy
@@ -315,6 +321,73 @@ services:
         condition: service_healthy
       kafka:
         condition: service_started
+
+  # ============ COURSES & ATTENDANCE SERVICE (2 instances) ============
+  courses-service-1:
+    build: ./courses-attendance-service
+    ports:
+      - "8085:8085"
+    environment:
+      - SERVER_PORT=8085
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_USER=graduation
+      - DB_PASSWORD=graduation_secret
+      - DB_NAME=graduation
+      - DB_SSL_MODE=disable
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - KAFKA_BROKERS=kafka:29092
+      - AUTH_SERVICE_URL=http://auth-service-1:6001
+      - INTERNAL_SERVICE_SECRET=1262c8c0eab801906cf8c1a0493897ff194f4948fde08cb453ad939578123b8596606d1d4871c4e0d1a46d5ecbd5dbcd09491cb0831fa808fcff4b98c9d67403
+      - QR_SIGNING_SECRET=1ce06e00180a568d716839e801a9f1430048386377709a349c869719488a0b0d3e52fef94c502b2801487c9f87178c54
+      - QR_ROTATION_INTERVAL_SECONDS=30
+      - QR_EXPIRY_SECONDS=35
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8085/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  courses-service-2:
+    build: ./courses-attendance-service
+    ports:
+      - "8086:8085"
+    environment:
+      - SERVER_PORT=8085
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_USER=graduation
+      - DB_PASSWORD=graduation_secret
+      - DB_NAME=graduation
+      - DB_SSL_MODE=disable
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - KAFKA_BROKERS=kafka:29092
+      - AUTH_SERVICE_URL=http://auth-service-2:6011
+      - INTERNAL_SERVICE_SECRET=1262c8c0eab801906cf8c1a0493897ff194f4948fde08cb453ad939578123b8596606d1d4871c4e0d1a46d5ecbd5dbcd09491cb0831fa808fcff4b98c9d67403
+      - QR_SIGNING_SECRET=1ce06e00180a568d716839e801a9f1430048386377709a349c869719488a0b0d3e52fef94c502b2801487c9f87178c54
+      - QR_ROTATION_INTERVAL_SECONDS=30
+      - QR_EXPIRY_SECONDS=35
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8085/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
 
 volumes:
   postgres_data:

@@ -23,6 +23,7 @@ const serviceIndexes: Record<string, number> = {
   notification: 0,
   chat: 0,
   ws: 0,
+  courses: 0,
 };
 
 /**
@@ -166,6 +167,25 @@ export function setupRoutes(app: Express, config: AppConfig): { wsProxy: any } {
   // Verify route hits
   app.get("/ws-test", (req, res) => {
     res.send("WS Path is reachable");
+  });
+
+  // Courses & Attendance service routes
+  const coursePaths = [
+    "/api/v1/courses",
+    "/api/v1/lessons",
+    "/api/v1/attendance",
+    "/api/v1/absences",
+    "/api/v1/progress",
+    "/api/v1/calendar",
+  ];
+
+  coursePaths.forEach(path => {
+    app.use(
+      path,
+      proxy(() => getNextServiceUrl(config.services.courses, "courses"), {
+        proxyReqPathResolver: (req) => req.originalUrl,
+      })
+    );
   });
 
   app.use("/ws", wsProxy);

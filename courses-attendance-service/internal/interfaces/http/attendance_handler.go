@@ -1,0 +1,310 @@
+package http
+
+import (
+	"errors"
+
+	attendanceApp "github.com/OmarrGhorab/courses-attendance-service/internal/application/attendance"
+	"github.com/OmarrGhorab/courses-attendance-service/internal/interfaces/http/dto"
+	"github.com/gofiber/fiber/v2"
+	"github.com/google/uuid"
+)
+
+// AttendanceHandler handles attendance-related HTTP requests
+type AttendanceHandler struct {
+	attendanceService *attendanceApp.Service
+}
+
+func NewAttendanceHandler(attendanceService *attendanceApp.Service) *AttendanceHandler {
+	return &AttendanceHandler{attendanceService: attendanceService}
+}
+
+func (h *AttendanceHandler) RegisterRoutes(router fiber.Router) {
+	attendance := router.Group("/attendance")
+	attendance.Post("/scan", h.ScanAttendance)
+	attendance.Get("/lesson/:id", h.GetLessonAttendance)
+	attendance.Get("/student/:id", h.GetStudentAttendance)
+
+	// Lesson QR management
+	router.Get("/lessons/:id/qr", h.GetCurrentQR)
+	router.Post("/lessons/:id/qr/rotate", h.RotateQR)
+}
+
+// ScanAttendance godoc
+// @Summary Scan QR code for attendance
+// @Tags attendance
+// @Accept json
+// @Produce json
+// @Param body body dto.ScanAttendanceRequest true "Scan data"
+// @Success 200 {object} dto.ScanAttendanceResponse
+// @Router /api/v1/attendance/scan [post]
+func (h *AttendanceHandler) ScanAttendance(c *fiber.Ctx) error {
+	var req dto.ScanAttendanceRequest
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"success": false,
+			"error":   "Invalid request body",
+		})
+	}
+
+	if err := ValidateStruct(req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"success": false,
+			"errors":  FormatValidationErrors(err),
+		})
+	}
+
+	studentID, err := getUserIDFromContext(c)
+	if err != nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"success": false,
+			"error":   "Unauthorized",
+		})
+	}
+
+	// Get request context
+	accessToken := c.Get("Authorization")
+	ip := c.IP()
+	userAgent := c.Get("User-Agent")
+
+	input := attendanceApp.ScanInput{
+		QRPayload:         req.QRPayload,
+		QRSignature:       req.QRSignature,
+		StudentID:         studentID,
+		DeviceID:          req.DeviceID,
+		DeviceFingerprint: req.DeviceFingerprint,
+		AttestationToken:  req.AttestationToken,
+		IP:                ip,
+		UserAgent:         userAgent,
+		Latitude:          req.Latitude,
+		Longitude:         req.Longitude,
+		AccessToken:       accessToken,
+	}
+
+	result, err := h.attendanceService.ScanAttendance(c.Context(), input)
+	if err != nil {
+		return handleAttendanceError(c, err)
+	}
+
+	return c.JSON(fiber.Map{
+		"success": true,
+		"data": dto.ScanAttendanceResponse{
+			Status:    string(result.Status),
+			ScannedAt: result.ScannedAt,
+			Distance:  result.Distance,
+			Message:   result.Message,
+		},
+	})
+}
+
+// GetLessonAttendance godoc
+// @Summary Get attendance records for a lesson
+// @Tags attendance
+// @Produce json
+// @Param id path string true "Lesson ID"
+// @Success 200 {array} dto.AttendanceRecordResponse
+// @Router /api/v1/attendance/lesson/{id} [get]
+func (h *AttendanceHandler) GetLessonAttendance(c *fiber.Ctx) error {
+	lessonID, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"success": false,
+			"error":   "Invalid lesson ID",
+		})
+	}
+
+	records, err := h.attendanceService.GetLessonAttendance(c.Context(), lessonID)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"success": false,
+			"error":   "Failed to fetch attendance records",
+		})
+	}
+
+	var responses []dto.AttendanceRecordResponse
+	for _, r := range records {
+		responses = append(responses, dto.ToAttendanceRecordResponse(&r))
+	}
+
+	return c.JSON(fiber.Map{
+		"success": true,
+		"data":    responses,
+	})
+}
+
+// GetStudentAttendance godoc
+// @Summary Get attendance records for a student
+// @Tags attendance
+// @Produce json
+// @Param id path string true "Student ID"
+// @Success 200 {array} dto.AttendanceRecordResponse
+// @Router /api/v1/attendance/student/{id} [get]
+func (h *AttendanceHandler) GetStudentAttendance(c *fiber.Ctx) error {
+	studentID, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"success": false,
+			"error":   "Invalid student ID",
+		})
+	}
+
+	records, err := h.attendanceService.GetStudentAttendance(c.Context(), studentID)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"success": false,
+			"error":   "Failed to fetch attendance records",
+		})
+	}
+
+	var responses []dto.AttendanceRecordResponse
+	for _, r := range records {
+		responses = append(responses, dto.ToAttendanceRecordResponse(&r))
+	}
+
+	return c.JSON(fiber.Map{
+		"success": true,
+		"data":    responses,
+	})
+}
+
+// GetCurrentQR godoc
+// @Summary Get current active QR token for a lesson
+// @Tags attendance
+// @Produce json
+// @Param id path string true "Lesson ID"
+// @Success 200 {object} dto.QRTokenResponse
+// @Router /api/v1/lessons/{id}/qr [get]
+func (h *AttendanceHandler) GetCurrentQR(c *fiber.Ctx) error {
+	lessonID, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"success": false,
+			"error":   "Invalid lesson ID",
+		})
+	}
+
+	token, err := h.attendanceService.GetCurrentQRToken(c.Context(), lessonID)
+	if err != nil {
+		return handleAttendanceError(c, err)
+	}
+	if token == nil {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+			"success": false,
+			"error":   "No active QR token",
+		})
+	}
+
+	lid, _ := uuid.Parse(token.LessonID)
+	return c.JSON(fiber.Map{
+		"success": true,
+		"data": dto.QRTokenResponse{
+			LessonID:  lid,
+			Payload:   token.Payload,
+			Signature: token.Signature,
+			IssuedAt:  token.IssuedAt,
+			ExpiresAt: token.ExpiresAt,
+		},
+	})
+}
+
+// RotateQR godoc
+// @Summary Force rotate QR token for a lesson
+// @Tags attendance
+// @Produce json
+// @Param id path string true "Lesson ID"
+// @Success 200 {object} dto.QRTokenResponse
+// @Router /api/v1/lessons/{id}/qr/rotate [post]
+func (h *AttendanceHandler) RotateQR(c *fiber.Ctx) error {
+	lessonID, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"success": false,
+			"error":   "Invalid lesson ID",
+		})
+	}
+
+	token, err := h.attendanceService.RotateQRToken(c.Context(), lessonID)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"success": false,
+			"error":   "Failed to rotate QR token",
+		})
+	}
+
+	lid, _ := uuid.Parse(token.LessonID)
+	return c.JSON(fiber.Map{
+		"success": true,
+		"data": dto.QRTokenResponse{
+			LessonID:  lid,
+			Payload:   token.Payload,
+			Signature: token.Signature,
+			IssuedAt:  token.IssuedAt,
+			ExpiresAt: token.ExpiresAt,
+		},
+		"message": "QR token rotated successfully",
+	})
+}
+
+func handleAttendanceError(c *fiber.Ctx, err error) error {
+	switch {
+	case errors.Is(err, attendanceApp.ErrLessonNotFound):
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+			"success": false,
+			"error":   "Lesson not found",
+		})
+	case errors.Is(err, attendanceApp.ErrLessonNotLive):
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"success": false,
+			"error":   "Lesson is not currently live",
+		})
+	case errors.Is(err, attendanceApp.ErrSessionNotActive):
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"success": false,
+			"error":   "Attendance session is not active",
+		})
+	case errors.Is(err, attendanceApp.ErrNotEnrolled):
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+			"success": false,
+			"error":   "You are not enrolled in this course",
+		})
+	case errors.Is(err, attendanceApp.ErrInvalidQRToken):
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"success": false,
+			"error":   "Invalid QR code",
+		})
+	case errors.Is(err, attendanceApp.ErrQRTokenExpired):
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"success": false,
+			"error":   "QR code has expired, please scan the new one",
+		})
+	case errors.Is(err, attendanceApp.ErrQRNonceConsumed):
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"success": false,
+			"error":   "This QR code has already been used",
+		})
+	case errors.Is(err, attendanceApp.ErrOutsideGeofence):
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+			"success": false,
+			"error":   "You are outside the allowed location",
+		})
+	case errors.Is(err, attendanceApp.ErrRateLimitExceeded):
+		return c.Status(fiber.StatusTooManyRequests).JSON(fiber.Map{
+			"success": false,
+			"error":   "Too many scan attempts, please wait",
+		})
+	case errors.Is(err, attendanceApp.ErrEmulatorDetected):
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+			"success": false,
+			"error":   "Emulator detected, please use a physical device",
+		})
+	case errors.Is(err, attendanceApp.ErrAlreadyScanned):
+		return c.Status(fiber.StatusConflict).JSON(fiber.Map{
+			"success": false,
+			"error":   "Attendance already recorded",
+		})
+	default:
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"success": false,
+			"error":   "Internal server error",
+		})
+	}
+}

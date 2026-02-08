@@ -497,6 +497,11 @@ function getNotificationTitle(type: string, data?: Record<string, any>): string 
     security_account_locked: "Account Locked",
     // Chat notifications
     "chat.message": "New Message",
+    // Course & Lesson notifications
+    "COURSE_ENROLLMENT": "New Student Enrolled",
+    "LESSON_STARTED": "Lesson Started 🚀",
+    "LESSON_CANCELED": "Lesson Canceled ⚠️",
+    "LESSON_RESCHEDULED": "Lesson Rescheduled 📅",
   };
 
   return titles[type] || "New Notification";
@@ -546,6 +551,15 @@ function getNotificationBody(
 
       // For direct chats, conversation title is already the sender name, so just show body
       return body;
+    // Course & Lesson notifications
+    case "COURSE_ENROLLMENT":
+      return `A student has enrolled in your course: ${data.course_name || "Course"}`;
+    case "LESSON_STARTED":
+      return `The lesson "${data.lesson_title || "Lesson"}" has started! Get ready.`;
+    case "LESSON_CANCELED":
+      return `The lesson scheduled for "${data.scheduled_at || "scheduled time"}" has been canceled.`;
+    case "LESSON_RESCHEDULED":
+      return `The lesson has been moved to ${data.new_scheduled_at || "a new time"}.`;
     default:
       return "You have a new notification";
   }
