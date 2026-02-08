@@ -41,19 +41,25 @@ func (r *CourseRepository) Delete(ctx context.Context, id uuid.UUID) error {
 
 func (r *CourseRepository) GetByTeacherID(ctx context.Context, teacherID uuid.UUID) ([]course.Course, error) {
 	var courses []course.Course
-	err := r.db.WithContext(ctx).Where("teacher_id = ?", teacherID).Find(&courses).Error
+	err := r.db.WithContext(ctx).Preload("Subject").Where("teacher_id = ?", teacherID).Find(&courses).Error
 	return courses, err
 }
 
 func (r *CourseRepository) GetByIDs(ctx context.Context, ids []uuid.UUID) ([]course.Course, error) {
 	var courses []course.Course
-	err := r.db.WithContext(ctx).Where("id IN ?", ids).Find(&courses).Error
+	err := r.db.WithContext(ctx).Preload("Subject").Where("id IN ?", ids).Find(&courses).Error
 	return courses, err
 }
 
 func (r *CourseRepository) GetBySubjectID(ctx context.Context, subjectID uuid.UUID) ([]course.Course, error) {
 	var courses []course.Course
-	err := r.db.WithContext(ctx).Where("subject_id = ?", subjectID).Find(&courses).Error
+	err := r.db.WithContext(ctx).Preload("Subject").Where("subject_id = ?", subjectID).Find(&courses).Error
+	return courses, err
+}
+
+func (r *CourseRepository) GetAll(ctx context.Context) ([]course.Course, error) {
+	var courses []course.Course
+	err := r.db.WithContext(ctx).Preload("Subject").Find(&courses).Error
 	return courses, err
 }
 

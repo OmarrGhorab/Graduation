@@ -22,7 +22,10 @@ func NewCourseHandler(courseService *courseApp.Service) *CourseHandler {
 func (h *CourseHandler) RegisterRoutes(router fiber.Router) {
 	courses := router.Group("/courses")
 	courses.Post("/", h.CreateCourse)
+	courses.Get("/", h.ListCourses)
 	courses.Get("/:id", h.GetCourse)
+	courses.Get("/my", h.GetMyCourses)
+	courses.Get("/my-subjects", h.GetMySubjects)
 	courses.Patch("/:id", h.UpdateCourse)
 	courses.Post("/:id/enroll", h.EnrollStudent)
 	courses.Post("/:id/assistants", h.AddAssistant)
@@ -80,6 +83,7 @@ func (h *CourseHandler) CreateCourse(c *fiber.Ctx) error {
 		TotalLessons:            req.TotalLessons,
 		AttendanceWindowMinutes: req.AttendanceWindowMinutes,
 		Price:                   req.Price,
+		Currency:                req.Currency,
 		IsPaid:                  req.IsPaid,
 		AttendanceWeight:        req.AttendanceWeight,
 	}
@@ -92,6 +96,39 @@ func (h *CourseHandler) CreateCourse(c *fiber.Ctx) error {
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{
 		"success": true,
 		"data":    dto.ToCourseResponse(course),
+	})
+}
+
+// ListCourses godoc
+// @Summary List all courses or filter by subject
+// @Tags courses
+// @Produce json
+// @Param subjectId query string false "Subject ID"
+// @Success 200 {array} dto.CourseResponse
+// @Router /api/v1/courses [get]
+func (h *CourseHandler) ListCourses(c *fiber.Ctx) error {
+	var subjectIDPtr *uuid.UUID
+	subjectIDStr := c.Query("subjectId")
+	if subjectIDStr != "" {
+		id, err := uuid.Parse(subjectIDStr)
+		if err == nil {
+			subjectIDPtr = &id
+		}
+	}
+
+	courses, err := h.courseService.ListCourses(c.Context(), subjectIDPtr)
+	if err != nil {
+		return handleServiceError(c, err)
+	}
+
+	var responses []dto.CourseResponse
+	for _, crs := range courses {
+		responses = append(responses, dto.ToCourseResponse(&crs))
+	}
+
+	return c.JSON(fiber.Map{
+		"success": true,
+		"data":    responses,
 	})
 }
 
@@ -119,6 +156,68 @@ func (h *CourseHandler) GetCourse(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{
 		"success": true,
 		"data":    dto.ToCourseResponse(course),
+	})
+}
+
+// GetMyCourses godoc
+// @Summary Get courses the current user is enrolled in
+// @Tags courses
+// @Produce json
+// @Success 200 {array} dto.CourseResponse
+// @Router /api/v1/courses/my [get]
+func (h *CourseHandler) GetMyCourses(c *fiber.Ctx) error {
+	userID, err := getUserIDFromContext(c)
+	if err != nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"success": false,
+			"error":   "Unauthorized",
+		})
+	}
+
+	courses, err := h.courseService.GetStudentCourses(c.Context(), userID)
+	if err != nil {
+		return handleServiceError(c, err)
+	}
+
+	var responses []dto.CourseResponse
+	for _, crs := range courses {
+		responses = append(responses, dto.ToCourseResponse(&crs))
+	}
+
+	return c.JSON(fiber.Map{
+		"success": true,
+		"data":    responses,
+	})
+}
+
+// GetMySubjects godoc
+// @Summary Get subjects the current user is enrolled in
+// @Tags subjects
+// @Produce json
+// @Success 200 {array} dto.SubjectResponse
+// @Router /api/v1/courses/my-subjects [get]
+func (h *CourseHandler) GetMySubjects(c *fiber.Ctx) error {
+	userID, err := getUserIDFromContext(c)
+	if err != nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"success": false,
+			"error":   "Unauthorized",
+		})
+	}
+
+	subjects, err := h.courseService.GetStudentSubjects(c.Context(), userID)
+	if err != nil {
+		return handleServiceError(c, err)
+	}
+
+	var responses []dto.SubjectResponse
+	for _, s := range subjects {
+		responses = append(responses, dto.ToSubjectResponse(&s))
+	}
+
+	return c.JSON(fiber.Map{
+		"success": true,
+		"data":    responses,
 	})
 }
 

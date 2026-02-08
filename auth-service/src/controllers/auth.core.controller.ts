@@ -148,8 +148,10 @@ export const loginUser = async (req: Request, res: Response, next: NextFunction)
                 twoFactorEnabled: true,
                 deviceBlocked: true,
                 pendingDeviceFingerprint: true,
-                isActive: true,
                 deletedAt: true,
+                isActive: true,
+                newsletterEnabled: true,
+                currency: true,
             },
         });
 
@@ -501,6 +503,7 @@ export const loginUser = async (req: Request, res: Response, next: NextFunction)
                 role: user.role,
                 profileImg: user.profileImg,
                 twoFactorEnabled: user.twoFactorEnabled,
+                currency: (user as any).currency,
             },
             accessToken,
             refreshToken,
@@ -603,6 +606,7 @@ export const refreshToken = async (req: Request, res: Response, next: NextFuncti
                 isActive: true,
                 deletedAt: true,
                 twoFactorEnabled: true,
+                currency: true,
             },
         });
 
@@ -673,6 +677,7 @@ export const refreshToken = async (req: Request, res: Response, next: NextFuncti
                 role: user.role,
                 profileImg: user.profileImg,
                 twoFactorEnabled: user.twoFactorEnabled,
+                currency: (user as any).currency,
             },
             accessToken,
             refreshToken: newRefreshToken,
@@ -716,6 +721,7 @@ export const getMyProfile = async (req: Request, res: Response, next: NextFuncti
                 bio: true,
                 goals: true,
                 newsletterEnabled: true,
+                currency: true,
                 // Include user preferences
                 preferences: {
                     select: {

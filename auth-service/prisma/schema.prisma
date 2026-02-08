@@ -23,6 +23,7 @@ model User {
   onboardingCompleted      Boolean         @default(false)
   goals                    String[]        @default([])
   newsletterEnabled        Boolean         @default(false)
+  currency                 String?         @default("EGP")
   preferences              UserPreference?
   verified                 Boolean         @default(false)
   twoFactorEnabled         Boolean         @default(false)

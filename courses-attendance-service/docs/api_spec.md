@@ -47,7 +47,11 @@ This document provides a comprehensive overview of the **Courses & Attendance Se
 ### 1. Course Management
 | Method | Endpoint | Description |
 | :--- | :--- | :--- |
+| `GET` | `/courses` | List all courses (Supports filtering by `subjectId` query) |
+| `GET` | `/courses/my` | List courses the current user is enrolled in |
+| `GET` | `/courses/my-subjects` | List subjects (categories) the current user is enrolled in |
 | `POST` | `/courses` | Create a new course |
+| `GET` | `/courses/:id` | Get details for a specific course |
 | `PATCH` | `/courses/:id` | Update course details (Location, Radius, etc.) |
 | `POST` | `/courses/:id/enroll` | Enroll a student in a course |
 | `POST` | `/courses/:id/assistants` | Add an assistant with specific permissions |

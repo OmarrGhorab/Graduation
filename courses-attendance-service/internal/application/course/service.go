@@ -63,6 +63,7 @@ type CreateCourseInput struct {
 	TotalLessons            int
 	AttendanceWindowMinutes int
 	Price                   float64
+	Currency                string
 	IsPaid                  bool
 	AttendanceWeight        float64
 }
@@ -88,6 +89,9 @@ func (s *Service) CreateCourse(ctx context.Context, input CreateCourseInput) (*c
 	if input.GeofenceRadiusM == 0 {
 		input.GeofenceRadiusM = 100
 	}
+	if input.Currency == "" {
+		input.Currency = "EGP"
+	}
 
 	course := &courseDomain.Course{
 		ID:                      uuid.New(),
@@ -103,6 +107,7 @@ func (s *Service) CreateCourse(ctx context.Context, input CreateCourseInput) (*c
 		TotalLessons:            input.TotalLessons,
 		AttendanceWindowMinutes: input.AttendanceWindowMinutes,
 		Price:                   input.Price,
+		Currency:                input.Currency,
 		IsPaid:                  input.IsPaid,
 		Status:                  courseDomain.CourseStatusActive,
 		AttendanceWeight:        input.AttendanceWeight,
@@ -127,6 +132,14 @@ func (s *Service) GetCourse(ctx context.Context, id uuid.UUID) (*courseDomain.Co
 		return nil, ErrCourseNotFound
 	}
 	return course, nil
+}
+
+// ListCourses returns courses, optionally filtered by subject
+func (s *Service) ListCourses(ctx context.Context, subjectID *uuid.UUID) ([]courseDomain.Course, error) {
+	if subjectID != nil {
+		return s.courseRepo.GetBySubjectID(ctx, *subjectID)
+	}
+	return s.courseRepo.GetAll(ctx)
 }
 
 // UpdateCourseInput represents input for updating a course
@@ -290,9 +303,45 @@ func (s *Service) GetTeacherCourses(ctx context.Context, teacherID uuid.UUID) ([
 	return s.courseRepo.GetByTeacherID(ctx, teacherID)
 }
 
-// GetStudentEnrollments returns all enrollments for a student
-func (s *Service) GetStudentEnrollments(ctx context.Context, studentID uuid.UUID) ([]courseDomain.Enrollment, error) {
-	return s.enrollmentRepo.GetByUserID(ctx, studentID)
+// GetStudentCourses returns all courses a student is enrolled in
+func (s *Service) GetStudentCourses(ctx context.Context, studentID uuid.UUID) ([]courseDomain.Course, error) {
+	enrollments, err := s.enrollmentRepo.GetByUserID(ctx, studentID)
+	if err != nil {
+		return nil, err
+	}
+
+	var courseIDs []uuid.UUID
+	for _, e := range enrollments {
+		courseIDs = append(courseIDs, e.CourseID)
+	}
+
+	if len(courseIDs) == 0 {
+		return []courseDomain.Course{}, nil
+	}
+
+	return s.courseRepo.GetByIDs(ctx, courseIDs)
+}
+
+// GetStudentSubjects returns all subjects a student is enrolled in through courses
+func (s *Service) GetStudentSubjects(ctx context.Context, studentID uuid.UUID) ([]courseDomain.Subject, error) {
+	courses, err := s.GetStudentCourses(ctx, studentID)
+	if err != nil {
+		return nil, err
+	}
+
+	subjectMap := make(map[uuid.UUID]courseDomain.Subject)
+	for _, c := range courses {
+		if c.Subject != nil {
+			subjectMap[c.SubjectID] = *c.Subject
+		}
+	}
+
+	var subjects []courseDomain.Subject
+	for _, sub := range subjectMap {
+		subjects = append(subjects, sub)
+	}
+
+	return subjects, nil
 }
 
 // GetCourseEnrollments returns all enrollments for a course

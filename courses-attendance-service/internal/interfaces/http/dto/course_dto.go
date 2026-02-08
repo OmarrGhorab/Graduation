@@ -22,6 +22,7 @@ type CreateCourseRequest struct {
 	TotalLessons            int      `json:"totalLessons"`
 	AttendanceWindowMinutes int      `json:"attendanceWindowMinutes"`
 	Price                   float64  `json:"price"`
+	Currency                string   `json:"currency"`
 	IsPaid                  bool     `json:"isPaid"`
 	AttendanceWeight        float64  `json:"attendanceWeight"`
 }
@@ -53,6 +54,7 @@ type CourseResponse struct {
 	TotalLessons            int       `json:"totalLessons"`
 	AttendanceWindowMinutes int       `json:"attendanceWindowMinutes"`
 	Price                   float64   `json:"price"`
+	Currency                string    `json:"currency"`
 	IsPaid                  bool      `json:"isPaid"`
 	Status                  string    `json:"status"`
 	AttendanceWeight        float64   `json:"attendanceWeight"`
@@ -75,6 +77,7 @@ func ToCourseResponse(c *course.Course) CourseResponse {
 		TotalLessons:            c.TotalLessons,
 		AttendanceWindowMinutes: c.AttendanceWindowMinutes,
 		Price:                   c.Price,
+		Currency:                c.Currency,
 		IsPaid:                  c.IsPaid,
 		Status:                  string(c.Status),
 		AttendanceWeight:        c.AttendanceWeight,

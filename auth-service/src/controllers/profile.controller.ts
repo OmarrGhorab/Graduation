@@ -312,7 +312,7 @@ export const updateProfile = async (req: Request, res: Response, next: NextFunct
  */
 async function generateUsernameSuggestions(baseUsername: string): Promise<string[]> {
   const suggestions: string[] = [];
-  
+
   // Try with numbers
   for (let i = 1; i <= 3; i++) {
     const suggestion = `${baseUsername}${Math.floor(Math.random() * 1000)}`;
@@ -366,6 +366,7 @@ export const getProfile = async (req: Request, res: Response, next: NextFunction
         bio: true,
         goals: true,
         newsletterEnabled: true,
+        currency: true,
         onboardingCompleted: true,
         lastUsernameChange: true,
         createdAt: true,
@@ -468,7 +469,7 @@ export const checkUsernameAvailability = async (req: Request, res: Response, nex
     if (existingUser) {
       // Generate suggestions
       const suggestions = await generateUsernameSuggestions(normalizedUsername);
-      
+
       return res.status(200).json({
         available: false,
         message: "Username is already taken",
@@ -496,7 +497,7 @@ export const updatePreferences = async (req: Request, res: Response, next: NextF
     }
 
     const userId = req.user.id;
-    const { language, themePreference, notifications, newsletterEnabled } = req.body;
+    const { language, themePreference, notifications, newsletterEnabled, currency } = req.body;
 
     const updateData: any = {};
     const preferenceUpdateData: any = {};
@@ -535,6 +536,14 @@ export const updatePreferences = async (req: Request, res: Response, next: NextF
       updateData.newsletterEnabled = newsletterEnabled;
     }
 
+    // Update currency preference (stored in User table)
+    if (currency !== undefined) {
+      if (typeof currency !== "string") {
+        throw new BadRequestError("Currency must be a string value");
+      }
+      updateData.currency = currency;
+    }
+
     // Update user preferences and newsletter setting in a transaction
     const result = await prisma.$transaction(async (tx) => {
       // Update or create user preferences if there are preference changes
@@ -561,6 +570,7 @@ export const updatePreferences = async (req: Request, res: Response, next: NextF
           select: {
             id: true,
             newsletterEnabled: true,
+            currency: true,
           },
         });
       }
@@ -579,6 +589,7 @@ export const updatePreferences = async (req: Request, res: Response, next: NextF
       message: "Preferences updated successfully",
       preferences: result.preferences,
       newsletterEnabled: result.user?.newsletterEnabled,
+      currency: result.user?.currency,
     });
   } catch (err) {
     next(err);
@@ -602,7 +613,7 @@ export const getPreferences = async (req: Request, res: Response, next: NextFunc
       }),
       prisma.user.findUnique({
         where: { id: userId },
-        select: { newsletterEnabled: true },
+        select: { newsletterEnabled: true, currency: true },
       }),
     ]);
 
@@ -613,6 +624,7 @@ export const getPreferences = async (req: Request, res: Response, next: NextFunc
         notifications: true,
       },
       newsletterEnabled: user?.newsletterEnabled || false,
+      currency: user?.currency || "EGP",
     });
   } catch (err) {
     next(err);
