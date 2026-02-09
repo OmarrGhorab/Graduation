@@ -2,7 +2,9 @@ package http
 
 import (
 	progressApp "github.com/OmarrGhorab/courses-attendance-service/internal/application/progress"
+	"github.com/OmarrGhorab/courses-attendance-service/internal/infrastructure/authclient"
 	"github.com/OmarrGhorab/courses-attendance-service/internal/interfaces/http/dto"
+	"github.com/OmarrGhorab/courses-attendance-service/internal/interfaces/http/middleware"
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
 )
@@ -10,17 +12,24 @@ import (
 // ProgressHandler handles progress-related HTTP requests
 type ProgressHandler struct {
 	progressService *progressApp.Service
+	authClient      *authclient.Client
 }
 
-func NewProgressHandler(progressService *progressApp.Service) *ProgressHandler {
-	return &ProgressHandler{progressService: progressService}
+func NewProgressHandler(progressService *progressApp.Service, authClient *authclient.Client) *ProgressHandler {
+	return &ProgressHandler{
+		progressService: progressService,
+		authClient:      authClient,
+	}
 }
 
 func (h *ProgressHandler) RegisterRoutes(router fiber.Router) {
-	progress := router.Group("/progress")
+	auth := middleware.Authenticate(h.authClient)
+	managementOnly := middleware.RequireRole("TEACHER", "INSTRUCTOR", "ASSISTANT")
+
+	progress := router.Group("/progress", auth)
 	progress.Get("/student/:courseId/:studentId", h.GetStudentProgress)
-	progress.Get("/course/:courseId", h.GetCourseProgress)
-	progress.Post("/recompute/:courseId/:studentId", h.RecomputeProgress)
+	progress.Get("/course/:courseId", managementOnly, h.GetCourseProgress)
+	progress.Post("/recompute/:courseId/:studentId", managementOnly, h.RecomputeProgress)
 }
 
 // GetStudentProgress godoc

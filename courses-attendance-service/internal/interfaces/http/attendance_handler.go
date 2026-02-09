@@ -4,7 +4,9 @@ import (
 	"errors"
 
 	attendanceApp "github.com/OmarrGhorab/courses-attendance-service/internal/application/attendance"
+	"github.com/OmarrGhorab/courses-attendance-service/internal/infrastructure/authclient"
 	"github.com/OmarrGhorab/courses-attendance-service/internal/interfaces/http/dto"
+	"github.com/OmarrGhorab/courses-attendance-service/internal/interfaces/http/middleware"
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
 )
@@ -12,21 +14,28 @@ import (
 // AttendanceHandler handles attendance-related HTTP requests
 type AttendanceHandler struct {
 	attendanceService *attendanceApp.Service
+	authClient        *authclient.Client
 }
 
-func NewAttendanceHandler(attendanceService *attendanceApp.Service) *AttendanceHandler {
-	return &AttendanceHandler{attendanceService: attendanceService}
+func NewAttendanceHandler(attendanceService *attendanceApp.Service, authClient *authclient.Client) *AttendanceHandler {
+	return &AttendanceHandler{
+		attendanceService: attendanceService,
+		authClient:        authClient,
+	}
 }
 
 func (h *AttendanceHandler) RegisterRoutes(router fiber.Router) {
-	attendance := router.Group("/attendance")
-	attendance.Post("/scan", h.ScanAttendance)
-	attendance.Get("/lesson/:id", h.GetLessonAttendance)
-	attendance.Get("/student/:id", h.GetStudentAttendance)
+	auth := middleware.Authenticate(h.authClient)
+	managementOnly := middleware.RequireRole("TEACHER", "INSTRUCTOR", "ASSISTANT")
+
+	attendance := router.Group("/attendance", auth)
+	attendance.Post("/scan", h.ScanAttendance) // Everyone authenticated can scan (logic handles enrollment)
+	attendance.Get("/lesson/:id", managementOnly, h.GetLessonAttendance)
+	attendance.Get("/student/:id", managementOnly, h.GetStudentAttendance)
 
 	// Lesson QR management
-	router.Get("/lessons/:id/qr", h.GetCurrentQR)
-	router.Post("/lessons/:id/qr/rotate", h.RotateQR)
+	router.Get("/lessons/:id/qr", auth, managementOnly, h.GetCurrentQR)
+	router.Post("/lessons/:id/qr/rotate", auth, managementOnly, h.RotateQR)
 }
 
 // ScanAttendance godoc

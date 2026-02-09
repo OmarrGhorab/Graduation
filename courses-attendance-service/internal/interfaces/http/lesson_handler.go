@@ -4,7 +4,9 @@ import (
 	"errors"
 
 	lessonApp "github.com/OmarrGhorab/courses-attendance-service/internal/application/lesson"
+	"github.com/OmarrGhorab/courses-attendance-service/internal/infrastructure/authclient"
 	"github.com/OmarrGhorab/courses-attendance-service/internal/interfaces/http/dto"
+	"github.com/OmarrGhorab/courses-attendance-service/internal/interfaces/http/middleware"
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
 )
@@ -12,23 +14,30 @@ import (
 // LessonHandler handles lesson-related HTTP requests
 type LessonHandler struct {
 	lessonService *lessonApp.Service
+	authClient    *authclient.Client
 }
 
-func NewLessonHandler(lessonService *lessonApp.Service) *LessonHandler {
-	return &LessonHandler{lessonService: lessonService}
+func NewLessonHandler(lessonService *lessonApp.Service, authClient *authclient.Client) *LessonHandler {
+	return &LessonHandler{
+		lessonService: lessonService,
+		authClient:    authClient,
+	}
 }
 
 func (h *LessonHandler) RegisterRoutes(router fiber.Router) {
-	lessons := router.Group("/lessons")
-	lessons.Post("/", h.CreateLesson)
+	auth := middleware.Authenticate(h.authClient)
+	teacherOnly := middleware.RequireRole("TEACHER", "INSTRUCTOR")
+
+	lessons := router.Group("/lessons", auth)
+	lessons.Post("/", teacherOnly, h.CreateLesson)
 	lessons.Get("/:id", h.GetLesson)
-	lessons.Post("/:id/start", h.StartLesson)
-	lessons.Post("/:id/end", h.EndLesson)
-	lessons.Post("/:id/cancel", h.CancelLesson)
-	lessons.Post("/:id/reschedule", h.RescheduleLesson)
+	lessons.Post("/:id/start", teacherOnly, h.StartLesson)
+	lessons.Post("/:id/end", teacherOnly, h.EndLesson)
+	lessons.Post("/:id/cancel", teacherOnly, h.CancelLesson)
+	lessons.Post("/:id/reschedule", teacherOnly, h.RescheduleLesson)
 
 	// Course lessons
-	router.Get("/courses/:id/lessons", h.GetCourseLessons)
+	router.Get("/courses/:id/lessons", auth, h.GetCourseLessons)
 }
 
 // CreateLesson godoc

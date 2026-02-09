@@ -65,6 +65,7 @@ type CreateCourseInput struct {
 	Price                   float64
 	Currency                string
 	IsPaid                  bool
+	BillingType             courseDomain.BillingType
 	AttendanceWeight        float64
 }
 
@@ -92,6 +93,9 @@ func (s *Service) CreateCourse(ctx context.Context, input CreateCourseInput) (*c
 	if input.Currency == "" {
 		input.Currency = "EGP"
 	}
+	if input.BillingType == "" {
+		input.BillingType = courseDomain.BillingTypeOneTime
+	}
 
 	course := &courseDomain.Course{
 		ID:                      uuid.New(),
@@ -109,6 +113,7 @@ func (s *Service) CreateCourse(ctx context.Context, input CreateCourseInput) (*c
 		Price:                   input.Price,
 		Currency:                input.Currency,
 		IsPaid:                  input.IsPaid,
+		BillingType:             input.BillingType,
 		Status:                  courseDomain.CourseStatusActive,
 		AttendanceWeight:        input.AttendanceWeight,
 		CreatedAt:               s.clock.Now(),
@@ -152,6 +157,7 @@ type UpdateCourseInput struct {
 	GeofenceRadiusM         *int
 	AttendanceWindowMinutes *int
 	Price                   *float64
+	BillingType             *courseDomain.BillingType
 	Status                  *courseDomain.CourseStatus
 }
 
@@ -192,6 +198,9 @@ func (s *Service) UpdateCourse(ctx context.Context, courseID uuid.UUID, teacherI
 	}
 	if input.Price != nil {
 		course.Price = *input.Price
+	}
+	if input.BillingType != nil {
+		course.BillingType = *input.BillingType
 	}
 	if input.Status != nil {
 		course.Status = *input.Status

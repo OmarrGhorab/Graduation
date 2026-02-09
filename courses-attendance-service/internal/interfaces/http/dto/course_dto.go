@@ -24,6 +24,7 @@ type CreateCourseRequest struct {
 	Price                   float64  `json:"price"`
 	Currency                string   `json:"currency"`
 	IsPaid                  bool     `json:"isPaid"`
+	BillingType             string   `json:"billingType" validate:"omitempty,oneof=ONE_TIME MONTHLY"`
 	AttendanceWeight        float64  `json:"attendanceWeight"`
 }
 
@@ -36,6 +37,7 @@ type UpdateCourseRequest struct {
 	GeofenceRadiusM         *int     `json:"geofenceRadiusM"`
 	AttendanceWindowMinutes *int     `json:"attendanceWindowMinutes"`
 	Price                   *float64 `json:"price"`
+	BillingType             *string  `json:"billingType" validate:"omitempty,oneof=ONE_TIME MONTHLY"`
 	Status                  *string  `json:"status" validate:"omitempty,oneof=ACTIVE PAUSED ARCHIVED"`
 }
 
@@ -56,6 +58,7 @@ type CourseResponse struct {
 	Price                   float64   `json:"price"`
 	Currency                string    `json:"currency"`
 	IsPaid                  bool      `json:"isPaid"`
+	BillingType             string    `json:"billingType"`
 	Status                  string    `json:"status"`
 	AttendanceWeight        float64   `json:"attendanceWeight"`
 	CreatedAt               time.Time `json:"createdAt"`
@@ -79,6 +82,7 @@ func ToCourseResponse(c *course.Course) CourseResponse {
 		Price:                   c.Price,
 		Currency:                c.Currency,
 		IsPaid:                  c.IsPaid,
+		BillingType:             string(c.BillingType),
 		Status:                  string(c.Status),
 		AttendanceWeight:        c.AttendanceWeight,
 		CreatedAt:               c.CreatedAt,

@@ -195,27 +195,27 @@ func (c *Container) registerRoutes() {
 	apiV1 := c.App.Group("/api/v1")
 
 	// Course routes
-	courseHandler := http.NewCourseHandler(c.CourseService)
+	courseHandler := http.NewCourseHandler(c.CourseService, c.AuthClient)
 	courseHandler.RegisterRoutes(apiV1)
 
 	// Lesson routes
-	lessonHandler := http.NewLessonHandler(c.LessonService)
+	lessonHandler := http.NewLessonHandler(c.LessonService, c.AuthClient)
 	lessonHandler.RegisterRoutes(apiV1)
 
 	// Attendance routes
-	attendanceHandler := http.NewAttendanceHandler(c.AttendanceService)
+	attendanceHandler := http.NewAttendanceHandler(c.AttendanceService, c.AuthClient)
 	attendanceHandler.RegisterRoutes(apiV1)
 
 	// Absence routes
-	absenceHandler := http.NewAbsenceHandler(c.AbsenceService)
+	absenceHandler := http.NewAbsenceHandler(c.AbsenceService, c.AuthClient)
 	absenceHandler.RegisterRoutes(apiV1)
 
 	// Progress routes
-	progressHandler := http.NewProgressHandler(c.ProgressService)
+	progressHandler := http.NewProgressHandler(c.ProgressService, c.AuthClient)
 	progressHandler.RegisterRoutes(apiV1)
 
 	// Calendar routes
-	calendarHandler := http.NewCalendarHandler(c.CalendarService)
+	calendarHandler := http.NewCalendarHandler(c.CalendarService, c.AuthClient)
 	calendarHandler.RegisterRoutes(apiV1)
 }
 

@@ -4,23 +4,32 @@ import (
 	"time"
 
 	calendarApp "github.com/OmarrGhorab/courses-attendance-service/internal/application/calendar"
+	"github.com/OmarrGhorab/courses-attendance-service/internal/infrastructure/authclient"
 	"github.com/OmarrGhorab/courses-attendance-service/internal/interfaces/http/dto"
+	"github.com/OmarrGhorab/courses-attendance-service/internal/interfaces/http/middleware"
 	"github.com/gofiber/fiber/v2"
 )
 
 // CalendarHandler handles calendar-related HTTP requests
 type CalendarHandler struct {
 	calendarService *calendarApp.Service
+	authClient      *authclient.Client
 }
 
-func NewCalendarHandler(calendarService *calendarApp.Service) *CalendarHandler {
-	return &CalendarHandler{calendarService: calendarService}
+func NewCalendarHandler(calendarService *calendarApp.Service, authClient *authclient.Client) *CalendarHandler {
+	return &CalendarHandler{
+		calendarService: calendarService,
+		authClient:      authClient,
+	}
 }
 
 func (h *CalendarHandler) RegisterRoutes(router fiber.Router) {
-	calendar := router.Group("/calendar")
+	auth := middleware.Authenticate(h.authClient)
+	managementOnly := middleware.RequireRole("TEACHER", "INSTRUCTOR", "ASSISTANT")
+
+	calendar := router.Group("/calendar", auth)
 	calendar.Get("/student", h.GetStudentCalendar)
-	calendar.Get("/teacher", h.GetTeacherCalendar)
+	calendar.Get("/teacher", managementOnly, h.GetTeacherCalendar)
 }
 
 // GetStudentCalendar godoc

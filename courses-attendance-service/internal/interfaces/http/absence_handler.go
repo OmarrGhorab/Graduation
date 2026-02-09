@@ -5,7 +5,9 @@ import (
 
 	absenceApp "github.com/OmarrGhorab/courses-attendance-service/internal/application/absence"
 	absenceDomain "github.com/OmarrGhorab/courses-attendance-service/internal/domain/absence"
+	"github.com/OmarrGhorab/courses-attendance-service/internal/infrastructure/authclient"
 	"github.com/OmarrGhorab/courses-attendance-service/internal/interfaces/http/dto"
+	"github.com/OmarrGhorab/courses-attendance-service/internal/interfaces/http/middleware"
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
 )
@@ -13,17 +15,24 @@ import (
 // AbsenceHandler handles absence-related HTTP requests
 type AbsenceHandler struct {
 	absenceService *absenceApp.Service
+	authClient     *authclient.Client
 }
 
-func NewAbsenceHandler(absenceService *absenceApp.Service) *AbsenceHandler {
-	return &AbsenceHandler{absenceService: absenceService}
+func NewAbsenceHandler(absenceService *absenceApp.Service, authClient *authclient.Client) *AbsenceHandler {
+	return &AbsenceHandler{
+		absenceService: absenceService,
+		authClient:     authClient,
+	}
 }
 
 func (h *AbsenceHandler) RegisterRoutes(router fiber.Router) {
-	absences := router.Group("/absences")
+	auth := middleware.Authenticate(h.authClient)
+	managementOnly := middleware.RequireRole("TEACHER", "INSTRUCTOR", "ASSISTANT")
+
+	absences := router.Group("/absences", auth)
 	absences.Post("/", h.CreateRequest)
 	absences.Get("/student/:id", h.GetStudentRequests)
-	absences.Get("/lesson/:id", h.GetLessonRequests)
+	absences.Get("/lesson/:id", managementOnly, h.GetLessonRequests)
 	absences.Get("/pending-parent", h.GetPendingParentRequests)
 	absences.Post("/:id/respond", h.RespondToRequest)
 }

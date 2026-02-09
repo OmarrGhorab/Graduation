@@ -12,6 +12,14 @@ type DeliveryType string
 const (
 	DeliveryTypeOnline  DeliveryType = "ONLINE"
 	DeliveryTypeOffline DeliveryType = "OFFLINE"
+	DeliveryTypeHybrid  DeliveryType = "HYBRID"
+)
+
+type BillingType string
+
+const (
+	BillingTypeOneTime BillingType = "ONE_TIME"
+	BillingTypeMonthly BillingType = "MONTHLY"
 )
 
 // CourseStatus represents the lifecycle status of a course
@@ -43,9 +51,10 @@ type Course struct {
 	AttendanceWindowMinutes int `gorm:"not null;default:15"`
 
 	// Pricing
-	Price    float64 `gorm:"type:decimal(10,2);default:0.00"`
-	Currency string  `gorm:"type:varchar(10);not null;default:'EGP'"`
-	IsPaid   bool    `gorm:"not null;default:false"`
+	Price       float64     `gorm:"type:decimal(10,2);default:0.00"`
+	Currency    string      `gorm:"type:varchar(10);not null;default:'EGP'"`
+	IsPaid      bool        `gorm:"not null;default:false"`
+	BillingType BillingType `gorm:"type:billing_type;not null;default:'ONE_TIME'"`
 
 	// Status
 	Status CourseStatus `gorm:"type:course_status;not null;default:'ACTIVE'"`

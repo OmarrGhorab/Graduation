@@ -5,7 +5,9 @@ import (
 
 	courseApp "github.com/OmarrGhorab/courses-attendance-service/internal/application/course"
 	courseDomain "github.com/OmarrGhorab/courses-attendance-service/internal/domain/course"
+	"github.com/OmarrGhorab/courses-attendance-service/internal/infrastructure/authclient"
 	"github.com/OmarrGhorab/courses-attendance-service/internal/interfaces/http/dto"
+	"github.com/OmarrGhorab/courses-attendance-service/internal/interfaces/http/middleware"
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
 )
@@ -13,27 +15,38 @@ import (
 // CourseHandler handles course-related HTTP requests
 type CourseHandler struct {
 	courseService *courseApp.Service
+	authClient    *authclient.Client
 }
 
-func NewCourseHandler(courseService *courseApp.Service) *CourseHandler {
-	return &CourseHandler{courseService: courseService}
+func NewCourseHandler(courseService *courseApp.Service, authClient *authclient.Client) *CourseHandler {
+	return &CourseHandler{
+		courseService: courseService,
+		authClient:    authClient,
+	}
 }
 
 func (h *CourseHandler) RegisterRoutes(router fiber.Router) {
-	courses := router.Group("/courses")
-	courses.Post("/", h.CreateCourse)
+	// Standard auth middleware for all course routes
+	auth := middleware.Authenticate(h.authClient)
+
+	courses := router.Group("/courses", auth)
+
+	// Teacher/Instructor only routes
+	teacherOnly := middleware.RequireRole("TEACHER", "INSTRUCTOR")
+	courses.Post("/", teacherOnly, h.CreateCourse)
+	courses.Patch("/:id", teacherOnly, h.UpdateCourse)
+	courses.Post("/:id/assistants", teacherOnly, h.AddAssistant)
+	courses.Get("/:id/enrollments", teacherOnly, h.GetCourseEnrollments)
+
+	// Public/Shared routes (but still authenticated)
 	courses.Get("/", h.ListCourses)
-	// Specific routes MUST come before parameterized routes
 	courses.Get("/my", h.GetMyCourses)
 	courses.Get("/my-subjects", h.GetMySubjects)
 	courses.Get("/:id", h.GetCourse)
-	courses.Patch("/:id", h.UpdateCourse)
 	courses.Post("/:id/enroll", h.EnrollStudent)
-	courses.Post("/:id/assistants", h.AddAssistant)
-	courses.Get("/:id/enrollments", h.GetCourseEnrollments)
 
 	// Subject routes
-	router.Get("/subjects", h.GetSubjects)
+	router.Get("/subjects", auth, h.GetSubjects)
 }
 
 // CreateCourse godoc
@@ -175,7 +188,15 @@ func (h *CourseHandler) GetMyCourses(c *fiber.Ctx) error {
 		})
 	}
 
-	courses, err := h.courseService.GetStudentCourses(c.Context(), userID)
+	role := c.Locals("userRole").(string)
+
+	var courses []courseDomain.Course
+	if role == "TEACHER" || role == "INSTRUCTOR" {
+		courses, err = h.courseService.GetTeacherCourses(c.Context(), userID)
+	} else {
+		courses, err = h.courseService.GetStudentCourses(c.Context(), userID)
+	}
+
 	if err != nil {
 		return handleServiceError(c, err)
 	}

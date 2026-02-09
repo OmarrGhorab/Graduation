@@ -145,3 +145,51 @@ func (c *Client) VerifyParentLink(ctx context.Context, parentID, childID string)
 
 	return &result.Data, nil
 }
+
+// ValidateTokenRequest represents the request to validate a token
+type ValidateTokenRequest struct {
+	Token string `json:"token"`
+}
+
+// ValidateTokenResponse represents the response from token validation
+type ValidateTokenResponse struct {
+	Valid  bool   `json:"valid"`
+	UserID string `json:"userId"`
+	Role   string `json:"role"`
+}
+
+// ValidateToken validates an access token with the auth service
+func (c *Client) ValidateToken(ctx context.Context, token string) (*ValidateTokenResponse, error) {
+	url := fmt.Sprintf("%s/api/v1/internal/validate-token", c.baseURL)
+
+	reqBody := ValidateTokenRequest{Token: token}
+	body, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewBuffer(body))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("x-internal-service-secret", c.internalSecret)
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, ErrAuthServiceUnavailable
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, ErrInvalidResponse
+	}
+
+	var result ValidateTokenResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, ErrInvalidResponse
+	}
+
+	return &result, nil
+}
