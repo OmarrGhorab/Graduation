@@ -38,6 +38,7 @@ type Course struct {
 	Description string    `gorm:"type:text"`
 	SubjectID   uuid.UUID `gorm:"type:uuid;not null"`
 	TeacherID   uuid.UUID `gorm:"type:uuid;not null"`
+	CourseImage string    `gorm:"type:text"`
 
 	// Delivery and location
 	DeliveryType    DeliveryType `gorm:"type:delivery_type;not null;default:'OFFLINE'"`

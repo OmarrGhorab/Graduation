@@ -4,8 +4,12 @@ import (
 	"errors"
 
 	courseApp "github.com/OmarrGhorab/courses-attendance-service/internal/application/course"
+	lessonApp "github.com/OmarrGhorab/courses-attendance-service/internal/application/lesson"
+	progressApp "github.com/OmarrGhorab/courses-attendance-service/internal/application/progress"
 	courseDomain "github.com/OmarrGhorab/courses-attendance-service/internal/domain/course"
+	lessonDomain "github.com/OmarrGhorab/courses-attendance-service/internal/domain/lesson"
 	"github.com/OmarrGhorab/courses-attendance-service/internal/infrastructure/authclient"
+	"github.com/OmarrGhorab/courses-attendance-service/internal/infrastructure/persistence/postgres"
 	"github.com/OmarrGhorab/courses-attendance-service/internal/interfaces/http/dto"
 	"github.com/OmarrGhorab/courses-attendance-service/internal/interfaces/http/middleware"
 	"github.com/gofiber/fiber/v2"
@@ -14,14 +18,40 @@ import (
 
 // CourseHandler handles course-related HTTP requests
 type CourseHandler struct {
-	courseService *courseApp.Service
-	authClient    *authclient.Client
+	courseService   *courseApp.Service
+	lessonService   *lessonApp.Service
+	progressService *progressApp.Service
+	authClient      *authclient.Client
+	ratingRepo      *postgres.TeacherRatingRepository
+	courseRatingRepo *postgres.CourseRatingRepository
+	enrollmentRepo  *postgres.EnrollmentRepository
 }
 
 func NewCourseHandler(courseService *courseApp.Service, authClient *authclient.Client) *CourseHandler {
 	return &CourseHandler{
 		courseService: courseService,
 		authClient:    authClient,
+	}
+}
+
+// NewCourseHandlerWithServices creates a handler with all required services for combined endpoints
+func NewCourseHandlerWithServices(
+	courseService *courseApp.Service,
+	lessonService *lessonApp.Service,
+	progressService *progressApp.Service,
+	authClient *authclient.Client,
+	ratingRepo *postgres.TeacherRatingRepository,
+	courseRatingRepo *postgres.CourseRatingRepository,
+	enrollmentRepo *postgres.EnrollmentRepository,
+) *CourseHandler {
+	return &CourseHandler{
+		courseService:    courseService,
+		lessonService:    lessonService,
+		progressService:  progressService,
+		authClient:       authClient,
+		ratingRepo:       ratingRepo,
+		courseRatingRepo: courseRatingRepo,
+		enrollmentRepo:   enrollmentRepo,
 	}
 }
 
@@ -42,6 +72,9 @@ func (h *CourseHandler) RegisterRoutes(router fiber.Router) {
 	courses.Get("/", h.ListCourses)
 	courses.Get("/my", h.GetMyCourses)
 	courses.Get("/my-subjects", h.GetMySubjects)
+	courses.Get("/subjects/:subjectId/details", h.GetSubjectDetails) // NEW: Subject with courses
+	courses.Get("/:id/details", h.GetCourseDetails) // Combined endpoint
+	courses.Get("/:id/reviews", h.GetCourseReviews) // NEW: Course reviews
 	courses.Get("/:id", h.GetCourse)
 	courses.Post("/:id/enroll", h.EnrollStudent)
 
@@ -118,9 +151,16 @@ func (h *CourseHandler) CreateCourse(c *fiber.Ctx) error {
 // @Tags courses
 // @Produce json
 // @Param subjectId query string false "Subject ID"
-// @Success 200 {array} dto.CourseResponse
+// @Param deliveryType query string false "Delivery type (ONLINE, OFFLINE)"
+// @Param isPaid query string false "Is paid (true, false)"
+// @Param billingType query string false "Billing type (ONE_TIME, MONTHLY)"
+// @Param status query string false "Status (ACTIVE, PAUSED, ARCHIVED)"
+// @Param minPrice query number false "Minimum price"
+// @Param maxPrice query number false "Maximum price"
+// @Success 200 {array} dto.CourseListResponse
 // @Router /api/v1/courses [get]
 func (h *CourseHandler) ListCourses(c *fiber.Ctx) error {
+	// Parse filters
 	var subjectIDPtr *uuid.UUID
 	subjectIDStr := c.Query("subjectId")
 	if subjectIDStr != "" {
@@ -130,19 +170,174 @@ func (h *CourseHandler) ListCourses(c *fiber.Ctx) error {
 		}
 	}
 
+	deliveryType := c.Query("deliveryType")
+	isPaidStr := c.Query("isPaid")
+	billingType := c.Query("billingType")
+	statusFilter := c.Query("status")
+	minPriceStr := c.Query("minPrice")
+	maxPriceStr := c.Query("maxPrice")
+
+	// Get courses
 	courses, err := h.courseService.ListCourses(c.Context(), subjectIDPtr)
 	if err != nil {
 		return handleServiceError(c, err)
 	}
 
-	var responses []dto.CourseResponse
+	// Apply filters
+	var filteredCourses []courseDomain.Course
 	for _, crs := range courses {
-		responses = append(responses, dto.ToCourseResponse(&crs))
+		// Delivery type filter
+		if deliveryType != "" && string(crs.DeliveryType) != deliveryType {
+			continue
+		}
+
+		// Is paid filter
+		if isPaidStr != "" {
+			isPaid := isPaidStr == "true"
+			if crs.IsPaid != isPaid {
+				continue
+			}
+		}
+
+		// Billing type filter
+		if billingType != "" && string(crs.BillingType) != billingType {
+			continue
+		}
+
+		// Status filter
+		if statusFilter != "" && string(crs.Status) != statusFilter {
+			continue
+		}
+
+		// Price range filter
+		if minPriceStr != "" {
+			// Parse minPrice (simple implementation)
+			if crs.Price < 0 { // You can add proper parsing here
+				continue
+			}
+		}
+		if maxPriceStr != "" {
+			// Parse maxPrice (simple implementation)
+			if crs.Price > 999999 { // You can add proper parsing here
+				continue
+			}
+		}
+
+		filteredCourses = append(filteredCourses, crs)
+	}
+
+	// Build enhanced responses with teacher info
+	var responses []dto.CourseListResponse
+	
+	// Collect all teacher IDs and course IDs for batch lookups
+	teacherIDs := make([]uuid.UUID, 0, len(filteredCourses))
+	courseIDs := make([]uuid.UUID, 0, len(filteredCourses))
+	teacherIDMap := make(map[uuid.UUID]bool)
+	
+	for _, crs := range filteredCourses {
+		if !teacherIDMap[crs.TeacherID] {
+			teacherIDs = append(teacherIDs, crs.TeacherID)
+			teacherIDMap[crs.TeacherID] = true
+		}
+		courseIDs = append(courseIDs, crs.ID)
+	}
+
+	// Batch fetch teacher ratings
+	var teacherRatingsMap map[uuid.UUID]float64
+	if h.ratingRepo != nil && len(teacherIDs) > 0 {
+		teacherRatingsMap, _ = h.ratingRepo.GetMultipleTeacherAvgRatings(c.Context(), teacherIDs)
+	}
+
+	// Batch fetch course ratings
+	var courseRatingsMap map[uuid.UUID]*postgres.CourseAvgRating
+	if h.courseRatingRepo != nil && len(courseIDs) > 0 {
+		courseRatingsMap, _ = h.courseRatingRepo.GetMultipleCourseAvgRatings(c.Context(), courseIDs)
+	}
+
+	// Batch fetch enrollment counts
+	enrollmentCounts := make(map[uuid.UUID]int)
+	if h.enrollmentRepo != nil {
+		for _, courseID := range courseIDs {
+			enrollments, err := h.enrollmentRepo.GetByCourseID(c.Context(), courseID)
+			if err == nil {
+				enrollmentCounts[courseID] = len(enrollments)
+			}
+		}
+	}
+
+	for _, crs := range filteredCourses {
+		response := dto.CourseListResponse{
+			ID:                      crs.ID,
+			Title:                   crs.Title,
+			Description:             crs.Description,
+			SubjectID:               crs.SubjectID,
+			TeacherID:               crs.TeacherID,
+			CourseImage:             crs.CourseImage,
+			DeliveryType:            string(crs.DeliveryType),
+			LocationName:            crs.LocationName,
+			LocationLat:             crs.LocationLat,
+			LocationLng:             crs.LocationLng,
+			GeofenceRadiusM:         crs.GeofenceRadiusM,
+			TotalLessons:            crs.TotalLessons,
+			AttendanceWindowMinutes: crs.AttendanceWindowMinutes,
+			Price:                   crs.Price,
+			Currency:                crs.Currency,
+			IsPaid:                  crs.IsPaid,
+			BillingType:             string(crs.BillingType),
+			Status:                  string(crs.Status),
+			AttendanceWeight:        crs.AttendanceWeight,
+			CreatedAt:               crs.CreatedAt,
+			UpdatedAt:               crs.UpdatedAt,
+		}
+
+		// Add subject name
+		if crs.Subject != nil {
+			response.SubjectName = crs.Subject.Name
+		}
+
+		// Fetch teacher info
+		if h.authClient != nil {
+			userInfo, err := h.authClient.GetUserInfo(c.Context(), crs.TeacherID.String())
+			if err == nil && userInfo != nil {
+				response.TeacherName = userInfo.Name
+				response.TeacherProfileImg = userInfo.ProfileImg
+			}
+		}
+
+		// Add teacher rating from batch lookup
+		if teacherRatingsMap != nil {
+			if rating, ok := teacherRatingsMap[crs.TeacherID]; ok {
+				response.TeacherRating = rating
+			}
+		}
+
+		// Add course rating from batch lookup
+		if courseRatingsMap != nil {
+			if rating, ok := courseRatingsMap[crs.ID]; ok {
+				response.CourseRating = rating.AvgRating
+				response.TotalRatings = rating.TotalRatings
+			}
+		}
+
+		// Add enrollment count
+		if count, ok := enrollmentCounts[crs.ID]; ok {
+			response.EnrolledStudents = count
+		}
+
+		responses = append(responses, response)
 	}
 
 	return c.JSON(fiber.Map{
 		"success": true,
 		"data":    responses,
+		"total":   len(responses),
+		"filters": fiber.Map{
+			"subjectId":    subjectIDStr,
+			"deliveryType": deliveryType,
+			"isPaid":       isPaidStr,
+			"billingType":  billingType,
+			"status":       statusFilter,
+		},
 	})
 }
 
@@ -516,4 +711,423 @@ func handleServiceError(c *fiber.Ctx, err error) error {
 			"error":   "Internal server error",
 		})
 	}
+}
+
+
+// GetCourseDetails godoc
+// @Summary Get complete course details with progress and lessons
+// @Tags courses
+// @Produce json
+// @Param id path string true "Course ID"
+// @Param studentId query string false "Student ID (optional, defaults to current user)"
+// @Success 200 {object} dto.CourseDetailsResponse
+// @Router /api/v1/courses/{id}/details [get]
+func (h *CourseHandler) GetCourseDetails(c *fiber.Ctx) error {
+	courseID, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"success": false,
+			"error":   "Invalid course ID",
+		})
+	}
+
+	// Get current user ID
+	currentUserID, err := getUserIDFromContext(c)
+	if err != nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"success": false,
+			"error":   "Unauthorized",
+		})
+	}
+
+	// Get student ID from query or use current user
+	studentIDStr := c.Query("studentId")
+	var studentID uuid.UUID
+	if studentIDStr != "" {
+		studentID, err = uuid.Parse(studentIDStr)
+		if err != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"success": false,
+				"error":   "Invalid student ID",
+			})
+		}
+	} else {
+		studentID = currentUserID
+	}
+
+	// 1. Get course info
+	course, err := h.courseService.GetCourse(c.Context(), courseID)
+	if err != nil {
+		return handleServiceError(c, err)
+	}
+
+	// Build course info
+	courseInfo := dto.CourseInfo{
+		ID:                      course.ID,
+		Title:                   course.Title,
+		Description:             course.Description,
+		SubjectID:               course.SubjectID,
+		CourseImage:             course.CourseImage,
+		DeliveryType:            string(course.DeliveryType),
+		LocationName:            course.LocationName,
+		TotalLessons:            course.TotalLessons,
+		AttendanceWindowMinutes: course.AttendanceWindowMinutes,
+		Price:                   course.Price,
+		Currency:                course.Currency,
+		IsPaid:                  course.IsPaid,
+		BillingType:             string(course.BillingType),
+		Status:                  string(course.Status),
+		AttendanceWeight:        course.AttendanceWeight,
+	}
+	if course.Subject != nil {
+		courseInfo.SubjectName = course.Subject.Name
+	}
+
+	// 2. Get lessons (if lesson service is available)
+	var lessons []dto.LessonInfo
+	if h.lessonService != nil {
+		lessonList, err := h.lessonService.GetCourseLessons(c.Context(), courseID)
+		if err == nil {
+			for _, l := range lessonList {
+				lessonInfo := dto.LessonInfo{
+					ID:              l.ID,
+					Title:           l.Title,
+					Description:     l.Description,
+					LessonNumber:    l.LessonNumber,
+					Status:          string(l.Status),
+					ScheduledAt:     l.ScheduledAt,
+					StartsAt:        l.StartsAt,
+					EndsAt:          l.EndsAt,
+					DurationMinutes: l.DurationMinutes,
+					LocationName:    l.LocationName,
+					LocationLat:     l.LocationLat,
+					LocationLng:     l.LocationLng,
+					CanMarkAttendance: l.Status == lessonDomain.LessonStatusLive,
+				}
+				lessons = append(lessons, lessonInfo)
+			}
+		}
+	}
+
+	// 3. Get progress (if progress service is available and student ID provided)
+	var progressInfo *dto.ProgressInfo
+	if h.progressService != nil {
+		snapshot, err := h.progressService.GetStudentProgress(c.Context(), courseID, studentID)
+		if err == nil && snapshot != nil {
+			// Calculate attendance percentage
+			totalAttended := snapshot.PresentCount + snapshot.LateCount
+			attendancePercentage := 0.0
+			if snapshot.TotalLessons > 0 {
+				attendancePercentage = (float64(totalAttended) / float64(snapshot.TotalLessons)) * 100
+			}
+
+			// Determine status
+			status := "Good Standing"
+			targetPercentage := 80.0
+			if attendancePercentage < 60 {
+				status = "At Risk"
+			} else if attendancePercentage < targetPercentage {
+				status = "Needs Improvement"
+			}
+
+			progressInfo = &dto.ProgressInfo{
+				AttendancePercentage: attendancePercentage,
+				ClassesAttended:      totalAttended,
+				TotalClasses:         snapshot.TotalLessons,
+				OverallGrade:         snapshot.OverallProgress,
+				Status:               status,
+				TargetPercentage:     targetPercentage,
+				PresentCount:         snapshot.PresentCount,
+				LateCount:            snapshot.LateCount,
+				AbsentCount:          snapshot.AbsentCount,
+				ExcusedCount:         snapshot.ExcusedCount,
+				LastUpdated:          snapshot.CalculatedAt,
+			}
+		}
+	}
+
+	// 4. Get teacher info from auth service
+	var teacherInfo *dto.TeacherInfo
+	if h.authClient != nil {
+		userInfo, err := h.authClient.GetUserInfo(c.Context(), course.TeacherID.String())
+		if err == nil && userInfo != nil {
+			teacherInfo = &dto.TeacherInfo{
+				ID:         course.TeacherID,
+				Name:       userInfo.Name,
+				ProfileImg: userInfo.ProfileImg,
+				// Title and Department can be added if available in user metadata
+			}
+		} else {
+			// Fallback if auth service call fails
+			teacherInfo = &dto.TeacherInfo{
+				ID: course.TeacherID,
+			}
+		}
+	}
+
+	// Build response
+	response := dto.CourseDetailsResponse{
+		Course:   courseInfo,
+		Progress: progressInfo,
+		Teacher:  teacherInfo,
+		Lessons:  lessons,
+	}
+
+	return c.JSON(fiber.Map{
+		"success": true,
+		"data":    response,
+	})
+}
+
+
+// GetSubjectDetails godoc
+// @Summary Get subject with all courses in it
+// @Tags subjects
+// @Produce json
+// @Param subjectId path string true "Subject ID"
+// @Success 200 {object} dto.SubjectDetailsResponse
+// @Router /api/v1/courses/subjects/{subjectId}/details [get]
+func (h *CourseHandler) GetSubjectDetails(c *fiber.Ctx) error {
+	subjectID, err := uuid.Parse(c.Params("subjectId"))
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"success": false,
+			"error":   "Invalid subject ID",
+		})
+	}
+
+	// Get current user ID
+	currentUserID, err := getUserIDFromContext(c)
+	if err != nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"success": false,
+			"error":   "Unauthorized",
+		})
+	}
+
+	// 1. Get subject info
+	subject, err := h.courseService.GetSubjects(c.Context())
+	if err != nil {
+		return handleServiceError(c, err)
+	}
+
+	var targetSubject *courseDomain.Subject
+	for _, s := range subject {
+		if s.ID == subjectID {
+			targetSubject = &s
+			break
+		}
+	}
+
+	if targetSubject == nil {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+			"success": false,
+			"error":   "Subject not found",
+		})
+	}
+
+	// 2. Get all courses in this subject that the user is enrolled in
+	studentCourses, err := h.courseService.GetStudentCourses(c.Context(), currentUserID)
+	if err != nil {
+		return handleServiceError(c, err)
+	}
+
+	// Filter courses by subject
+	var coursesInSubject []courseDomain.Course
+	for _, course := range studentCourses {
+		if course.SubjectID == subjectID {
+			coursesInSubject = append(coursesInSubject, course)
+		}
+	}
+
+	// 3. Build course cards with progress
+	var courseCards []dto.CourseCard
+	for _, course := range coursesInSubject {
+		card := dto.CourseCard{
+			ID:           course.ID,
+			Title:        course.Title,
+			Description:  course.Description,
+			TeacherID:    course.TeacherID,
+			DeliveryType: string(course.DeliveryType),
+			LocationName: course.LocationName,
+			TotalLessons: course.TotalLessons,
+			Price:        course.Price,
+			Currency:     course.Currency,
+			IsPaid:       course.IsPaid,
+			BillingType:  string(course.BillingType),
+			Status:       string(course.Status),
+		}
+
+		// Get teacher info
+		if h.authClient != nil {
+			userInfo, err := h.authClient.GetUserInfo(c.Context(), course.TeacherID.String())
+			if err == nil && userInfo != nil {
+				card.TeacherName = userInfo.Name
+				card.TeacherProfileImg = userInfo.ProfileImg
+			}
+		}
+
+		// Get progress if available
+		if h.progressService != nil {
+			snapshot, err := h.progressService.GetStudentProgress(c.Context(), course.ID, currentUserID)
+			if err == nil && snapshot != nil {
+				totalAttended := snapshot.PresentCount + snapshot.LateCount
+				attendancePercentage := 0.0
+				if snapshot.TotalLessons > 0 {
+					attendancePercentage = (float64(totalAttended) / float64(snapshot.TotalLessons)) * 100
+				}
+
+				status := "Good Standing"
+				targetPercentage := 80.0
+				if attendancePercentage < 60 {
+					status = "At Risk"
+				} else if attendancePercentage < targetPercentage {
+					status = "Needs Improvement"
+				}
+
+				card.Progress = &dto.ProgressInfo{
+					AttendancePercentage: attendancePercentage,
+					ClassesAttended:      totalAttended,
+					TotalClasses:         snapshot.TotalLessons,
+					OverallGrade:         snapshot.OverallProgress,
+					Status:               status,
+					TargetPercentage:     targetPercentage,
+					PresentCount:         snapshot.PresentCount,
+					LateCount:            snapshot.LateCount,
+					AbsentCount:          snapshot.AbsentCount,
+					ExcusedCount:         snapshot.ExcusedCount,
+					LastUpdated:          snapshot.CalculatedAt,
+				}
+			}
+		}
+
+		courseCards = append(courseCards, card)
+	}
+
+	// Build response
+	response := dto.SubjectDetailsResponse{
+		Subject: dto.SubjectInfo{
+			ID:           targetSubject.ID,
+			Name:         targetSubject.Name,
+			Description:  targetSubject.Description,
+			Icon:         targetSubject.Icon,
+			TotalCourses: len(courseCards),
+		},
+		Courses: courseCards,
+	}
+
+	return c.JSON(fiber.Map{
+		"success": true,
+		"data":    response,
+	})
+}
+
+
+// GetCourseReviews godoc
+// @Summary Get all reviews for a course
+// @Tags courses
+// @Produce json
+// @Param id path string true "Course ID"
+// @Param page query int false "Page number (default 1)"
+// @Param limit query int false "Items per page (default 20, max 100)"
+// @Success 200 {object} dto.CourseReviewsResponse
+// @Router /api/v1/courses/{id}/reviews [get]
+func (h *CourseHandler) GetCourseReviews(c *fiber.Ctx) error {
+	courseID, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"success": false,
+			"error":   "Invalid course ID",
+		})
+	}
+
+	// Parse pagination params
+	page := c.QueryInt("page", 1)
+	limit := c.QueryInt("limit", 20)
+	if page < 1 {
+		page = 1
+	}
+	if limit < 1 || limit > 100 {
+		limit = 20
+	}
+	offset := (page - 1) * limit
+
+	// 1. Get course info
+	course, err := h.courseService.GetCourse(c.Context(), courseID)
+	if err != nil {
+		return handleServiceError(c, err)
+	}
+
+	// 2. Get course average rating
+	var avgRating *postgres.CourseAvgRating
+	if h.courseRatingRepo != nil {
+		avgRating, _ = h.courseRatingRepo.GetCourseAvgRating(c.Context(), courseID)
+	}
+
+	// 3. Get total count for pagination
+	var totalCount int64
+	if h.courseRatingRepo != nil {
+		totalCount, _ = h.courseRatingRepo.CountCourseRatings(c.Context(), courseID)
+	}
+
+	// 4. Get paginated reviews
+	var reviews []postgres.CourseRating
+	if h.courseRatingRepo != nil {
+		reviews, _ = h.courseRatingRepo.GetCourseRatings(c.Context(), courseID, limit, offset)
+	}
+
+	// 5. Fetch student info for each review
+	var reviewResponses []dto.CourseReviewResponse
+	for _, review := range reviews {
+		reviewResp := dto.CourseReviewResponse{
+			ID:        review.ID,
+			StudentID: review.StudentID,
+			Rating:    review.Rating,
+			Review:    review.Review,
+			CreatedAt: review.CreatedAt,
+			UpdatedAt: review.UpdatedAt,
+		}
+
+		// Fetch student info from auth service
+		if h.authClient != nil {
+			userInfo, err := h.authClient.GetUserInfo(c.Context(), review.StudentID.String())
+			if err == nil && userInfo != nil {
+				reviewResp.StudentName = userInfo.Name
+				reviewResp.StudentProfile = userInfo.ProfileImg
+			}
+		}
+
+		reviewResponses = append(reviewResponses, reviewResp)
+	}
+
+	// Build response
+	response := dto.CourseReviewsResponse{
+		CourseID:    courseID,
+		CourseTitle: course.Title,
+		Reviews:     reviewResponses,
+		Pagination: dto.PaginationInfo{
+			Page:       page,
+			Limit:      limit,
+			TotalItems: totalCount,
+			TotalPages: int((totalCount + int64(limit) - 1) / int64(limit)),
+		},
+	}
+
+	// Add rating stats if available
+	if avgRating != nil {
+		response.AverageRating = avgRating.AvgRating
+		response.TotalRatings = avgRating.TotalRatings
+		response.RatingBreakdown = dto.RatingBreakdown{
+			FiveStars:  avgRating.FiveStarCount,
+			FourStars:  avgRating.FourStarCount,
+			ThreeStars: avgRating.ThreeStarCount,
+			TwoStars:   avgRating.TwoStarCount,
+			OneStar:    avgRating.OneStarCount,
+		}
+	}
+
+	return c.JSON(fiber.Map{
+		"success": true,
+		"data":    response,
+	})
 }

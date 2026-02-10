@@ -148,3 +148,54 @@ export const getBatchUsersInternal = async (
     next(err);
   }
 };
+
+/**
+ * Get single user details for internal services
+ * Used by courses-service to get teacher info
+ */
+export const getUserInternal = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const { userId } = req.params;
+
+    if (!userId) {
+      throw new BadRequestError("userId is required");
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        name: true,
+        username: true,
+        email: true,
+        profileImg: true,
+        role: true,
+      },
+    });
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        error: "User not found",
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      data: {
+        id: user.id,
+        name: user.name,
+        username: user.username,
+        email: user.email,
+        profileImg: user.profileImg,
+        role: user.role,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+};

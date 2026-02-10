@@ -193,3 +193,49 @@ func (c *Client) ValidateToken(ctx context.Context, token string) (*ValidateToke
 
 	return &result, nil
 }
+
+// UserInfo represents user information from auth service
+type UserInfo struct {
+	ID         string `json:"id"`
+	Name       string `json:"name"`
+	Email      string `json:"email"`
+	Role       string `json:"role"`
+	ProfileImg string `json:"profileImg"`
+	Username   string `json:"username"`
+}
+
+// GetUserInfo fetches user information by user ID
+func (c *Client) GetUserInfo(ctx context.Context, userID string) (*UserInfo, error) {
+	url := fmt.Sprintf("%s/api/v1/internal/users/%s", c.baseURL, userID)
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	httpReq.Header.Set("x-internal-service-secret", c.internalSecret)
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, ErrAuthServiceUnavailable
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, errors.New("user not found")
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, ErrInvalidResponse
+	}
+
+	var result struct {
+		Success bool     `json:"success"`
+		Data    UserInfo `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, ErrInvalidResponse
+	}
+
+	return &result.Data, nil
+}

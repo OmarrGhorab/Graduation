@@ -48,6 +48,7 @@ type CourseResponse struct {
 	SubjectID               uuid.UUID `json:"subjectId"`
 	SubjectName             string    `json:"subjectName,omitempty"`
 	TeacherID               uuid.UUID `json:"teacherId"`
+	CourseImage             string    `json:"courseImage,omitempty"`
 	DeliveryType            string    `json:"deliveryType"`
 	LocationName            string    `json:"locationName,omitempty"`
 	LocationLat             *float64  `json:"locationLat,omitempty"`
@@ -72,6 +73,7 @@ func ToCourseResponse(c *course.Course) CourseResponse {
 		Description:             c.Description,
 		SubjectID:               c.SubjectID,
 		TeacherID:               c.TeacherID,
+		CourseImage:             c.CourseImage,
 		DeliveryType:            string(c.DeliveryType),
 		LocationName:            c.LocationName,
 		LocationLat:             c.LocationLat,

@@ -39,6 +39,8 @@ type Container struct {
 	AttendanceRecordRepo  *postgres.AttendanceRecordRepository
 	AbsenceRequestRepo    *postgres.AbsenceRequestRepository
 	ProgressSnapshotRepo  *postgres.ProgressSnapshotRepository
+	TeacherRatingRepo     *postgres.TeacherRatingRepository
+	CourseRatingRepo      *postgres.CourseRatingRepository
 
 	// Infrastructure
 	Redis           *redis.Client
@@ -122,6 +124,8 @@ func (c *Container) initRepositories() {
 	c.AttendanceRecordRepo = postgres.NewAttendanceRecordRepository(c.DB)
 	c.AbsenceRequestRepo = postgres.NewAbsenceRequestRepository(c.DB)
 	c.ProgressSnapshotRepo = postgres.NewProgressSnapshotRepository(c.DB)
+	c.TeacherRatingRepo = postgres.NewTeacherRatingRepository(c.DB)
+	c.CourseRatingRepo = postgres.NewCourseRatingRepository(c.DB)
 }
 
 func (c *Container) initServices() {
@@ -194,8 +198,16 @@ func (c *Container) registerRoutes() {
 	// API v1 group
 	apiV1 := c.App.Group("/api/v1")
 
-	// Course routes
-	courseHandler := http.NewCourseHandler(c.CourseService, c.AuthClient)
+	// Course routes (with combined endpoint support)
+	courseHandler := http.NewCourseHandlerWithServices(
+		c.CourseService,
+		c.LessonService,
+		c.ProgressService,
+		c.AuthClient,
+		c.TeacherRatingRepo,
+		c.CourseRatingRepo,
+		c.EnrollmentRepo,
+	)
 	courseHandler.RegisterRoutes(apiV1)
 
 	// Lesson routes
