@@ -55,6 +55,7 @@ type CreateLessonInput struct {
 	Description     string
 	ScheduledAt     time.Time
 	DurationMinutes int
+	DeliveryType    lessonDomain.DeliveryType
 	LocationName    string
 	LocationLat     *float64
 	LocationLng     *float64
@@ -96,6 +97,7 @@ func (s *Service) CreateLesson(ctx context.Context, teacherID uuid.UUID, input C
 		ScheduledAt:     input.ScheduledAt.UTC(),
 		DurationMinutes: input.DurationMinutes,
 		Status:          lessonDomain.LessonStatusScheduled,
+		DeliveryType:    input.DeliveryType,
 		LocationName:    input.LocationName,
 		LocationLat:     input.LocationLat,
 		LocationLng:     input.LocationLng,

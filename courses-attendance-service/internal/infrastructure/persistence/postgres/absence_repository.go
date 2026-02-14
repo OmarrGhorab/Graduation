@@ -58,3 +58,15 @@ func (r *AbsenceRequestRepository) GetPendingForStudent(ctx context.Context, stu
 	err := r.db.WithContext(ctx).Where("student_id = ? AND status = ?", studentID, absence.AbsenceStatusPending).Find(&requests).Error
 	return requests, err
 }
+
+func (r *AbsenceRequestRepository) GetByLessonAndStudent(ctx context.Context, lessonID, studentID uuid.UUID) (*absence.AbsenceRequest, error) {
+	var req absence.AbsenceRequest
+	err := r.db.WithContext(ctx).
+		Where("lesson_id = ? AND student_id = ?", lessonID, studentID).
+		Order("created_at DESC").
+		First(&req).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	return &req, err
+}

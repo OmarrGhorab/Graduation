@@ -32,6 +32,7 @@ func (h *AttendanceHandler) RegisterRoutes(router fiber.Router) {
 	attendance.Post("/scan", h.ScanAttendance) // Everyone authenticated can scan (logic handles enrollment)
 	attendance.Get("/lesson/:id", managementOnly, h.GetLessonAttendance)
 	attendance.Get("/student/:id", managementOnly, h.GetStudentAttendance)
+	attendance.Get("/student/:studentId/course/:courseId/analytics", managementOnly, h.GetStudentCourseAnalytics)
 
 	// Lesson QR management
 	router.Get("/lessons/:id/qr", auth, managementOnly, h.GetCurrentQR)
@@ -131,7 +132,16 @@ func (h *AttendanceHandler) GetLessonAttendance(c *fiber.Ctx) error {
 
 	var responses []dto.AttendanceRecordResponse
 	for _, r := range records {
-		responses = append(responses, dto.ToAttendanceRecordResponse(&r))
+		response := dto.ToAttendanceRecordResponse(&r)
+		
+		// Fetch student info
+		userInfo, err := h.authClient.GetUserInfo(c.Context(), r.StudentID.String())
+		if err == nil && userInfo != nil {
+			response.StudentName = userInfo.Name
+			response.StudentProfileImg = userInfo.ProfileImg
+		}
+		
+		responses = append(responses, response)
 	}
 
 	return c.JSON(fiber.Map{
@@ -316,4 +326,90 @@ func handleAttendanceError(c *fiber.Ctx, err error) error {
 			"error":   "Internal server error",
 		})
 	}
+}
+
+// GetStudentCourseAnalytics godoc
+// @Summary Get analytics for a student in a specific course
+// @Tags attendance
+// @Produce json
+// @Param studentId path string true "Student ID"
+// @Param courseId path string true "Course ID"
+// @Success 200 {object} dto.StudentAnalyticsResponse
+// @Router /api/v1/attendance/student/{studentId}/course/{courseId}/analytics [get]
+func (h *AttendanceHandler) GetStudentCourseAnalytics(c *fiber.Ctx) error {
+	studentID, err := uuid.Parse(c.Params("studentId"))
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"success": false,
+			"error":   "Invalid student ID",
+		})
+	}
+
+	courseID, err := uuid.Parse(c.Params("courseId"))
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"success": false,
+			"error":   "Invalid course ID",
+		})
+	}
+
+	analytics, err := h.attendanceService.GetStudentCourseAnalytics(c.Context(), studentID, courseID)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"success": false,
+			"error":   "Failed to fetch analytics",
+		})
+	}
+
+	// Fetch student info
+	userInfo, err := h.authClient.GetUserInfo(c.Context(), studentID.String())
+	studentName := ""
+	studentProfileImg := ""
+	if err == nil && userInfo != nil {
+		studentName = userInfo.Name
+		studentProfileImg = userInfo.ProfileImg
+	}
+
+	// Convert to DTO
+	weeklyAttendance := make([]dto.DailyAttendance, len(analytics.WeeklyAttendance))
+	for i, wa := range analytics.WeeklyAttendance {
+		weeklyAttendance[i] = dto.DailyAttendance{
+			Day:   wa.Day,
+			Hours: wa.Hours,
+		}
+	}
+
+	recentActivity := make([]dto.RecentActivityItem, len(analytics.RecentActivity))
+	for i, ra := range analytics.RecentActivity {
+		recentActivity[i] = dto.RecentActivityItem{
+			LessonID:     ra.LessonID,
+			LessonTitle:  ra.LessonTitle,
+			Status:       ra.Status,
+			ScheduledAt:  ra.ScheduledAt,
+			ScannedAt:    ra.ScannedAt,
+			DurationMins: ra.DurationMins,
+		}
+	}
+
+	response := dto.StudentAnalyticsResponse{
+		StudentID:         studentID,
+		StudentName:       studentName,
+		StudentProfileImg: studentProfileImg,
+		CourseID:          courseID,
+		AttendanceRate:    analytics.AttendanceRate,
+		AttendanceChange:  analytics.AttendanceChange,
+		CompletionRate:    analytics.CompletionRate,
+		CompletedLessons:  analytics.CompletedLessons,
+		TotalLessons:      analytics.TotalLessons,
+		WeeklyAttendance:  weeklyAttendance,
+		Rank:              analytics.Rank,
+		TotalStudents:     analytics.TotalStudents,
+		Points:            analytics.Points,
+		RecentActivity:    recentActivity,
+	}
+
+	return c.JSON(fiber.Map{
+		"success": true,
+		"data":    response,
+	})
 }

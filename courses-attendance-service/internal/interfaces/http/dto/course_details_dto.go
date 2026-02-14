@@ -62,18 +62,21 @@ type TeacherInfo struct {
 
 // LessonInfo contains lesson information for the syllabus
 type LessonInfo struct {
-	ID              uuid.UUID  `json:"id"`
-	Title           string     `json:"title"`
-	Description     string     `json:"description,omitempty"`
-	LessonNumber    int        `json:"lessonNumber"`
-	Status          string     `json:"status"` // LIVE, COMPLETED, UPCOMING, CANCELED
-	ScheduledAt     time.Time  `json:"scheduledAt"`
-	StartsAt        *time.Time `json:"startsAt,omitempty"`
-	EndsAt          *time.Time `json:"endsAt,omitempty"`
-	DurationMinutes int        `json:"durationMinutes"`
-	LocationName    string     `json:"locationName,omitempty"`
-	LocationLat     *float64   `json:"locationLat,omitempty"`
-	LocationLng     *float64   `json:"locationLng,omitempty"`
-	CanMarkAttendance bool     `json:"canMarkAttendance"` // True if lesson is LIVE
-	IsAttended      *bool      `json:"isAttended,omitempty"` // True/False if student has attendance record
+	ID                uuid.UUID  `json:"id"`
+	Title             string     `json:"title"`
+	Description       string     `json:"description,omitempty"`
+	LessonNumber      int        `json:"lessonNumber"`
+	Status            string     `json:"status"` // LIVE, COMPLETED, UPCOMING, CANCELED
+	ScheduledAt       time.Time  `json:"scheduledAt"`
+	StartsAt          *time.Time `json:"startsAt,omitempty"`
+	EndsAt            *time.Time `json:"endsAt,omitempty"`
+	DurationMinutes   int        `json:"durationMinutes"`
+	DeliveryType      string     `json:"deliveryType"`
+	LocationName      string     `json:"locationName,omitempty"`
+	LocationLat       *float64   `json:"locationLat,omitempty"`
+	LocationLng       *float64   `json:"locationLng,omitempty"`
+	CanMarkAttendance bool       `json:"canMarkAttendance"` // True if lesson is LIVE
+	AttendanceStatus  *string    `json:"attendanceStatus,omitempty"` // PRESENT, LATE, ABSENT, EXCUSED (null if no record)
+	AttendeeCount     *int       `json:"attendeeCount,omitempty"` // Number of students who attended
+	AbsenceRequestStatus *string `json:"absenceRequestStatus,omitempty"` // PENDING, APPROVED, REJECTED (null if no request)
 }

@@ -42,6 +42,8 @@ type AttendanceRecordResponse struct {
 	ID                   uuid.UUID  `json:"id"`
 	LessonID             uuid.UUID  `json:"lessonId"`
 	StudentID            uuid.UUID  `json:"studentId"`
+	StudentName          string     `json:"studentName,omitempty"`
+	StudentProfileImg    string     `json:"studentProfileImg,omitempty"`
 	Status               string     `json:"status"`
 	ScannedAt            *time.Time `json:"scannedAt,omitempty"`
 	DistanceFromLocation *float64   `json:"distanceFromLocation,omitempty"`

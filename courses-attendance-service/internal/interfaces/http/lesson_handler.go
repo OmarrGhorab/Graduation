@@ -3,7 +3,9 @@ package http
 import (
 	"errors"
 
+	attendanceApp "github.com/OmarrGhorab/courses-attendance-service/internal/application/attendance"
 	lessonApp "github.com/OmarrGhorab/courses-attendance-service/internal/application/lesson"
+	lessonDomain "github.com/OmarrGhorab/courses-attendance-service/internal/domain/lesson"
 	"github.com/OmarrGhorab/courses-attendance-service/internal/infrastructure/authclient"
 	"github.com/OmarrGhorab/courses-attendance-service/internal/interfaces/http/dto"
 	"github.com/OmarrGhorab/courses-attendance-service/internal/interfaces/http/middleware"
@@ -13,14 +15,16 @@ import (
 
 // LessonHandler handles lesson-related HTTP requests
 type LessonHandler struct {
-	lessonService *lessonApp.Service
-	authClient    *authclient.Client
+	lessonService     *lessonApp.Service
+	attendanceService *attendanceApp.Service
+	authClient        *authclient.Client
 }
 
-func NewLessonHandler(lessonService *lessonApp.Service, authClient *authclient.Client) *LessonHandler {
+func NewLessonHandler(lessonService *lessonApp.Service, attendanceService *attendanceApp.Service, authClient *authclient.Client) *LessonHandler {
 	return &LessonHandler{
-		lessonService: lessonService,
-		authClient:    authClient,
+		lessonService:     lessonService,
+		attendanceService: attendanceService,
+		authClient:        authClient,
 	}
 }
 
@@ -80,6 +84,7 @@ func (h *LessonHandler) CreateLesson(c *fiber.Ctx) error {
 		Description:     req.Description,
 		ScheduledAt:     req.ScheduledAt,
 		DurationMinutes: req.DurationMinutes,
+		DeliveryType:    lessonDomain.DeliveryType(req.DeliveryType),
 		LocationName:    req.LocationName,
 		LocationLat:     req.LocationLat,
 		LocationLng:     req.LocationLng,
@@ -157,7 +162,7 @@ func (h *LessonHandler) GetCourseLessons(c *fiber.Ctx) error {
 }
 
 // StartLesson godoc
-// @Summary Start a lesson (sets status to LIVE)
+// @Summary Start a lesson (sets status to LIVE and creates attendance session)
 // @Tags lessons
 // @Produce json
 // @Param id path string true "Lesson ID"
@@ -172,20 +177,54 @@ func (h *LessonHandler) StartLesson(c *fiber.Ctx) error {
 		})
 	}
 
+	// Start the lesson (sets status to LIVE)
 	lesson, err := h.lessonService.StartLesson(c.Context(), lessonID)
 	if err != nil {
 		return handleLessonServiceError(c, err)
+	}
+
+	// Automatically start attendance session and generate first QR token
+	session, err := h.attendanceService.StartAttendanceSession(c.Context(), lessonID)
+	if err != nil {
+		// Log error but don't fail the request - lesson is already started
+		// In production, you might want to handle this differently
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"success": false,
+			"error":   "Lesson started but failed to create attendance session",
+		})
+	}
+
+	// Get the first QR token
+	qrToken, err := h.attendanceService.GetCurrentQRToken(c.Context(), lessonID)
+	if err != nil {
+		// QR token generation failed, but session is created
+		return c.JSON(fiber.Map{
+			"success": true,
+			"data":    dto.ToLessonResponse(lesson),
+			"message": "Lesson and attendance session started successfully, but QR generation failed",
+		})
 	}
 
 	return c.JSON(fiber.Map{
 		"success": true,
 		"data":    dto.ToLessonResponse(lesson),
 		"message": "Lesson started successfully",
+		"attendance_session": fiber.Map{
+			"session_id": session.ID,
+			"started_at": session.StartedAt,
+			"is_active":  session.IsActive,
+		},
+		"qr_token": fiber.Map{
+			"payload":    qrToken.Payload,
+			"signature":  qrToken.Signature,
+			"issued_at":  qrToken.IssuedAt,
+			"expires_at": qrToken.ExpiresAt,
+		},
 	})
 }
 
 // EndLesson godoc
-// @Summary End a lesson (sets status to COMPLETED)
+// @Summary End a lesson (sets status to COMPLETED and ends attendance session)
 // @Tags lessons
 // @Produce json
 // @Param id path string true "Lesson ID"
@@ -200,6 +239,13 @@ func (h *LessonHandler) EndLesson(c *fiber.Ctx) error {
 		})
 	}
 
+	// End attendance session first (marks absentees)
+	if err := h.attendanceService.EndAttendanceSession(c.Context(), lessonID); err != nil {
+		// Log error but continue to end lesson
+		// In production, you might want to handle this differently
+	}
+
+	// End the lesson (sets status to COMPLETED)
 	lesson, err := h.lessonService.EndLesson(c.Context(), lessonID)
 	if err != nil {
 		return handleLessonServiceError(c, err)

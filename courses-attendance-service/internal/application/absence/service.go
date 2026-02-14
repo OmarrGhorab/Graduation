@@ -15,11 +15,13 @@ import (
 )
 
 var (
-	ErrRequestNotFound    = errors.New("absence request not found")
-	ErrUnauthorized       = errors.New("unauthorized to perform this action")
-	ErrInvalidStatus      = errors.New("request is not in a pending state")
-	ErrAttendanceNotFound = errors.New("attendance record not found")
-	ErrParentNotLinked    = errors.New("user is not linked to this student as a parent")
+	ErrRequestNotFound      = errors.New("absence request not found")
+	ErrUnauthorized         = errors.New("unauthorized to perform this action")
+	ErrInvalidStatus        = errors.New("request is not in a pending state")
+	ErrAttendanceNotFound   = errors.New("attendance record not found")
+	ErrParentNotLinked      = errors.New("user is not linked to this student as a parent")
+	ErrDuplicateRequest     = errors.New("an absence request already exists for this lesson")
+	ErrRequestAlreadyExists = errors.New("you have already submitted an excuse for this lesson")
 )
 
 // Service handles absence request logic
@@ -80,6 +82,20 @@ func (s *Service) CreateRequest(ctx context.Context, input CreateRequestInput) (
 	}
 	if lesson == nil {
 		return nil, errors.New("lesson not found")
+	}
+
+	// Check if an absence request already exists for this lesson and student
+	existingRequest, err := s.absenceRepo.GetByLessonAndStudent(ctx, input.LessonID, input.StudentID)
+	if err != nil {
+		return nil, err
+	}
+	if existingRequest != nil {
+		// If there's already a pending or approved request, don't allow duplicate
+		if existingRequest.Status == absenceDomain.AbsenceStatusPending || 
+		   existingRequest.Status == absenceDomain.AbsenceStatusApproved {
+			return nil, ErrRequestAlreadyExists
+		}
+		// If the previous request was rejected, allow a new one
 	}
 
 	// Create request

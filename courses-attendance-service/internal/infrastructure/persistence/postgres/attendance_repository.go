@@ -120,6 +120,15 @@ func (r *AttendanceRecordRepository) GetByStudentID(ctx context.Context, student
 	return records, err
 }
 
+func (r *AttendanceRecordRepository) GetByStudentAndLessons(ctx context.Context, studentID uuid.UUID, lessonIDs []uuid.UUID) ([]attendance.AttendanceRecord, error) {
+	var records []attendance.AttendanceRecord
+	if len(lessonIDs) == 0 {
+		return records, nil
+	}
+	err := r.db.WithContext(ctx).Where("student_id = ? AND lesson_id IN ?", studentID, lessonIDs).Find(&records).Error
+	return records, err
+}
+
 func (r *AttendanceRecordRepository) Update(ctx context.Context, rec *attendance.AttendanceRecord) error {
 	return r.db.WithContext(ctx).Save(rec).Error
 }

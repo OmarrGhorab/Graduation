@@ -18,13 +18,15 @@ import (
 
 // CourseHandler handles course-related HTTP requests
 type CourseHandler struct {
-	courseService   *courseApp.Service
-	lessonService   *lessonApp.Service
-	progressService *progressApp.Service
-	authClient      *authclient.Client
-	ratingRepo      *postgres.TeacherRatingRepository
+	courseService    *courseApp.Service
+	lessonService    *lessonApp.Service
+	progressService  *progressApp.Service
+	authClient       *authclient.Client
+	ratingRepo       *postgres.TeacherRatingRepository
 	courseRatingRepo *postgres.CourseRatingRepository
-	enrollmentRepo  *postgres.EnrollmentRepository
+	enrollmentRepo   *postgres.EnrollmentRepository
+	attendanceRepo   *postgres.AttendanceRecordRepository
+	absenceRepo      *postgres.AbsenceRequestRepository
 }
 
 func NewCourseHandler(courseService *courseApp.Service, authClient *authclient.Client) *CourseHandler {
@@ -43,6 +45,8 @@ func NewCourseHandlerWithServices(
 	ratingRepo *postgres.TeacherRatingRepository,
 	courseRatingRepo *postgres.CourseRatingRepository,
 	enrollmentRepo *postgres.EnrollmentRepository,
+	attendanceRepo *postgres.AttendanceRecordRepository,
+	absenceRepo *postgres.AbsenceRequestRepository,
 ) *CourseHandler {
 	return &CourseHandler{
 		courseService:    courseService,
@@ -52,6 +56,8 @@ func NewCourseHandlerWithServices(
 		ratingRepo:       ratingRepo,
 		courseRatingRepo: courseRatingRepo,
 		enrollmentRepo:   enrollmentRepo,
+		attendanceRepo:   attendanceRepo,
+		absenceRepo:      absenceRepo,
 	}
 }
 
@@ -122,6 +128,7 @@ func (h *CourseHandler) CreateCourse(c *fiber.Ctx) error {
 		Description:             req.Description,
 		SubjectID:               subjectID,
 		TeacherID:               teacherID,
+		CourseImage:             req.CourseImage,
 		DeliveryType:            courseDomain.DeliveryType(req.DeliveryType),
 		LocationName:            req.LocationName,
 		LocationLat:             req.LocationLat,
@@ -788,22 +795,80 @@ func (h *CourseHandler) GetCourseDetails(c *fiber.Ctx) error {
 	if h.lessonService != nil {
 		lessonList, err := h.lessonService.GetCourseLessons(c.Context(), courseID)
 		if err == nil {
+			// Collect lesson IDs for batch attendance lookup
+			lessonIDs := make([]uuid.UUID, 0, len(lessonList))
+			for _, l := range lessonList {
+				lessonIDs = append(lessonIDs, l.ID)
+			}
+
+			// Batch fetch attendance records for this student
+			attendanceMap := make(map[uuid.UUID]string)
+			attendeeCountMap := make(map[uuid.UUID]int)
+			absenceRequestMap := make(map[uuid.UUID]string)
+			
+			if h.attendanceRepo != nil && len(lessonIDs) > 0 {
+				// Get student's attendance records
+				studentRecords, _ := h.attendanceRepo.GetByStudentAndLessons(c.Context(), studentID, lessonIDs)
+				for _, record := range studentRecords {
+					attendanceMap[record.LessonID] = string(record.Status)
+				}
+
+				// Get attendee counts for each lesson
+				for _, lessonID := range lessonIDs {
+					records, _ := h.attendanceRepo.GetByLessonID(c.Context(), lessonID)
+					count := 0
+					for _, r := range records {
+						if r.Status != "ABSENT" {
+							count++
+						}
+					}
+					attendeeCountMap[lessonID] = count
+				}
+			}
+
+			// Batch fetch absence requests for this student
+			if h.absenceRepo != nil && len(lessonIDs) > 0 {
+				for _, lessonID := range lessonIDs {
+					absenceRequest, _ := h.absenceRepo.GetByLessonAndStudent(c.Context(), lessonID, studentID)
+					if absenceRequest != nil {
+						absenceRequestMap[lessonID] = string(absenceRequest.Status)
+					}
+				}
+			}
+
 			for _, l := range lessonList {
 				lessonInfo := dto.LessonInfo{
-					ID:              l.ID,
-					Title:           l.Title,
-					Description:     l.Description,
-					LessonNumber:    l.LessonNumber,
-					Status:          string(l.Status),
-					ScheduledAt:     l.ScheduledAt,
-					StartsAt:        l.StartsAt,
-					EndsAt:          l.EndsAt,
-					DurationMinutes: l.DurationMinutes,
-					LocationName:    l.LocationName,
-					LocationLat:     l.LocationLat,
-					LocationLng:     l.LocationLng,
+					ID:                l.ID,
+					Title:             l.Title,
+					Description:       l.Description,
+					LessonNumber:      l.LessonNumber,
+					Status:            string(l.Status),
+					ScheduledAt:       l.ScheduledAt,
+					StartsAt:          l.StartsAt,
+					EndsAt:            l.EndsAt,
+					DurationMinutes:   l.DurationMinutes,
+					DeliveryType:      string(l.DeliveryType),
+					LocationName:      l.LocationName,
+					LocationLat:       l.LocationLat,
+					LocationLng:       l.LocationLng,
 					CanMarkAttendance: l.Status == lessonDomain.LessonStatusLive,
 				}
+
+				// Add attendance status if available
+				if status, ok := attendanceMap[l.ID]; ok {
+					lessonInfo.AttendanceStatus = &status
+				}
+
+				// Add attendee count if available
+				if count, ok := attendeeCountMap[l.ID]; ok {
+					lessonInfo.AttendeeCount = &count
+				}
+
+				// Add absence request status if available
+				if absenceStatus, ok := absenceRequestMap[l.ID]; ok {
+					lessonInfo.AbsenceRequestStatus = &absenceStatus
+				}
+
 				lessons = append(lessons, lessonInfo)
 			}
 		}

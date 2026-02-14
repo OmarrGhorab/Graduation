@@ -172,6 +172,7 @@ export function setupRoutes(app: Express, config: AppConfig): { wsProxy: any } {
   // Courses & Attendance service routes
   const coursePaths = [
     "/api/v1/courses",
+    "/api/v1/subjects",
     "/api/v1/lessons",
     "/api/v1/attendance",
     "/api/v1/absences",

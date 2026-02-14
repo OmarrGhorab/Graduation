@@ -89,7 +89,8 @@ func (g *Generator) GenerateToken(lessonID uuid.UUID, rotationSeconds, expirySec
 	}, nil
 }
 
-// ValidateToken validates a QR token
+// ValidateToken validates a QR token with tolerance window
+// Accepts tokens from current period, previous period (30s ago), and next period (30s ahead)
 func (g *Generator) ValidateToken(raw, signature string, serverTime time.Time) (*TokenPayload, error) {
 	// Decode payload
 	payloadBytes, err := base64.URLEncoding.DecodeString(raw)
@@ -110,8 +111,19 @@ func (g *Generator) ValidateToken(raw, signature string, serverTime time.Time) (
 		return nil, ErrInvalidSignature
 	}
 
-	// Check expiry using server time (never trust client time)
-	if serverTime.After(payload.ExpiresAt) {
+	// Check expiry with tolerance window (30 seconds before and after)
+	// This allows:
+	// - Previous QR code (issued 30s ago) to still work
+	// - Current QR code to work
+	// - Next QR code (issued up to 30s in future due to clock skew) to work
+	toleranceWindow := 30 * time.Second
+	
+	// Token is valid if server time is within tolerance window of expiry
+	// Example: If token expires at 10:00:30, it's valid from 10:00:00 to 10:01:00
+	earliestValid := payload.ExpiresAt.Add(-toleranceWindow)
+	latestValid := payload.ExpiresAt.Add(toleranceWindow)
+	
+	if serverTime.Before(earliestValid) || serverTime.After(latestValid) {
 		return nil, ErrTokenExpired
 	}
 

@@ -207,11 +207,13 @@ func (c *Container) registerRoutes() {
 		c.TeacherRatingRepo,
 		c.CourseRatingRepo,
 		c.EnrollmentRepo,
+		c.AttendanceRecordRepo,
+		c.AbsenceRequestRepo,
 	)
 	courseHandler.RegisterRoutes(apiV1)
 
 	// Lesson routes
-	lessonHandler := http.NewLessonHandler(c.LessonService, c.AuthClient)
+	lessonHandler := http.NewLessonHandler(c.LessonService, c.AttendanceService, c.AuthClient)
 	lessonHandler.RegisterRoutes(apiV1)
 
 	// Attendance routes

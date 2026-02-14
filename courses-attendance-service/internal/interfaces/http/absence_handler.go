@@ -270,6 +270,11 @@ func handleAbsenceError(c *fiber.Ctx, err error) error {
 			"success": false,
 			"error":   "This request is already processed",
 		})
+	case errors.Is(err, absenceApp.ErrRequestAlreadyExists):
+		return c.Status(fiber.StatusConflict).JSON(fiber.Map{
+			"success": false,
+			"error":   "You have already submitted an excuse for this lesson",
+		})
 	default:
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"success": false,

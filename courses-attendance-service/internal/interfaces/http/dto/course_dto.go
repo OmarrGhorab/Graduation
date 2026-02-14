@@ -14,6 +14,7 @@ type CreateCourseRequest struct {
 	Title                   string   `json:"title" validate:"required,min=3,max=255"`
 	Description             string   `json:"description"`
 	SubjectID               string   `json:"subjectId" validate:"required,uuid"`
+	CourseImage             string   `json:"courseImage"`
 	DeliveryType            string   `json:"deliveryType" validate:"required,oneof=ONLINE OFFLINE"`
 	LocationName            string   `json:"locationName"`
 	LocationLat             *float64 `json:"locationLat"`
@@ -31,6 +32,7 @@ type CreateCourseRequest struct {
 type UpdateCourseRequest struct {
 	Title                   *string  `json:"title" validate:"omitempty,min=3,max=255"`
 	Description             *string  `json:"description"`
+	CourseImage             *string  `json:"courseImage"`
 	LocationName            *string  `json:"locationName"`
 	LocationLat             *float64 `json:"locationLat"`
 	LocationLng             *float64 `json:"locationLng"`
@@ -180,6 +182,7 @@ type CreateLessonRequest struct {
 	Description     string    `json:"description"`
 	ScheduledAt     time.Time `json:"scheduledAt" validate:"required"`
 	DurationMinutes int       `json:"durationMinutes"`
+	DeliveryType    string    `json:"deliveryType" validate:"required,oneof=ONLINE OFFLINE"`
 	LocationName    string    `json:"locationName"`
 	LocationLat     *float64  `json:"locationLat"`
 	LocationLng     *float64  `json:"locationLng"`
@@ -201,6 +204,7 @@ type LessonResponse struct {
 	EndsAt          *time.Time `json:"endsAt,omitempty"`
 	DurationMinutes int        `json:"durationMinutes"`
 	Status          string     `json:"status"`
+	DeliveryType    string     `json:"deliveryType"`
 	LocationName    string     `json:"locationName,omitempty"`
 	LocationLat     *float64   `json:"locationLat,omitempty"`
 	LocationLng     *float64   `json:"locationLng,omitempty"`
@@ -221,6 +225,7 @@ func ToLessonResponse(l *lessonDomain.Lesson) LessonResponse {
 		EndsAt:          l.EndsAt,
 		DurationMinutes: l.DurationMinutes,
 		Status:          string(l.Status),
+		DeliveryType:    string(l.DeliveryType),
 		LocationName:    l.LocationName,
 		LocationLat:     l.LocationLat,
 		LocationLng:     l.LocationLng,

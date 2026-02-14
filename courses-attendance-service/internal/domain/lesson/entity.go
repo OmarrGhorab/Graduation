@@ -16,6 +16,14 @@ const (
 	LessonStatusCanceled  LessonStatus = "CANCELED"
 )
 
+// DeliveryType represents how a lesson is delivered
+type DeliveryType string
+
+const (
+	DeliveryTypeOnline  DeliveryType = "ONLINE"
+	DeliveryTypeOffline DeliveryType = "OFFLINE"
+)
+
 // Lesson represents a single lesson within a course
 type Lesson struct {
 	ID       uuid.UUID `gorm:"type:uuid;primary_key;default:gen_random_uuid()"`
@@ -35,7 +43,10 @@ type Lesson struct {
 	// Status
 	Status LessonStatus `gorm:"type:lesson_status;not null;default:'SCHEDULED'"`
 
-	// Location override (optional)
+	// Delivery type (can differ from course default)
+	DeliveryType DeliveryType `gorm:"type:varchar(20);not null;default:'OFFLINE'"`
+
+	// Location override (optional, required for OFFLINE lessons)
 	LocationName    string   `gorm:"type:varchar(255)"`
 	LocationLat     *float64 `gorm:"type:double precision"`
 	LocationLng     *float64 `gorm:"type:double precision"`

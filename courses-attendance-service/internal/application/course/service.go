@@ -55,6 +55,7 @@ type CreateCourseInput struct {
 	Description             string
 	SubjectID               uuid.UUID
 	TeacherID               uuid.UUID
+	CourseImage             string
 	DeliveryType            courseDomain.DeliveryType
 	LocationName            string
 	LocationLat             *float64
@@ -103,6 +104,7 @@ func (s *Service) CreateCourse(ctx context.Context, input CreateCourseInput) (*c
 		Description:             input.Description,
 		SubjectID:               input.SubjectID,
 		TeacherID:               input.TeacherID,
+		CourseImage:             input.CourseImage,
 		DeliveryType:            input.DeliveryType,
 		LocationName:            input.LocationName,
 		LocationLat:             input.LocationLat,
