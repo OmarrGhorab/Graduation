@@ -72,6 +72,8 @@ func (h *CourseHandler) RegisterRoutes(router fiber.Router) {
 	courses.Post("/", teacherOnly, h.CreateCourse)
 	courses.Patch("/:id", teacherOnly, h.UpdateCourse)
 	courses.Post("/:id/assistants", teacherOnly, h.AddAssistant)
+	courses.Get("/:id/assistants", teacherOnly, h.GetCourseAssistants)
+	courses.Delete("/:id/assistants/:assistantId", teacherOnly, h.RemoveAssistant)
 	courses.Get("/:id/enrollments", teacherOnly, h.GetCourseEnrollments)
 
 	// Public/Shared routes (but still authenticated)
@@ -790,6 +792,45 @@ func (h *CourseHandler) GetCourseDetails(c *fiber.Ctx) error {
 		courseInfo.SubjectName = course.Subject.Name
 	}
 
+	// Get enrollment count
+	if h.enrollmentRepo != nil {
+		enrollments, err := h.enrollmentRepo.GetByCourseID(c.Context(), courseID)
+		if err == nil {
+			courseInfo.EnrollmentCount = len(enrollments)
+		}
+	}
+
+	// Get assistants
+	if h.courseService != nil {
+		assistants, err := h.courseService.GetCourseAssistants(c.Context(), courseID)
+		if err == nil && len(assistants) > 0 {
+			var assistantInfos []dto.AssistantInfo
+			for _, asst := range assistants {
+				assistantInfo := dto.AssistantInfo{
+					ID:                asst.ID,
+					AssistantID:       asst.AssistantID,
+					CanStartLesson:    asst.CanStartLesson,
+					CanEndLesson:      asst.CanEndLesson,
+					CanViewAttendance: asst.CanViewAttendance,
+					CanEditAttendance: asst.CanEditAttendance,
+					AddedAt:           asst.CreatedAt,
+				}
+
+				// Fetch assistant user info
+				if h.authClient != nil {
+					userInfo, err := h.authClient.GetUserInfo(c.Context(), asst.AssistantID.String())
+					if err == nil && userInfo != nil {
+						assistantInfo.AssistantName = userInfo.Name
+						assistantInfo.AssistantProfileImg = userInfo.ProfileImg
+					}
+				}
+
+				assistantInfos = append(assistantInfos, assistantInfo)
+			}
+			courseInfo.Assistants = assistantInfos
+		}
+	}
+
 	// 2. Get lessons (if lesson service is available)
 	var lessons []dto.LessonInfo
 	if h.lessonService != nil {
@@ -1194,5 +1235,100 @@ func (h *CourseHandler) GetCourseReviews(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{
 		"success": true,
 		"data":    response,
+	})
+}
+
+// GetCourseAssistants godoc
+// @Summary Get all assistants for a course
+// @Tags courses
+// @Produce json
+// @Param id path string true "Course ID"
+// @Success 200 {array} dto.AssistantInfo
+// @Router /api/v1/courses/{id}/assistants [get]
+func (h *CourseHandler) GetCourseAssistants(c *fiber.Ctx) error {
+	courseID, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"success": false,
+			"error":   "Invalid course ID",
+		})
+	}
+
+	assistants, err := h.courseService.GetCourseAssistants(c.Context(), courseID)
+	if err != nil {
+		return handleServiceError(c, err)
+	}
+
+	var responses []dto.AssistantInfo
+	for _, asst := range assistants {
+		assistantInfo := dto.AssistantInfo{
+			ID:                asst.ID,
+			AssistantID:       asst.AssistantID,
+			CanStartLesson:    asst.CanStartLesson,
+			CanEndLesson:      asst.CanEndLesson,
+			CanViewAttendance: asst.CanViewAttendance,
+			CanEditAttendance: asst.CanEditAttendance,
+			AddedAt:           asst.CreatedAt,
+		}
+
+		// Fetch assistant user info
+		if h.authClient != nil {
+			userInfo, err := h.authClient.GetUserInfo(c.Context(), asst.AssistantID.String())
+			if err == nil && userInfo != nil {
+				assistantInfo.AssistantName = userInfo.Name
+				assistantInfo.AssistantProfileImg = userInfo.ProfileImg
+			}
+		}
+
+		responses = append(responses, assistantInfo)
+	}
+
+	return c.JSON(fiber.Map{
+		"success": true,
+		"data":    responses,
+	})
+}
+
+// RemoveAssistant godoc
+// @Summary Remove an assistant from a course
+// @Tags courses
+// @Produce json
+// @Param id path string true "Course ID"
+// @Param assistantId path string true "Assistant ID"
+// @Success 200 {object} map[string]interface{}
+// @Router /api/v1/courses/{id}/assistants/{assistantId} [delete]
+func (h *CourseHandler) RemoveAssistant(c *fiber.Ctx) error {
+	courseID, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"success": false,
+			"error":   "Invalid course ID",
+		})
+	}
+
+	assistantID, err := uuid.Parse(c.Params("assistantId"))
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"success": false,
+			"error":   "Invalid assistant ID",
+		})
+	}
+
+	teacherID, err := getUserIDFromContext(c)
+	if err != nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"success": false,
+			"error":   "Unauthorized",
+		})
+	}
+
+	err = h.courseService.RemoveAssistant(c.Context(), courseID, teacherID, assistantID)
+	if err != nil {
+		return handleServiceError(c, err)
+	}
+
+	return c.JSON(fiber.Map{
+		"success": true,
+		"message": "Assistant removed successfully",
 	})
 }

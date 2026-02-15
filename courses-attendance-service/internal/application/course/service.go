@@ -411,3 +411,34 @@ func (s *Service) MarkEnrollmentPaid(ctx context.Context, courseID, studentID uu
 
 	return s.enrollmentRepo.Update(ctx, enrollment)
 }
+
+// GetCourseAssistants returns all assistants for a course
+func (s *Service) GetCourseAssistants(ctx context.Context, courseID uuid.UUID) ([]courseDomain.CourseAssistant, error) {
+	return s.assistantRepo.GetByCourseID(ctx, courseID)
+}
+
+// RemoveAssistant removes an assistant from a course
+func (s *Service) RemoveAssistant(ctx context.Context, courseID, teacherID, assistantID uuid.UUID) error {
+	// Verify course and ownership
+	course, err := s.courseRepo.GetByID(ctx, courseID)
+	if err != nil {
+		return err
+	}
+	if course == nil {
+		return ErrCourseNotFound
+	}
+	if course.TeacherID != teacherID {
+		return ErrUnauthorized
+	}
+
+	// Get assistant to verify it exists
+	assistant, err := s.assistantRepo.GetByCourseAndAssistant(ctx, courseID, assistantID)
+	if err != nil {
+		return err
+	}
+	if assistant == nil {
+		return errors.New("assistant not found")
+	}
+
+	return s.assistantRepo.Delete(ctx, courseID, assistantID)
+}
