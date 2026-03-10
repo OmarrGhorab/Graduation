@@ -74,6 +74,14 @@ type LessonInfo struct {
 	EndsAt            *time.Time `json:"endsAt,omitempty"`
 	DurationMinutes   int        `json:"durationMinutes"`
 	DeliveryType      string     `json:"deliveryType"`
+	IsFree            bool       `json:"isFree"` // True if this lesson is free (for trial)
+	
+	// Online lesson materials (for ONLINE delivery type)
+	VideoURL      string `json:"videoUrl,omitempty"`      // Cloudinary video URL
+	VideoPublicID string `json:"videoPublicId,omitempty"` // Cloudinary public ID
+	MaterialsURL  string `json:"materialsUrl,omitempty"`  // Additional materials URL
+	Duration      *int   `json:"duration,omitempty"`      // Video duration in seconds
+	
 	LocationName      string     `json:"locationName,omitempty"`
 	LocationLat       *float64   `json:"locationLat,omitempty"`
 	LocationLng       *float64   `json:"locationLng,omitempty"`

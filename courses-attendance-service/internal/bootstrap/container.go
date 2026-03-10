@@ -14,6 +14,7 @@ import (
 	"github.com/OmarrGhorab/courses-attendance-service/internal/infrastructure/authclient"
 	"github.com/OmarrGhorab/courses-attendance-service/internal/infrastructure/cache/redis"
 	"github.com/OmarrGhorab/courses-attendance-service/internal/infrastructure/clock"
+	"github.com/OmarrGhorab/courses-attendance-service/internal/infrastructure/cloudinary"
 	"github.com/OmarrGhorab/courses-attendance-service/internal/infrastructure/messaging/kafka"
 	"github.com/OmarrGhorab/courses-attendance-service/internal/infrastructure/notificationevents"
 	"github.com/OmarrGhorab/courses-attendance-service/internal/infrastructure/persistence/postgres"
@@ -48,6 +49,7 @@ type Container struct {
 	QRGenerator     *qr.Generator
 	KafkaProducer   *kafka.Producer
 	EventDispatcher *notificationevents.EventDispatcher
+	CloudinaryClient *cloudinary.Client
 	Clock           clock.Clock
 
 	// Services
@@ -107,6 +109,13 @@ func New() (*Container, error) {
 func (c *Container) initInfrastructure() {
 	c.AuthClient = authclient.NewClient(c.Config.Auth.ServiceURL, c.Config.Auth.InternalSecret)
 	c.QRGenerator = qr.NewGenerator(c.Config.QR.SigningSecret, c.Clock)
+
+	// Cloudinary
+	cloudinaryClient, err := cloudinary.NewClient(c.Config.Cloudinary)
+	if err != nil {
+		log.Fatalf("Failed to initialize Cloudinary: %v", err)
+	}
+	c.CloudinaryClient = cloudinaryClient
 
 	// Messaging
 	c.KafkaProducer = kafka.NewProducer(c.Config.Kafka.Brokers)
@@ -212,8 +221,12 @@ func (c *Container) registerRoutes() {
 	)
 	courseHandler.RegisterRoutes(apiV1)
 
+	// Teacher routes
+	teacherHandler := http.NewTeacherHandler(c.TeacherRatingRepo, c.AuthClient)
+	teacherHandler.RegisterRoutes(apiV1)
+
 	// Lesson routes
-	lessonHandler := http.NewLessonHandler(c.LessonService, c.AttendanceService, c.AuthClient)
+	lessonHandler := http.NewLessonHandler(c.LessonService, c.AttendanceService, c.AuthClient, c.CloudinaryClient)
 	lessonHandler.RegisterRoutes(apiV1)
 
 	// Attendance routes

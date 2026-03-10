@@ -8,12 +8,13 @@ import (
 )
 
 type Config struct {
-	Server   ServerConfig
-	Database DatabaseConfig
-	Redis    RedisConfig
-	Kafka    KafkaConfig
-	Auth     AuthConfig
-	QR       QRConfig
+	Server    ServerConfig
+	Database  DatabaseConfig
+	Redis     RedisConfig
+	Kafka     KafkaConfig
+	Auth      AuthConfig
+	QR        QRConfig
+	Cloudinary CloudinaryConfig
 }
 
 type ServerConfig struct {
@@ -51,6 +52,13 @@ type QRConfig struct {
 	SigningSecret          string
 	RotationIntervalSeconds int
 	ExpirySeconds          int
+}
+
+type CloudinaryConfig struct {
+	CloudName string
+	APIKey    string
+	APISecret string
+	Folder    string
 }
 
 func Load() (*Config, error) {
@@ -94,6 +102,12 @@ func Load() (*Config, error) {
 			RotationIntervalSeconds: qrRotation,
 			ExpirySeconds:          qrExpiry,
 		},
+		Cloudinary: CloudinaryConfig{
+			CloudName: getEnv("CLOUDINARY_CLOUD_NAME", ""),
+			APIKey:    getEnv("CLOUDINARY_API_KEY", ""),
+			APISecret: getEnv("CLOUDINARY_API_SECRET", ""),
+			Folder:    getEnv("CLOUDINARY_FOLDER", "course-materials"),
+		},
 	}
 
 	if cfg.Auth.InternalSecret == "" {
@@ -101,6 +115,9 @@ func Load() (*Config, error) {
 	}
 	if cfg.QR.SigningSecret == "" {
 		return nil, fmt.Errorf("QR_SIGNING_SECRET is required")
+	}
+	if cfg.Cloudinary.CloudName == "" || cfg.Cloudinary.APIKey == "" || cfg.Cloudinary.APISecret == "" {
+		return nil, fmt.Errorf("Cloudinary credentials are required")
 	}
 
 	return cfg, nil

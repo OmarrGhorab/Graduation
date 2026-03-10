@@ -56,6 +56,15 @@ type CreateLessonInput struct {
 	ScheduledAt     time.Time
 	DurationMinutes int
 	DeliveryType    lessonDomain.DeliveryType
+	IsFree          bool
+	
+	// Online lesson materials
+	VideoURL      string
+	VideoPublicID string
+	MaterialsURL  string
+	Duration      *int
+	
+	// Location (for OFFLINE)
 	LocationName    string
 	LocationLat     *float64
 	LocationLng     *float64
@@ -98,6 +107,11 @@ func (s *Service) CreateLesson(ctx context.Context, teacherID uuid.UUID, input C
 		DurationMinutes: input.DurationMinutes,
 		Status:          lessonDomain.LessonStatusScheduled,
 		DeliveryType:    input.DeliveryType,
+		IsFree:          input.IsFree,
+		VideoURL:        input.VideoURL,
+		VideoPublicID:   input.VideoPublicID,
+		MaterialsURL:    input.MaterialsURL,
+		Duration:        input.Duration,
 		LocationName:    input.LocationName,
 		LocationLat:     input.LocationLat,
 		LocationLng:     input.LocationLng,
@@ -286,4 +300,11 @@ func (s *Service) recomputeAllStudentsProgress(courseID uuid.UUID) {
 	// Note: We need a way to get all student IDs for this course.
 	// Since we don't have enrollment repo here yet, we'll leave it as a hook
 	// for Phase 7 (Events).
+}
+
+
+// UpdateLesson updates a lesson
+func (s *Service) UpdateLesson(ctx context.Context, lesson *lessonDomain.Lesson) error {
+	lesson.UpdatedAt = s.clock.Now()
+	return s.lessonRepo.Update(ctx, lesson)
 }

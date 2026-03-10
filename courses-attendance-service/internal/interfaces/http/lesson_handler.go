@@ -7,6 +7,7 @@ import (
 	lessonApp "github.com/OmarrGhorab/courses-attendance-service/internal/application/lesson"
 	lessonDomain "github.com/OmarrGhorab/courses-attendance-service/internal/domain/lesson"
 	"github.com/OmarrGhorab/courses-attendance-service/internal/infrastructure/authclient"
+	"github.com/OmarrGhorab/courses-attendance-service/internal/infrastructure/cloudinary"
 	"github.com/OmarrGhorab/courses-attendance-service/internal/interfaces/http/dto"
 	"github.com/OmarrGhorab/courses-attendance-service/internal/interfaces/http/middleware"
 	"github.com/gofiber/fiber/v2"
@@ -18,13 +19,15 @@ type LessonHandler struct {
 	lessonService     *lessonApp.Service
 	attendanceService *attendanceApp.Service
 	authClient        *authclient.Client
+	cloudinaryClient  *cloudinary.Client
 }
 
-func NewLessonHandler(lessonService *lessonApp.Service, attendanceService *attendanceApp.Service, authClient *authclient.Client) *LessonHandler {
+func NewLessonHandler(lessonService *lessonApp.Service, attendanceService *attendanceApp.Service, authClient *authclient.Client, cloudinaryClient *cloudinary.Client) *LessonHandler {
 	return &LessonHandler{
 		lessonService:     lessonService,
 		attendanceService: attendanceService,
 		authClient:        authClient,
+		cloudinaryClient:  cloudinaryClient,
 	}
 }
 
@@ -39,6 +42,10 @@ func (h *LessonHandler) RegisterRoutes(router fiber.Router) {
 	lessons.Post("/:id/end", teacherOnly, h.EndLesson)
 	lessons.Post("/:id/cancel", teacherOnly, h.CancelLesson)
 	lessons.Post("/:id/reschedule", teacherOnly, h.RescheduleLesson)
+	lessons.Put("/:id/materials", teacherOnly, h.UpdateLessonMaterials)
+	lessons.Post("/:id/upload-video", teacherOnly, h.UploadVideo)       // NEW: Upload video
+	lessons.Post("/:id/upload-document", teacherOnly, h.UploadDocument) // NEW: Upload document
+	lessons.Delete("/:id/video", teacherOnly, h.DeleteVideo)            // NEW: Delete video
 
 	// Course lessons
 	router.Get("/courses/:id/lessons", auth, h.GetCourseLessons)
@@ -85,6 +92,11 @@ func (h *LessonHandler) CreateLesson(c *fiber.Ctx) error {
 		ScheduledAt:     req.ScheduledAt,
 		DurationMinutes: req.DurationMinutes,
 		DeliveryType:    lessonDomain.DeliveryType(req.DeliveryType),
+		IsFree:          req.IsFree,
+		VideoURL:        req.VideoURL,
+		VideoPublicID:   req.VideoPublicID,
+		MaterialsURL:    req.MaterialsURL,
+		Duration:        req.Duration,
 		LocationName:    req.LocationName,
 		LocationLat:     req.LocationLat,
 		LocationLng:     req.LocationLng,
@@ -369,4 +381,317 @@ func handleLessonServiceError(c *fiber.Ctx, err error) error {
 			"error":   "Internal server error",
 		})
 	}
+}
+
+
+// UpdateLessonMaterials godoc
+// @Summary Update lesson materials (video, documents)
+// @Tags lessons
+// @Accept json
+// @Produce json
+// @Param id path string true "Lesson ID"
+// @Param body body dto.UpdateLessonMaterialsRequest true "Materials data"
+// @Success 200 {object} dto.LessonResponse
+// @Router /api/v1/lessons/{id}/materials [put]
+func (h *LessonHandler) UpdateLessonMaterials(c *fiber.Ctx) error {
+	lessonID, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"success": false,
+			"error":   "Invalid lesson ID",
+		})
+	}
+
+	var req dto.UpdateLessonMaterialsRequest
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"success": false,
+			"error":   "Invalid request body",
+		})
+	}
+
+	// Get lesson
+	lesson, err := h.lessonService.GetLesson(c.Context(), lessonID)
+	if err != nil {
+		return handleLessonServiceError(c, err)
+	}
+
+	// Check if lesson is ONLINE
+	if lesson.DeliveryType != lessonDomain.DeliveryTypeOnline {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"success": false,
+			"error":   "Materials can only be uploaded for ONLINE lessons",
+		})
+	}
+
+	// Update materials
+	if req.VideoURL != nil {
+		lesson.VideoURL = *req.VideoURL
+	}
+	if req.VideoPublicID != nil {
+		lesson.VideoPublicID = *req.VideoPublicID
+	}
+	if req.MaterialsURL != nil {
+		lesson.MaterialsURL = *req.MaterialsURL
+	}
+	if req.Duration != nil {
+		lesson.Duration = req.Duration
+	}
+
+	// Save lesson
+	if err := h.lessonService.UpdateLesson(c.Context(), lesson); err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"success": false,
+			"error":   "Failed to update lesson materials",
+		})
+	}
+
+	return c.JSON(fiber.Map{
+		"success": true,
+		"data":    dto.ToLessonResponse(lesson),
+		"message": "Lesson materials updated successfully",
+	})
+}
+
+
+// UploadVideo godoc
+// @Summary Upload video file to Cloudinary for a lesson
+// @Tags lessons
+// @Accept multipart/form-data
+// @Produce json
+// @Param id path string true "Lesson ID"
+// @Param video formData file true "Video file"
+// @Success 200 {object} dto.LessonResponse
+// @Router /api/v1/lessons/{id}/upload-video [post]
+func (h *LessonHandler) UploadVideo(c *fiber.Ctx) error {
+	lessonID, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"success": false,
+			"error":   "Invalid lesson ID",
+		})
+	}
+
+	// Get lesson
+	lesson, err := h.lessonService.GetLesson(c.Context(), lessonID)
+	if err != nil {
+		return handleLessonServiceError(c, err)
+	}
+
+	// Check if lesson is ONLINE
+	if lesson.DeliveryType != lessonDomain.DeliveryTypeOnline {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"success": false,
+			"error":   "Videos can only be uploaded for ONLINE lessons",
+		})
+	}
+
+	// Get file from form
+	fileHeader, err := c.FormFile("video")
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"success": false,
+			"error":   "Video file is required",
+		})
+	}
+
+	// Validate video file
+	if err := cloudinary.ValidateVideoFile(fileHeader); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"success": false,
+			"error":   err.Error(),
+		})
+	}
+
+	// Open file
+	file, err := fileHeader.Open()
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"success": false,
+			"error":   "Failed to read video file",
+		})
+	}
+	defer file.Close()
+
+	// Delete old video if exists
+	if lesson.VideoPublicID != "" {
+		_ = h.cloudinaryClient.DeleteResource(c.Context(), lesson.VideoPublicID, "video")
+	}
+
+	// Upload to Cloudinary
+	result, err := h.cloudinaryClient.UploadVideo(c.Context(), file, fileHeader.Filename)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"success": false,
+			"error":   "Failed to upload video to Cloudinary",
+		})
+	}
+
+	// Update lesson
+	lesson.VideoURL = result.URL
+	lesson.VideoPublicID = result.PublicID
+	lesson.Duration = result.Duration
+
+	if err := h.lessonService.UpdateLesson(c.Context(), lesson); err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"success": false,
+			"error":   "Failed to update lesson",
+		})
+	}
+
+	return c.JSON(fiber.Map{
+		"success": true,
+		"data":    dto.ToLessonResponse(lesson),
+		"message": "Video uploaded successfully",
+		"upload_info": fiber.Map{
+			"size_mb":  float64(result.Bytes) / (1024 * 1024),
+			"duration": result.Duration,
+			"format":   result.Format,
+		},
+	})
+}
+
+// UploadDocument godoc
+// @Summary Upload document file to Cloudinary for a lesson
+// @Tags lessons
+// @Accept multipart/form-data
+// @Produce json
+// @Param id path string true "Lesson ID"
+// @Param document formData file true "Document file (PDF, DOC, PPT, etc.)"
+// @Success 200 {object} dto.LessonResponse
+// @Router /api/v1/lessons/{id}/upload-document [post]
+func (h *LessonHandler) UploadDocument(c *fiber.Ctx) error {
+	lessonID, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"success": false,
+			"error":   "Invalid lesson ID",
+		})
+	}
+
+	// Get lesson
+	lesson, err := h.lessonService.GetLesson(c.Context(), lessonID)
+	if err != nil {
+		return handleLessonServiceError(c, err)
+	}
+
+	// Check if lesson is ONLINE
+	if lesson.DeliveryType != lessonDomain.DeliveryTypeOnline {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"success": false,
+			"error":   "Documents can only be uploaded for ONLINE lessons",
+		})
+	}
+
+	// Get file from form
+	fileHeader, err := c.FormFile("document")
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"success": false,
+			"error":   "Document file is required",
+		})
+	}
+
+	// Validate document file
+	if err := cloudinary.ValidateDocumentFile(fileHeader); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"success": false,
+			"error":   err.Error(),
+		})
+	}
+
+	// Open file
+	file, err := fileHeader.Open()
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"success": false,
+			"error":   "Failed to read document file",
+		})
+	}
+	defer file.Close()
+
+	// Upload to Cloudinary
+	result, err := h.cloudinaryClient.UploadDocument(c.Context(), file, fileHeader.Filename)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"success": false,
+			"error":   "Failed to upload document to Cloudinary",
+		})
+	}
+
+	// Update lesson
+	lesson.MaterialsURL = result.URL
+
+	if err := h.lessonService.UpdateLesson(c.Context(), lesson); err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"success": false,
+			"error":   "Failed to update lesson",
+		})
+	}
+
+	return c.JSON(fiber.Map{
+		"success": true,
+		"data":    dto.ToLessonResponse(lesson),
+		"message": "Document uploaded successfully",
+		"upload_info": fiber.Map{
+			"size_mb": float64(result.Bytes) / (1024 * 1024),
+			"format":  result.Format,
+		},
+	})
+}
+
+// DeleteVideo godoc
+// @Summary Delete video from Cloudinary and lesson
+// @Tags lessons
+// @Produce json
+// @Param id path string true "Lesson ID"
+// @Success 200 {object} dto.LessonResponse
+// @Router /api/v1/lessons/{id}/video [delete]
+func (h *LessonHandler) DeleteVideo(c *fiber.Ctx) error {
+	lessonID, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"success": false,
+			"error":   "Invalid lesson ID",
+		})
+	}
+
+	// Get lesson
+	lesson, err := h.lessonService.GetLesson(c.Context(), lessonID)
+	if err != nil {
+		return handleLessonServiceError(c, err)
+	}
+
+	if lesson.VideoPublicID == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"success": false,
+			"error":   "No video to delete",
+		})
+	}
+
+	// Delete from Cloudinary
+	if err := h.cloudinaryClient.DeleteResource(c.Context(), lesson.VideoPublicID, "video"); err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"success": false,
+			"error":   "Failed to delete video from Cloudinary",
+		})
+	}
+
+	// Update lesson
+	lesson.VideoURL = ""
+	lesson.VideoPublicID = ""
+	lesson.Duration = nil
+
+	if err := h.lessonService.UpdateLesson(c.Context(), lesson); err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"success": false,
+			"error":   "Failed to update lesson",
+		})
+	}
+
+	return c.JSON(fiber.Map{
+		"success": true,
+		"data":    dto.ToLessonResponse(lesson),
+		"message": "Video deleted successfully",
+	})
 }

@@ -56,6 +56,9 @@ type Course struct {
 	Currency    string      `gorm:"type:varchar(10);not null;default:'EGP'"`
 	IsPaid      bool        `gorm:"not null;default:false"`
 	BillingType BillingType `gorm:"type:billing_type;not null;default:'ONE_TIME'"`
+	
+	// Free trial support
+	FreeTrialLessons int `gorm:"not null;default:0"` // Number of free lessons (0 = all paid or all free based on IsPaid)
 
 	// Status
 	Status CourseStatus `gorm:"type:course_status;not null;default:'ACTIVE'"`

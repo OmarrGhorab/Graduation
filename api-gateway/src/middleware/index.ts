@@ -46,12 +46,12 @@ export function setupMiddleware(app: Express, config: AppConfig): void {
   app.use(timeoutMiddleware);
 
   // 3. Body parsing with halt-on-timeout checks between parsers
-  // Parse JSON bodies (up to 10MB)
-  app.use(json({ limit: "10mb" }));
+  // Parse JSON bodies (up to 500MB for video uploads)
+  app.use(json({ limit: "500mb" }));
   app.use(haltOnTimeout); // Check timeout after JSON parsing to prevent processing timed-out requests
 
-  // Parse URL-encoded bodies (up to 10MB)
-  app.use(urlencoded({ extended: true, limit: "10mb" }));
+  // Parse URL-encoded bodies (up to 500MB for video uploads)
+  app.use(urlencoded({ extended: true, limit: "500mb" }));
   app.use(haltOnTimeout); // Check timeout after URL-encoded parsing
 
   // 4. CORS (after body parsing, before business logic)

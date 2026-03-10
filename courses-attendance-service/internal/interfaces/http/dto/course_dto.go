@@ -26,6 +26,7 @@ type CreateCourseRequest struct {
 	Currency                string   `json:"currency"`
 	IsPaid                  bool     `json:"isPaid"`
 	BillingType             string   `json:"billingType" validate:"omitempty,oneof=ONE_TIME MONTHLY"`
+	FreeTrialLessons        int      `json:"freeTrialLessons"` // Number of free lessons for trial
 	AttendanceWeight        float64  `json:"attendanceWeight"`
 }
 
@@ -40,6 +41,7 @@ type UpdateCourseRequest struct {
 	AttendanceWindowMinutes *int     `json:"attendanceWindowMinutes"`
 	Price                   *float64 `json:"price"`
 	BillingType             *string  `json:"billingType" validate:"omitempty,oneof=ONE_TIME MONTHLY"`
+	FreeTrialLessons        *int     `json:"freeTrialLessons"` // Number of free lessons for trial
 	Status                  *string  `json:"status" validate:"omitempty,oneof=ACTIVE PAUSED ARCHIVED"`
 }
 
@@ -183,10 +185,19 @@ type CreateLessonRequest struct {
 	ScheduledAt     time.Time `json:"scheduledAt" validate:"required"`
 	DurationMinutes int       `json:"durationMinutes"`
 	DeliveryType    string    `json:"deliveryType" validate:"required,oneof=ONLINE OFFLINE"`
-	LocationName    string    `json:"locationName"`
-	LocationLat     *float64  `json:"locationLat"`
-	LocationLng     *float64  `json:"locationLng"`
-	GeofenceRadiusM *int      `json:"geofenceRadiusM"`
+	IsFree          bool      `json:"isFree"` // True if this lesson is free (for trial)
+	
+	// Online lesson materials (for ONLINE delivery type)
+	VideoURL      string `json:"videoUrl"`      // Cloudinary video URL
+	VideoPublicID string `json:"videoPublicId"` // Cloudinary public ID
+	MaterialsURL  string `json:"materialsUrl"`  // Additional materials URL
+	Duration      *int   `json:"duration"`      // Video duration in seconds
+	
+	// Location (for OFFLINE delivery type)
+	LocationName    string   `json:"locationName"`
+	LocationLat     *float64 `json:"locationLat"`
+	LocationLng     *float64 `json:"locationLng"`
+	GeofenceRadiusM *int     `json:"geofenceRadiusM"`
 }
 
 type RescheduleLessonRequest struct {
@@ -233,4 +244,13 @@ func ToLessonResponse(l *lessonDomain.Lesson) LessonResponse {
 		CreatedAt:       l.CreatedAt,
 		UpdatedAt:       l.UpdatedAt,
 	}
+}
+
+
+// UpdateLessonMaterialsRequest represents a request to update lesson materials
+type UpdateLessonMaterialsRequest struct {
+	VideoURL      *string `json:"videoUrl"`      // Cloudinary video URL
+	VideoPublicID *string `json:"videoPublicId"` // Cloudinary public ID
+	MaterialsURL  *string `json:"materialsUrl"`  // Additional materials URL
+	Duration      *int    `json:"duration"`      // Video duration in seconds
 }

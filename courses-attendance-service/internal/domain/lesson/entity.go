@@ -46,6 +46,15 @@ type Lesson struct {
 	// Delivery type (can differ from course default)
 	DeliveryType DeliveryType `gorm:"type:varchar(20);not null;default:'OFFLINE'"`
 
+	// Free trial support
+	IsFree bool `gorm:"not null;default:false"` // True if this lesson is free (for trial)
+
+	// Online lesson materials (for ONLINE delivery type)
+	VideoURL      string `gorm:"type:text"` // Cloudinary video URL
+	VideoPublicID string `gorm:"type:varchar(255)"` // Cloudinary public ID for video
+	MaterialsURL  string `gorm:"type:text"` // Additional materials (PDFs, slides, etc.)
+	Duration      *int   `gorm:"type:integer"` // Video duration in seconds
+
 	// Location override (optional, required for OFFLINE lessons)
 	LocationName    string   `gorm:"type:varchar(255)"`
 	LocationLat     *float64 `gorm:"type:double precision"`

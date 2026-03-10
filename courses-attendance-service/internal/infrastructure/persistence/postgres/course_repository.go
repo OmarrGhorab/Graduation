@@ -299,3 +299,38 @@ func (r *CourseRatingRepository) CountCourseRatings(ctx context.Context, courseI
 	err := r.db.WithContext(ctx).Model(&CourseRating{}).Where("course_id = ?", courseID).Count(&count).Error
 	return count, err
 }
+
+// CreateCourseRating creates a new course rating
+func (r *CourseRatingRepository) CreateCourseRating(ctx context.Context, rating *CourseRating) error {
+	return r.db.WithContext(ctx).Create(rating).Error
+}
+
+// GetCourseRatingByStudent gets a student's rating for a course
+func (r *CourseRatingRepository) GetCourseRatingByStudent(ctx context.Context, courseID, studentID uuid.UUID) (*CourseRating, error) {
+	var rating CourseRating
+	err := r.db.WithContext(ctx).Where("course_id = ? AND student_id = ?", courseID, studentID).First(&rating).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	return &rating, err
+}
+
+// UpdateCourseRating updates an existing course rating
+func (r *CourseRatingRepository) UpdateCourseRating(ctx context.Context, rating *CourseRating) error {
+	return r.db.WithContext(ctx).Save(rating).Error
+}
+
+// DeleteCourseRating deletes a course rating
+func (r *CourseRatingRepository) DeleteCourseRating(ctx context.Context, id uuid.UUID) error {
+	return r.db.WithContext(ctx).Delete(&CourseRating{}, "id = ?", id).Error
+}
+
+// GetTopRatedTeachers gets top-rated teachers
+func (r *TeacherRatingRepository) GetTopRatedTeachers(ctx context.Context, limit int, minRating float64, ratings *[]TeacherAvgRating) error {
+	return r.db.WithContext(ctx).
+		Table("teacher_avg_ratings").
+		Where("avg_rating >= ?", minRating).
+		Order("avg_rating DESC, total_ratings DESC").
+		Limit(limit).
+		Find(ratings).Error
+}

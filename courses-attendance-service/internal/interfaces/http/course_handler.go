@@ -2,6 +2,7 @@ package http
 
 import (
 	"errors"
+	"time"
 
 	courseApp "github.com/OmarrGhorab/courses-attendance-service/internal/application/course"
 	lessonApp "github.com/OmarrGhorab/courses-attendance-service/internal/application/lesson"
@@ -83,6 +84,9 @@ func (h *CourseHandler) RegisterRoutes(router fiber.Router) {
 	courses.Get("/subjects/:subjectId/details", h.GetSubjectDetails) // NEW: Subject with courses
 	courses.Get("/:id/details", h.GetCourseDetails) // Combined endpoint
 	courses.Get("/:id/reviews", h.GetCourseReviews) // NEW: Course reviews
+	courses.Post("/:id/reviews", h.CreateCourseReview) // NEW: Create review
+	courses.Put("/:id/reviews/:reviewId", h.UpdateCourseReview) // NEW: Update review
+	courses.Delete("/:id/reviews/:reviewId", h.DeleteCourseReview) // NEW: Delete review
 	courses.Get("/:id", h.GetCourse)
 	courses.Post("/:id/enroll", h.EnrollStudent)
 
@@ -889,6 +893,11 @@ func (h *CourseHandler) GetCourseDetails(c *fiber.Ctx) error {
 					EndsAt:            l.EndsAt,
 					DurationMinutes:   l.DurationMinutes,
 					DeliveryType:      string(l.DeliveryType),
+					IsFree:            l.IsFree,
+					VideoURL:          l.VideoURL,
+					VideoPublicID:     l.VideoPublicID,
+					MaterialsURL:      l.MaterialsURL,
+					Duration:          l.Duration,
 					LocationName:      l.LocationName,
 					LocationLat:       l.LocationLat,
 					LocationLng:       l.LocationLng,
@@ -1330,5 +1339,285 @@ func (h *CourseHandler) RemoveAssistant(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{
 		"success": true,
 		"message": "Assistant removed successfully",
+	})
+}
+
+// CreateCourseReview godoc
+// @Summary Create a review for a course
+// @Tags courses
+// @Accept json
+// @Produce json
+// @Param id path string true "Course ID"
+// @Param body body dto.CreateCourseReviewRequest true "Review data"
+// @Success 201 {object} dto.CourseReviewResponse
+// @Router /api/v1/courses/{id}/reviews [post]
+func (h *CourseHandler) CreateCourseReview(c *fiber.Ctx) error {
+	courseID, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"success": false,
+			"error":   "Invalid course ID",
+		})
+	}
+
+	var req dto.CreateCourseReviewRequest
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"success": false,
+			"error":   "Invalid request body",
+		})
+	}
+
+	if err := ValidateStruct(req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"success": false,
+			"errors":  FormatValidationErrors(err),
+		})
+	}
+
+	// Get current user ID
+	studentID, err := getUserIDFromContext(c)
+	if err != nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"success": false,
+			"error":   "Unauthorized",
+		})
+	}
+
+	// Check if course exists
+	_, err = h.courseService.GetCourse(c.Context(), courseID)
+	if err != nil {
+		return handleServiceError(c, err)
+	}
+
+	// Check if student is enrolled
+	if h.enrollmentRepo != nil {
+		enrollment, _ := h.enrollmentRepo.GetByCourseAndUser(c.Context(), courseID, studentID)
+		if enrollment == nil || !enrollment.IsActive {
+			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+				"success": false,
+				"error":   "You must be enrolled in this course to leave a review",
+			})
+		}
+	}
+
+	// Check if student already reviewed this course
+	if h.courseRatingRepo != nil {
+		existingReview, _ := h.courseRatingRepo.GetCourseRatingByStudent(c.Context(), courseID, studentID)
+		if existingReview != nil {
+			return c.Status(fiber.StatusConflict).JSON(fiber.Map{
+				"success": false,
+				"error":   "You have already reviewed this course. Use PUT to update your review.",
+			})
+		}
+	}
+
+	// Create review
+	now := time.Now()
+	review := &postgres.CourseRating{
+		ID:        uuid.New(),
+		CourseID:  courseID,
+		StudentID: studentID,
+		Rating:    req.Rating,
+		Review:    req.Review,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+
+	if err := h.courseRatingRepo.CreateCourseRating(c.Context(), review); err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"success": false,
+			"error":   "Failed to create review",
+		})
+	}
+
+	// Fetch student info
+	response := dto.CourseReviewResponse{
+		ID:        review.ID,
+		StudentID: review.StudentID,
+		Rating:    review.Rating,
+		Review:    review.Review,
+		CreatedAt: review.CreatedAt,
+		UpdatedAt: review.UpdatedAt,
+	}
+
+	if h.authClient != nil {
+		userInfo, _ := h.authClient.GetUserInfo(c.Context(), studentID.String())
+		if userInfo != nil {
+			response.StudentName = userInfo.Name
+			response.StudentProfile = userInfo.ProfileImg
+		}
+	}
+
+	return c.Status(fiber.StatusCreated).JSON(fiber.Map{
+		"success": true,
+		"data":    response,
+	})
+}
+
+// UpdateCourseReview godoc
+// @Summary Update a course review
+// @Tags courses
+// @Accept json
+// @Produce json
+// @Param id path string true "Course ID"
+// @Param reviewId path string true "Review ID"
+// @Param body body dto.UpdateCourseReviewRequest true "Review data"
+// @Success 200 {object} dto.CourseReviewResponse
+// @Router /api/v1/courses/{id}/reviews/{reviewId} [put]
+func (h *CourseHandler) UpdateCourseReview(c *fiber.Ctx) error {
+	courseID, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"success": false,
+			"error":   "Invalid course ID",
+		})
+	}
+
+	reviewID, err := uuid.Parse(c.Params("reviewId"))
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"success": false,
+			"error":   "Invalid review ID",
+		})
+	}
+
+	var req dto.UpdateCourseReviewRequest
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"success": false,
+			"error":   "Invalid request body",
+		})
+	}
+
+	if err := ValidateStruct(req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"success": false,
+			"errors":  FormatValidationErrors(err),
+		})
+	}
+
+	// Get current user ID
+	studentID, err := getUserIDFromContext(c)
+	if err != nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"success": false,
+			"error":   "Unauthorized",
+		})
+	}
+
+	// Get existing review
+	existingReview, err := h.courseRatingRepo.GetCourseRatingByStudent(c.Context(), courseID, studentID)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"success": false,
+			"error":   "Failed to fetch review",
+		})
+	}
+
+	if existingReview == nil || existingReview.ID != reviewID {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+			"success": false,
+			"error":   "Review not found or you don't have permission to edit it",
+		})
+	}
+
+	// Update review
+	existingReview.Rating = req.Rating
+	existingReview.Review = req.Review
+	existingReview.UpdatedAt = time.Now()
+
+	if err := h.courseRatingRepo.UpdateCourseRating(c.Context(), existingReview); err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"success": false,
+			"error":   "Failed to update review",
+		})
+	}
+
+	// Fetch student info
+	response := dto.CourseReviewResponse{
+		ID:        existingReview.ID,
+		StudentID: existingReview.StudentID,
+		Rating:    existingReview.Rating,
+		Review:    existingReview.Review,
+		CreatedAt: existingReview.CreatedAt,
+		UpdatedAt: existingReview.UpdatedAt,
+	}
+
+	if h.authClient != nil {
+		userInfo, _ := h.authClient.GetUserInfo(c.Context(), studentID.String())
+		if userInfo != nil {
+			response.StudentName = userInfo.Name
+			response.StudentProfile = userInfo.ProfileImg
+		}
+	}
+
+	return c.JSON(fiber.Map{
+		"success": true,
+		"data":    response,
+	})
+}
+
+// DeleteCourseReview godoc
+// @Summary Delete a course review
+// @Tags courses
+// @Produce json
+// @Param id path string true "Course ID"
+// @Param reviewId path string true "Review ID"
+// @Success 200 {object} map[string]interface{}
+// @Router /api/v1/courses/{id}/reviews/{reviewId} [delete]
+func (h *CourseHandler) DeleteCourseReview(c *fiber.Ctx) error {
+	courseID, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"success": false,
+			"error":   "Invalid course ID",
+		})
+	}
+
+	reviewID, err := uuid.Parse(c.Params("reviewId"))
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"success": false,
+			"error":   "Invalid review ID",
+		})
+	}
+
+	// Get current user ID
+	studentID, err := getUserIDFromContext(c)
+	if err != nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"success": false,
+			"error":   "Unauthorized",
+		})
+	}
+
+	// Get existing review
+	existingReview, err := h.courseRatingRepo.GetCourseRatingByStudent(c.Context(), courseID, studentID)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"success": false,
+			"error":   "Failed to fetch review",
+		})
+	}
+
+	if existingReview == nil || existingReview.ID != reviewID {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+			"success": false,
+			"error":   "Review not found or you don't have permission to delete it",
+		})
+	}
+
+	// Delete review
+	if err := h.courseRatingRepo.DeleteCourseRating(c.Context(), reviewID); err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"success": false,
+			"error":   "Failed to delete review",
+		})
+	}
+
+	return c.JSON(fiber.Map{
+		"success": true,
+		"message": "Review deleted successfully",
 	})
 }
