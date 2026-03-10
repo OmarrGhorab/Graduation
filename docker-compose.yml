@@ -1,4 +1,4 @@
-# Docker Compose for Graduation Project - All Microservices
+﻿# Docker Compose for Graduation Project - All Microservices
 # Supports multiple instances per service for load balancing
 
 services:
@@ -45,12 +45,14 @@ services:
       - CHAT_SERVICE_URLS=http://chat-service-1:6004,http://chat-service-2:6014,http://chat-service-3:6024
       - WS_GATEWAY_URLS=http://ws-gateway-1:6005,http://ws-gateway-2:6015,http://ws-gateway-3:6025
       - COURSES_SERVICE_URLS=http://courses-service-1:8085,http://courses-service-2:8085
+      - PAYMENT_SERVICE_URLS=http://payment-service:8090
     depends_on:
       - auth-service-1
       - notification-service-1
       - chat-service-1
       - ws-gateway-1
       - courses-service-1
+      - payment-service
 
   # ============ AUTH SERVICE (3 instances) ============
   auth-service-1:
@@ -181,8 +183,8 @@ services:
       - KAFKA_BROKERS=kafka:29092
       - JWT_ACCESS_SECRET=47079cb745e7b5c1ebaa8106cabc00f43d6356ce3b0d4b725156742f4084280b
       - INTERNAL_SERVICE_SECRET=1262c8c0eab801906cf8c1a0493897ff194f4948fde08cb453ad939578123b8596606d1d4871c4e0d1a46d5ecbd5dbcd09491cb0831fa808fcff4b98c9d67403
-      - NOTIFICATION_SERVICE_URL=http://host.docker.internal:6003
-      - AUTH_SERVICE_URL=http://host.docker.internal:6001
+      - NOTIFICATION_SERVICE_URL=http://notification-service-1:6003
+      - AUTH_SERVICE_URL=http://auth-service-1:6001
       - WS_GATEWAY_URL=http://ws-gateway-1:6005
       - CLOUDINARY_CLOUD_NAME=${CLOUDINARY_CLOUD_NAME}
       - CLOUDINARY_API_KEY=${CLOUDINARY_API_KEY}
@@ -209,8 +211,8 @@ services:
       - KAFKA_BROKERS=kafka:29092
       - JWT_ACCESS_SECRET=47079cb745e7b5c1ebaa8106cabc00f43d6356ce3b0d4b725156742f4084280b
       - INTERNAL_SERVICE_SECRET=1262c8c0eab801906cf8c1a0493897ff194f4948fde08cb453ad939578123b8596606d1d4871c4e0d1a46d5ecbd5dbcd09491cb0831fa808fcff4b98c9d67403
-      - NOTIFICATION_SERVICE_URL=http://host.docker.internal:6003
-      - AUTH_SERVICE_URL=http://host.docker.internal:6001
+      - NOTIFICATION_SERVICE_URL=http://notification-service-1:6003
+      - AUTH_SERVICE_URL=http://auth-service-1:6001
       - WS_GATEWAY_URL=http://ws-gateway-2:6015
       - CLOUDINARY_CLOUD_NAME=${CLOUDINARY_CLOUD_NAME}
       - CLOUDINARY_API_KEY=${CLOUDINARY_API_KEY}
@@ -237,8 +239,8 @@ services:
       - KAFKA_BROKERS=kafka:29092
       - JWT_ACCESS_SECRET=47079cb745e7b5c1ebaa8106cabc00f43d6356ce3b0d4b725156742f4084280b
       - INTERNAL_SERVICE_SECRET=1262c8c0eab801906cf8c1a0493897ff194f4948fde08cb453ad939578123b8596606d1d4871c4e0d1a46d5ecbd5dbcd09491cb0831fa808fcff4b98c9d67403
-      - NOTIFICATION_SERVICE_URL=http://host.docker.internal:6003
-      - AUTH_SERVICE_URL=http://host.docker.internal:6001
+      - NOTIFICATION_SERVICE_URL=http://notification-service-1:6003
+      - AUTH_SERVICE_URL=http://auth-service-1:6001
       - WS_GATEWAY_URL=http://ws-gateway-3:6025
       - CLOUDINARY_CLOUD_NAME=${CLOUDINARY_CLOUD_NAME}
       - CLOUDINARY_API_KEY=${CLOUDINARY_API_KEY}
@@ -338,7 +340,7 @@ services:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - KAFKA_BROKERS=kafka:29092
-      - AUTH_SERVICE_URL=http://host.docker.internal:6001
+      - AUTH_SERVICE_URL=http://auth-service-1:6001
       - INTERNAL_SERVICE_SECRET=1262c8c0eab801906cf8c1a0493897ff194f4948fde08cb453ad939578123b8596606d1d4871c4e0d1a46d5ecbd5dbcd09491cb0831fa808fcff4b98c9d67403
       - QR_SIGNING_SECRET=1ce06e00180a568d716839e801a9f1430048386377709a349c869719488a0b0d3e52fef94c502b2801487c9f87178c54
       - QR_ROTATION_INTERVAL_SECONDS=30
@@ -375,7 +377,7 @@ services:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - KAFKA_BROKERS=kafka:29092
-      - AUTH_SERVICE_URL=http://host.docker.internal:6001
+      - AUTH_SERVICE_URL=http://auth-service-1:6001
       - INTERNAL_SERVICE_SECRET=1262c8c0eab801906cf8c1a0493897ff194f4948fde08cb453ad939578123b8596606d1d4871c4e0d1a46d5ecbd5dbcd09491cb0831fa808fcff4b98c9d67403
       - QR_SIGNING_SECRET=1ce06e00180a568d716839e801a9f1430048386377709a349c869719488a0b0d3e52fef94c502b2801487c9f87178c54
       - QR_ROTATION_INTERVAL_SECONDS=30
@@ -393,6 +395,42 @@ services:
         condition: service_started
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:8085/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+  # ============ PAYMENT SERVICE ============
+  payment-service:
+    build: ./payment-service
+    ports:
+      - "8090:8090"
+    environment:
+      - SERVER_PORT=8090
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_USER=graduation
+      - DB_PASSWORD=graduation_secret
+      - DB_NAME=graduation
+      - DB_SSL_MODE=disable
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - KAFKA_BROKERS=kafka:29092
+      - AUTH_SERVICE_URL=http://auth-service-1:6001
+      - INTERNAL_SERVICE_SECRET=1262c8c0eab801906cf8c1a0493897ff194f4948fde08cb453ad939578123b8596606d1d4871c4e0d1a46d5ecbd5dbcd09491cb0831fa808fcff4b98c9d67403
+      - PAYMOB_API_KEY=${PAYMOB_API_KEY}
+      - PAYMOB_CARD_INTEGRATION_ID=${PAYMOB_CARD_INTEGRATION_ID}
+      - PAYMOB_WALLET_INTEGRATION_ID=${PAYMOB_WALLET_INTEGRATION_ID}
+      - PAYMOB_IFRAME_ID=${PAYMOB_IFRAME_ID}
+      - PAYMOB_HMAC_SECRET=${PAYMOB_HMAC_SECRET}
+      - COURSES_SERVICE_URL=http://courses-service-1:8085
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8090/health"]
       interval: 10s
       timeout: 5s
       retries: 3

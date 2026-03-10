@@ -24,6 +24,7 @@ const serviceIndexes: Record<string, number> = {
   chat: 0,
   ws: 0,
   courses: 0,
+  payment: 0,
 };
 
 /**
@@ -81,6 +82,8 @@ export function setupRoutes(app: Express, config: AppConfig): { wsProxy: any } {
         ...config.services.auth,
         ...config.services.notification,
         ...config.services.chat,
+        ...config.services.courses,
+        ...config.services.payment,
       ];
       const healthCheck = await checkAllServices(services);
 
@@ -190,6 +193,14 @@ export function setupRoutes(app: Express, config: AppConfig): { wsProxy: any } {
   });
 
   app.use("/ws", wsProxy);
+
+  // Payment service routes
+  app.use(
+    "/api/v1/payments",
+    proxy(() => getNextServiceUrl(config.services.payment, "payment"), {
+      proxyReqPathResolver: (req) => req.originalUrl,
+    })
+  );
 
   // Auth service catch-all (load balanced, must be last)
   app.use(

@@ -41,4 +41,4 @@ ENV NODE_ENV=production
 EXPOSE 6001
 
 # Start the server
-CMD ["node", "dist/main.js"]
+CMD ["node", "--experimental-specifier-resolution=node", "dist/main.js"]

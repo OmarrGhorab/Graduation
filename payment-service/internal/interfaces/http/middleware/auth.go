@@ -1,0 +1,50 @@
+package middleware
+
+import (
+	"strings"
+
+	"github.com/OmarrGhorab/payment-service/internal/infrastructure/authclient"
+	"github.com/gofiber/fiber/v2"
+)
+
+func Authenticate(authClient *authclient.Client) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		authHeader := c.Get("Authorization")
+		if authHeader == "" {
+			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+				"success": false,
+				"error":   "Missing authorization header",
+			})
+		}
+
+		parts := strings.Split(authHeader, " ")
+		if len(parts) != 2 || parts[0] != "Bearer" {
+			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+				"success": false,
+				"error":   "Invalid authorization header format",
+			})
+		}
+
+		token := parts[1]
+
+		resp, err := authClient.ValidateToken(c.Context(), token)
+		if err != nil {
+			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+				"success": false,
+				"error":   "Invalid or expired token",
+			})
+		}
+
+		if !resp.Valid {
+			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+				"success": false,
+				"error":   "Unauthorized",
+			})
+		}
+
+		c.Locals("userId", resp.UserID)
+		c.Locals("userRole", resp.Role)
+
+		return c.Next()
+	}
+}

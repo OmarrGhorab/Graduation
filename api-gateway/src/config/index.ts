@@ -56,6 +56,7 @@ export interface ServicesConfig {
   chat: ServiceEndpoint[];
   ws: ServiceEndpoint[];
   courses: ServiceEndpoint[];
+  payment: ServiceEndpoint[];
 }
 
 /**
@@ -167,6 +168,16 @@ export function validateConfig(config: AppConfig): void {
       throw new Error(`Invalid COURSES_SERVICE_URL: ${service.url} must be a valid HTTP/HTTPS URL`);
     }
   }
+
+  // Validate payment service URLs
+  if (config.services.payment.length === 0) {
+    throw new Error("At least one PAYMENT_SERVICE_URL is required");
+  }
+  for (const service of config.services.payment) {
+    if (!urlPattern.test(service.url)) {
+      throw new Error(`Invalid PAYMENT_SERVICE_URL: ${service.url} must be a valid HTTP/HTTPS URL`);
+    }
+  }
 }
 
 /**
@@ -206,6 +217,7 @@ export function loadConfig(): AppConfig {
   const notificationServiceUrls = process.env.NOTIFICATION_SERVICE_URLS || "http://localhost:6003,http://localhost:6013,http://localhost:6023";
   const chatServiceUrls = process.env.CHAT_SERVICE_URLS || "http://localhost:6004,http://localhost:6014,http://localhost:6024";
   const coursesServiceUrls = process.env.COURSES_SERVICE_URLS || "http://localhost:8085,http://localhost:8086";
+  const paymentServiceUrls = process.env.PAYMENT_SERVICE_URLS || "http://localhost:8090";
 
   // Build configuration object
   const config: AppConfig = {
@@ -230,6 +242,7 @@ export function loadConfig(): AppConfig {
       chat: parseServiceUrls(chatServiceUrls, "chat-service"),
       ws: parseServiceUrls(process.env.WS_GATEWAY_URLS || "http://localhost:8001", "ws-gateway"),
       courses: parseServiceUrls(coursesServiceUrls, "courses-service"),
+      payment: parseServiceUrls(paymentServiceUrls, "payment-service"),
     },
     security: {
       arcjetKey: process.env.ARCJET_KEY,
