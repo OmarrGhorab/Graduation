@@ -61,6 +61,20 @@ func (s *Service) CreatePayment(ctx context.Context, opts CreatePaymentOptions) 
 		return "", uuid.Nil, errors.New("course is free or price is invalid")
 	}
 
+	// Check if user is the owner
+	if course.TeacherID == opts.UserID.String() {
+		return "", uuid.Nil, errors.New("you cannot buy your own course")
+	}
+
+	// Check if already enrolled
+	isEnrolled, err := s.coursesClient.CheckEnrollment(ctx, opts.UserID.String(), opts.CourseID.String())
+	if err != nil {
+		log.Printf("Warning: failed to check enrollment: %v", err)
+	} else if isEnrolled {
+		return "", uuid.Nil, errors.New("you are already enrolled in this course")
+	}
+
+
 	amountCents := int64(math.Round(course.Price * 100))
 
 	// 2. Create local PaymentOrder

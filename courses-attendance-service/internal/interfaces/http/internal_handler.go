@@ -25,6 +25,7 @@ func (h *InternalHandler) RegisterRoutes(router fiber.Router) {
 
 	internal.Get("/courses/:id", h.GetCourse)
 	internal.Post("/enrollments/activate", h.ActivateEnrollment)
+	internal.Get("/enrollments/check", h.CheckEnrollment)
 }
 
 func (h *InternalHandler) GetCourse(c *fiber.Ctx) error {
@@ -86,3 +87,37 @@ func (h *InternalHandler) ActivateEnrollment(c *fiber.Ctx) error {
 		"message": "Enrollment activated successfully",
 	})
 }
+
+func (h *InternalHandler) CheckEnrollment(c *fiber.Ctx) error {
+	userIDStr := c.Query("userId")
+	courseIDStr := c.Query("courseId")
+
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"success": false,
+			"error":   "Invalid user ID",
+		})
+	}
+
+	courseID, err := uuid.Parse(courseIDStr)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"success": false,
+			"error":   "Invalid course ID",
+		})
+	}
+
+	isEnrolled, err := h.courseService.IsEnrolled(c.Context(), courseID, userID)
+	if err != nil {
+		return handleServiceError(c, err)
+	}
+
+	return c.JSON(fiber.Map{
+		"success": true,
+		"data": fiber.Map{
+			"isEnrolled": isEnrolled,
+		},
+	})
+}
+

@@ -1390,13 +1390,22 @@ func (h *CourseHandler) CreateCourseReview(c *fiber.Ctx) error {
 		return handleServiceError(c, err)
 	}
 
-	// Check if student is enrolled
+	// Check if student is enrolled and has paid
 	if h.enrollmentRepo != nil {
 		enrollment, _ := h.enrollmentRepo.GetByCourseAndUser(c.Context(), courseID, studentID)
 		if enrollment == nil || !enrollment.IsActive {
 			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
 				"success": false,
 				"error":   "You must be enrolled in this course to leave a review",
+			})
+		}
+		
+		// Ensure payment is completed for paid courses
+		course, _ := h.courseService.GetCourse(c.Context(), courseID)
+		if course != nil && course.IsPaid && !enrollment.IsPaid {
+			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+				"success": false,
+				"error":   "You must purchase the course before leaving a review",
 			})
 		}
 	}
