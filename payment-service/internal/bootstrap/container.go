@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/OmarrGhorab/payment-service/internal/application/payment"
+	paymentApp "github.com/OmarrGhorab/payment-service/internal/application/payment"
 	"github.com/OmarrGhorab/payment-service/internal/config"
 	"github.com/OmarrGhorab/payment-service/internal/infrastructure/authclient"
 	"github.com/OmarrGhorab/payment-service/internal/infrastructure/cache/redis"
@@ -12,6 +12,7 @@ import (
 	"github.com/OmarrGhorab/payment-service/internal/infrastructure/messaging/kafka"
 	"github.com/OmarrGhorab/payment-service/internal/infrastructure/paymob"
 	"github.com/OmarrGhorab/payment-service/internal/infrastructure/persistence/postgres"
+	paymentDomain "github.com/OmarrGhorab/payment-service/internal/domain/payment"
 	"github.com/OmarrGhorab/payment-service/internal/interfaces/http"
 	"github.com/gofiber/fiber/v2"
 )
@@ -32,7 +33,7 @@ type Container struct {
 	KafkaProducer *kafka.Producer
 
 	// Services
-	PaymentService *payment.Service
+	PaymentService *paymentApp.Service
 }
 
 func New() (*Container, error) {
@@ -60,6 +61,13 @@ func New() (*Container, error) {
 		Redis:  redisClient,
 	}
 
+	// Auto-migrate tables
+	if err := db.DB.AutoMigrate(&paymentDomain.PaymentOrder{}, &paymentDomain.PaymentTransaction{}); err != nil {
+		return nil, fmt.Errorf("failed to auto-migrate: %w", err)
+	}
+
+
+
 	container.initInfrastructure()
 	container.initRepositories()
 	container.initServices()
@@ -86,7 +94,7 @@ func (c *Container) initRepositories() {
 }
 
 func (c *Container) initServices() {
-	c.PaymentService = payment.NewService(
+	c.PaymentService = paymentApp.NewService(
 		c.PaymentRepo,
 		c.PaymobClient,
 		c.CoursesClient,

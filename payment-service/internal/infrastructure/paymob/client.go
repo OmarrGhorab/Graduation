@@ -179,13 +179,18 @@ func (c *Client) PayWithWallet(ctx context.Context, paymentToken string, phoneNu
 	}
 
 	var result struct {
-		RedirectURL string `json:"iframe_redirection_url"`
+		RedirectURL       string `json:"redirect_url"`
+		IframeRedirectURL string `json:"iframe_redirection_url"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return "", err
 	}
 
-	return result.RedirectURL, nil
+	if result.RedirectURL != "" {
+		return result.RedirectURL, nil
+	}
+	return result.IframeRedirectURL, nil
+
 }
 
 // Helper: Build Iframe URL

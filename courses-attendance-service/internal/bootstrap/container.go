@@ -221,6 +221,11 @@ func (c *Container) registerRoutes() {
 	)
 	courseHandler.RegisterRoutes(apiV1)
 
+	// Internal routes
+	internalHandler := http.NewInternalHandler(c.CourseService, c.Config.Auth.InternalSecret)
+	internalHandler.RegisterRoutes(apiV1)
+
+
 	// Teacher routes
 	teacherHandler := http.NewTeacherHandler(c.TeacherRatingRepo, c.AuthClient)
 	teacherHandler.RegisterRoutes(apiV1)

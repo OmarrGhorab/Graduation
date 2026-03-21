@@ -7,6 +7,13 @@ type CreatePaymentRequest struct {
 	FirstName     string `json:"firstName" validate:"required"`
 	LastName      string `json:"lastName" validate:"required"`
 	Email         string `json:"email" validate:"required,email"`
+	Apartment     string `json:"apartment" validate:"omitempty"`
+	Floor         string `json:"floor" validate:"omitempty"`
+	Building      string `json:"building" validate:"omitempty"`
+	Street        string `json:"street" validate:"omitempty"`
+	City          string `json:"city" validate:"omitempty"`
+	State         string `json:"state" validate:"omitempty"`
+	Country       string `json:"country" validate:"omitempty"`
 }
 
 type CreatePaymentResponse struct {

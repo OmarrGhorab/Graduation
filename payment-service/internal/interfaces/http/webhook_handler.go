@@ -14,7 +14,7 @@ func NewWebhookHandler(svc *payment.Service) *WebhookHandler {
 }
 
 func (h *WebhookHandler) RegisterRoutes(router fiber.Router) {
-	router.Post("/webhook/paymob", h.PaymobWebhook)
+	router.Post("/payments/webhook/paymob", h.PaymobWebhook)
 }
 
 func (h *WebhookHandler) PaymobWebhook(c *fiber.Ctx) error {

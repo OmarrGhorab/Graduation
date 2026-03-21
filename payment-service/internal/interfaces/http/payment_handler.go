@@ -49,8 +49,16 @@ func (h *PaymentHandler) CreatePayment(c *fiber.Ctx) error {
 			LastName:    req.LastName,
 			Email:       req.Email,
 			PhoneNumber: req.PhoneNumber,
+			Street:      h.defaultIfEmpty(req.Street, "N/A"),
+			Building:    h.defaultIfEmpty(req.Building, "N/A"),
+			Floor:       h.defaultIfEmpty(req.Floor, "N/A"),
+			Apartment:   h.defaultIfEmpty(req.Apartment, "N/A"),
+			City:        h.defaultIfEmpty(req.City, "N/A"),
+			State:       h.defaultIfEmpty(req.State, "N/A"),
+			Country:     h.defaultIfEmpty(req.Country, "Egypt"),
 		},
 	})
+
 
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
@@ -100,3 +108,11 @@ func (h *PaymentHandler) GetStatus(c *fiber.Ctx) error {
 		},
 	})
 }
+
+func (h *PaymentHandler) defaultIfEmpty(val, def string) string {
+	if val == "" {
+		return def
+	}
+	return val
+}
+

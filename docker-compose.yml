@@ -1,5 +1,5 @@
-﻿# Docker Compose for Graduation Project - All Microservices
-# Supports multiple instances per service for load balancing
+# Docker Compose for Graduation Project - Supporting Infrastructure Only
+# Node services (API Gateway, Auth, Notification) are managed via terminal
 
 services:
   # ============ DATABASES ============
@@ -31,230 +31,6 @@ services:
       timeout: 5s
       retries: 5
 
-  # ============ API GATEWAY ============
-  api-gateway:
-    build: ./api-gateway
-    ports:
-      - "3000:3000"
-    environment:
-      - PORT=3000
-      - NODE_ENV=production
-      - ALLOWED_ORIGINS=*
-      - AUTH_SERVICE_URLS=http://auth-service-1:6001,http://auth-service-2:6011,http://auth-service-3:6021
-      - NOTIFICATION_SERVICE_URLS=http://notification-service-1:6003,http://notification-service-2:6013,http://notification-service-3:6023
-      - CHAT_SERVICE_URLS=http://chat-service-1:6004,http://chat-service-2:6014,http://chat-service-3:6024
-      - WS_GATEWAY_URLS=http://ws-gateway-1:6005,http://ws-gateway-2:6015,http://ws-gateway-3:6025
-      - COURSES_SERVICE_URLS=http://courses-service-1:8085,http://courses-service-2:8085
-      - PAYMENT_SERVICE_URLS=http://payment-service:8090
-    depends_on:
-      - auth-service-1
-      - notification-service-1
-      - chat-service-1
-      - ws-gateway-1
-      - courses-service-1
-      - payment-service
-
-  # ============ AUTH SERVICE (3 instances) ============
-  auth-service-1:
-    build: ./auth-service
-    ports:
-      - "6001:6001"
-    environment:
-      - PORT=6001
-      - NODE_ENV=production
-      - DATABASE_URL=postgresql://graduation:graduation_secret@postgres:5432/graduation
-      - REDIS_URL=redis://redis:6379
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-
-  auth-service-2:
-    build: ./auth-service
-    ports:
-      - "6011:6011"
-    environment:
-      - PORT=6011
-      - NODE_ENV=production
-      - DATABASE_URL=postgresql://graduation:graduation_secret@postgres:5432/graduation
-      - REDIS_URL=redis://redis:6379
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-
-  auth-service-3:
-    build: ./auth-service
-    ports:
-      - "6021:6021"
-    environment:
-      - PORT=6021
-      - NODE_ENV=production
-      - DATABASE_URL=postgresql://graduation:graduation_secret@postgres:5432/graduation
-      - REDIS_URL=redis://redis:6379
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-
-  # ============ NOTIFICATION SERVICE (3 instances) ============
-  notification-service-1:
-    build: ./notification-service
-    ports:
-      - "6003:6003"
-    environment:
-      - PORT=6003
-      - NODE_ENV=production
-      - DATABASE_URL=postgresql://graduation:graduation_secret@postgres:5432/graduation
-      - REDIS_URL=redis://redis:6379
-      - AUTH_SERVICE_URL=http://auth-service-1:6001
-      - INTERNAL_SERVICE_SECRET=1262c8c0eab801906cf8c1a0493897ff194f4948fde08cb453ad939578123b8596606d1d4871c4e0d1a46d5ecbd5dbcd09491cb0831fa808fcff4b98c9d67403
-      - JWT_ACCESS_SECRET=47079cb745e7b5c1ebaa8106cabc00f43d6356ce3b0d4b725156742f4084280b
-      - FIREBASE_PROJECT_ID=${FIREBASE_PROJECT_ID}
-      - FIREBASE_PRIVATE_KEY=${FIREBASE_PRIVATE_KEY}
-      - FIREBASE_CLIENT_EMAIL=${FIREBASE_CLIENT_EMAIL}
-      - COURSES_SERVICE_URL=http://courses-service-1:8085
-      - KAFKA_BROKERS=kafka:29092
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-
-  notification-service-2:
-    build: ./notification-service
-    ports:
-      - "6013:6013"
-    environment:
-      - PORT=6013
-      - NODE_ENV=production
-      - DATABASE_URL=postgresql://graduation:graduation_secret@postgres:5432/graduation
-      - REDIS_URL=redis://redis:6379
-      - AUTH_SERVICE_URL=http://auth-service-2:6011
-      - INTERNAL_SERVICE_SECRET=1262c8c0eab801906cf8c1a0493897ff194f4948fde08cb453ad939578123b8596606d1d4871c4e0d1a46d5ecbd5dbcd09491cb0831fa808fcff4b98c9d67403
-      - JWT_ACCESS_SECRET=47079cb745e7b5c1ebaa8106cabc00f43d6356ce3b0d4b725156742f4084280b
-      - FIREBASE_PROJECT_ID=${FIREBASE_PROJECT_ID}
-      - FIREBASE_PRIVATE_KEY=${FIREBASE_PRIVATE_KEY}
-      - FIREBASE_CLIENT_EMAIL=${FIREBASE_CLIENT_EMAIL}
-      - COURSES_SERVICE_URL=http://courses-service-1:8085
-      - KAFKA_BROKERS=kafka:29092
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-
-  notification-service-3:
-    build: ./notification-service
-    ports:
-      - "6023:6023"
-    environment:
-      - PORT=6023
-      - NODE_ENV=production
-      - DATABASE_URL=postgresql://graduation:graduation_secret@postgres:5432/graduation
-      - REDIS_URL=redis://redis:6379
-      - AUTH_SERVICE_URL=http://auth-service-3:6021
-      - INTERNAL_SERVICE_SECRET=1262c8c0eab801906cf8c1a0493897ff194f4948fde08cb453ad939578123b8596606d1d4871c4e0d1a46d5ecbd5dbcd09491cb0831fa808fcff4b98c9d67403
-      - JWT_ACCESS_SECRET=47079cb745e7b5c1ebaa8106cabc00f43d6356ce3b0d4b725156742f4084280b
-      - FIREBASE_PROJECT_ID=${FIREBASE_PROJECT_ID}
-      - FIREBASE_PRIVATE_KEY=${FIREBASE_PRIVATE_KEY}
-      - FIREBASE_CLIENT_EMAIL=${FIREBASE_CLIENT_EMAIL}
-      - COURSES_SERVICE_URL=http://courses-service-1:8085
-      - KAFKA_BROKERS=kafka:29092
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-
-  # ============ CHAT SERVICE (3 instances) ============
-  chat-service-1:
-    build: ./chat-service
-    ports:
-      - "6004:6004"
-    environment:
-      - PORT=6004
-      - ENV=production
-      - DATABASE_URL=postgresql://graduation:graduation_secret@postgres:5432/graduation?sslmode=disable
-      - REDIS_URL=redis://redis:6379
-      - KAFKA_BROKERS=kafka:29092
-      - JWT_ACCESS_SECRET=47079cb745e7b5c1ebaa8106cabc00f43d6356ce3b0d4b725156742f4084280b
-      - INTERNAL_SERVICE_SECRET=1262c8c0eab801906cf8c1a0493897ff194f4948fde08cb453ad939578123b8596606d1d4871c4e0d1a46d5ecbd5dbcd09491cb0831fa808fcff4b98c9d67403
-      - NOTIFICATION_SERVICE_URL=http://notification-service-1:6003
-      - AUTH_SERVICE_URL=http://auth-service-1:6001
-      - WS_GATEWAY_URL=http://ws-gateway-1:6005
-      - CLOUDINARY_CLOUD_NAME=${CLOUDINARY_CLOUD_NAME}
-      - CLOUDINARY_API_KEY=${CLOUDINARY_API_KEY}
-      - CLOUDINARY_API_SECRET=${CLOUDINARY_API_SECRET}
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      notification-service-1:
-        condition: service_started
-      ws-gateway-1:
-        condition: service_started
-
-  chat-service-2:
-    build: ./chat-service
-    ports:
-      - "6014:6014"
-    environment:
-      - PORT=6014
-      - ENV=production
-      - DATABASE_URL=postgresql://graduation:graduation_secret@postgres:5432/graduation?sslmode=disable
-      - REDIS_URL=redis://redis:6379
-      - KAFKA_BROKERS=kafka:29092
-      - JWT_ACCESS_SECRET=47079cb745e7b5c1ebaa8106cabc00f43d6356ce3b0d4b725156742f4084280b
-      - INTERNAL_SERVICE_SECRET=1262c8c0eab801906cf8c1a0493897ff194f4948fde08cb453ad939578123b8596606d1d4871c4e0d1a46d5ecbd5dbcd09491cb0831fa808fcff4b98c9d67403
-      - NOTIFICATION_SERVICE_URL=http://notification-service-1:6003
-      - AUTH_SERVICE_URL=http://auth-service-1:6001
-      - WS_GATEWAY_URL=http://ws-gateway-2:6015
-      - CLOUDINARY_CLOUD_NAME=${CLOUDINARY_CLOUD_NAME}
-      - CLOUDINARY_API_KEY=${CLOUDINARY_API_KEY}
-      - CLOUDINARY_API_SECRET=${CLOUDINARY_API_SECRET}
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      notification-service-2:
-        condition: service_started
-      ws-gateway-2:
-        condition: service_started
-
-  chat-service-3:
-    build: ./chat-service
-    ports:
-      - "6024:6024"
-    environment:
-      - PORT=6024
-      - ENV=production
-      - DATABASE_URL=postgresql://graduation:graduation_secret@postgres:5432/graduation?sslmode=disable
-      - REDIS_URL=redis://redis:6379
-      - KAFKA_BROKERS=kafka:29092
-      - JWT_ACCESS_SECRET=47079cb745e7b5c1ebaa8106cabc00f43d6356ce3b0d4b725156742f4084280b
-      - INTERNAL_SERVICE_SECRET=1262c8c0eab801906cf8c1a0493897ff194f4948fde08cb453ad939578123b8596606d1d4871c4e0d1a46d5ecbd5dbcd09491cb0831fa808fcff4b98c9d67403
-      - NOTIFICATION_SERVICE_URL=http://notification-service-1:6003
-      - AUTH_SERVICE_URL=http://auth-service-1:6001
-      - WS_GATEWAY_URL=http://ws-gateway-3:6025
-      - CLOUDINARY_CLOUD_NAME=${CLOUDINARY_CLOUD_NAME}
-      - CLOUDINARY_API_KEY=${CLOUDINARY_API_KEY}
-      - CLOUDINARY_API_SECRET=${CLOUDINARY_API_SECRET}
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      notification-service-3:
-        condition: service_started
-      ws-gateway-3:
-        condition: service_started
-
   # ============ KAFKA ============
   zookeeper:
     image: confluentinc/cp-zookeeper:7.5.0
@@ -277,6 +53,91 @@ services:
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+
+  # ============ CHAT SERVICE (3 instances) ============
+  chat-service-1:
+    build: ./chat-service
+    ports:
+      - "6004:6004"
+    environment:
+      - PORT=6004
+      - ENV=production
+      - DATABASE_URL=postgresql://graduation:graduation_secret@postgres:5432/graduation?sslmode=disable
+      - REDIS_URL=redis://redis:6379
+      - KAFKA_BROKERS=kafka:29092
+      - JWT_ACCESS_SECRET=47079cb745e7b5c1ebaa8106cabc00f43d6356ce3b0d4b725156742f4084280b
+      - INTERNAL_SERVICE_SECRET=1262c8c0eab801906cf8c1a0493897ff194f4948fde08cb453ad939578123b8596606d1d4871c4e0d1a46d5ecbd5dbcd09491cb0831fa808fcff4b98c9d67403
+      - NOTIFICATION_SERVICE_URL=http://host.docker.internal:6003
+      - AUTH_SERVICE_URL=http://host.docker.internal:6001
+      - WS_GATEWAY_URL=http://ws-gateway-1:6005
+      - CLOUDINARY_CLOUD_NAME=${CLOUDINARY_CLOUD_NAME}
+      - CLOUDINARY_API_KEY=${CLOUDINARY_API_KEY}
+      - CLOUDINARY_API_SECRET=${CLOUDINARY_API_SECRET}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      ws-gateway-1:
+        condition: service_started
+
+  chat-service-2:
+    build: ./chat-service
+    ports:
+      - "6014:6014"
+    environment:
+      - PORT=6014
+      - ENV=production
+      - DATABASE_URL=postgresql://graduation:graduation_secret@postgres:5432/graduation?sslmode=disable
+      - REDIS_URL=redis://redis:6379
+      - KAFKA_BROKERS=kafka:29092
+      - JWT_ACCESS_SECRET=47079cb745e7b5c1ebaa8106cabc00f43d6356ce3b0d4b725156742f4084280b
+      - INTERNAL_SERVICE_SECRET=1262c8c0eab801906cf8c1a0493897ff194f4948fde08cb453ad939578123b8596606d1d4871c4e0d1a46d5ecbd5dbcd09491cb0831fa808fcff4b98c9d67403
+      - NOTIFICATION_SERVICE_URL=http://host.docker.internal:6003
+      - AUTH_SERVICE_URL=http://host.docker.internal:6001
+      - WS_GATEWAY_URL=http://ws-gateway-2:6015
+      - CLOUDINARY_CLOUD_NAME=${CLOUDINARY_CLOUD_NAME}
+      - CLOUDINARY_API_KEY=${CLOUDINARY_API_KEY}
+      - CLOUDINARY_API_SECRET=${CLOUDINARY_API_SECRET}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      ws-gateway-2:
+        condition: service_started
+
+  chat-service-3:
+    build: ./chat-service
+    ports:
+      - "6024:6024"
+    environment:
+      - PORT=6024
+      - ENV=production
+      - DATABASE_URL=postgresql://graduation:graduation_secret@postgres:5432/graduation?sslmode=disable
+      - REDIS_URL=redis://redis:6379
+      - KAFKA_BROKERS=kafka:29092
+      - JWT_ACCESS_SECRET=47079cb745e7b5c1ebaa8106cabc00f43d6356ce3b0d4b725156742f4084280b
+      - INTERNAL_SERVICE_SECRET=1262c8c0eab801906cf8c1a0493897ff194f4948fde08cb453ad939578123b8596606d1d4871c4e0d1a46d5ecbd5dbcd09491cb0831fa808fcff4b98c9d67403
+      - NOTIFICATION_SERVICE_URL=http://host.docker.internal:6003
+      - AUTH_SERVICE_URL=http://host.docker.internal:6001
+      - WS_GATEWAY_URL=http://ws-gateway-3:6025
+      - CLOUDINARY_CLOUD_NAME=${CLOUDINARY_CLOUD_NAME}
+      - CLOUDINARY_API_KEY=${CLOUDINARY_API_KEY}
+      - CLOUDINARY_API_SECRET=${CLOUDINARY_API_SECRET}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      ws-gateway-3:
+        condition: service_started
 
   # ============ WS GATEWAY (3 instances) ============
   ws-gateway-1:
@@ -340,7 +201,7 @@ services:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - KAFKA_BROKERS=kafka:29092
-      - AUTH_SERVICE_URL=http://auth-service-1:6001
+      - AUTH_SERVICE_URL=http://host.docker.internal:6001
       - INTERNAL_SERVICE_SECRET=1262c8c0eab801906cf8c1a0493897ff194f4948fde08cb453ad939578123b8596606d1d4871c4e0d1a46d5ecbd5dbcd09491cb0831fa808fcff4b98c9d67403
       - QR_SIGNING_SECRET=1ce06e00180a568d716839e801a9f1430048386377709a349c869719488a0b0d3e52fef94c502b2801487c9f87178c54
       - QR_ROTATION_INTERVAL_SECONDS=30
@@ -349,6 +210,8 @@ services:
       - CLOUDINARY_API_KEY=${CLOUDINARY_API_KEY}
       - CLOUDINARY_API_SECRET=${CLOUDINARY_API_SECRET}
       - CLOUDINARY_FOLDER=course-materials
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       postgres:
         condition: service_healthy
@@ -377,7 +240,7 @@ services:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - KAFKA_BROKERS=kafka:29092
-      - AUTH_SERVICE_URL=http://auth-service-1:6001
+      - AUTH_SERVICE_URL=http://host.docker.internal:6001
       - INTERNAL_SERVICE_SECRET=1262c8c0eab801906cf8c1a0493897ff194f4948fde08cb453ad939578123b8596606d1d4871c4e0d1a46d5ecbd5dbcd09491cb0831fa808fcff4b98c9d67403
       - QR_SIGNING_SECRET=1ce06e00180a568d716839e801a9f1430048386377709a349c869719488a0b0d3e52fef94c502b2801487c9f87178c54
       - QR_ROTATION_INTERVAL_SECONDS=30
@@ -386,6 +249,8 @@ services:
       - CLOUDINARY_API_KEY=${CLOUDINARY_API_KEY}
       - CLOUDINARY_API_SECRET=${CLOUDINARY_API_SECRET}
       - CLOUDINARY_FOLDER=course-materials
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       postgres:
         condition: service_healthy
@@ -398,6 +263,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 3
+
   # ============ PAYMENT SERVICE ============
   payment-service:
     build: ./payment-service
@@ -414,7 +280,7 @@ services:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - KAFKA_BROKERS=kafka:29092
-      - AUTH_SERVICE_URL=http://auth-service-1:6001
+      - AUTH_SERVICE_URL=http://host.docker.internal:6001
       - INTERNAL_SERVICE_SECRET=1262c8c0eab801906cf8c1a0493897ff194f4948fde08cb453ad939578123b8596606d1d4871c4e0d1a46d5ecbd5dbcd09491cb0831fa808fcff4b98c9d67403
       - PAYMOB_API_KEY=${PAYMOB_API_KEY}
       - PAYMOB_CARD_INTEGRATION_ID=${PAYMOB_CARD_INTEGRATION_ID}
@@ -422,6 +288,9 @@ services:
       - PAYMOB_IFRAME_ID=${PAYMOB_IFRAME_ID}
       - PAYMOB_HMAC_SECRET=${PAYMOB_HMAC_SECRET}
       - COURSES_SERVICE_URL=http://courses-service-1:8085
+
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       postgres:
         condition: service_healthy
