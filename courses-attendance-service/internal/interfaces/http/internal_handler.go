@@ -26,7 +26,36 @@ func (h *InternalHandler) RegisterRoutes(router fiber.Router) {
 	internal.Get("/courses/:id", h.GetCourse)
 	internal.Post("/enrollments/activate", h.ActivateEnrollment)
 	internal.Get("/enrollments/check", h.CheckEnrollment)
+	internal.Post("/enrollments", h.InternalEnroll)
 }
+
+func (h *InternalHandler) InternalEnroll(c *fiber.Ctx) error {
+	var req struct {
+		UserID   string `json:"userId"`
+		CourseID string `json:"courseId"`
+	}
+
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"success": false,
+			"error":   "Invalid request body",
+		})
+	}
+
+	userID, _ := uuid.Parse(req.UserID)
+	courseID, _ := uuid.Parse(req.CourseID)
+
+	enrollment, err := h.courseService.EnrollStudent(c.Context(), courseID, userID)
+	if err != nil && err.Error() != "student already enrolled in this course" {
+		return handleServiceError(c, err)
+	}
+
+	return c.JSON(fiber.Map{
+		"success": true,
+		"data":    dto.ToEnrollmentResponse(enrollment),
+	})
+}
+
 
 func (h *InternalHandler) GetCourse(c *fiber.Ctx) error {
 	id, err := uuid.Parse(c.Params("id"))
@@ -113,11 +142,21 @@ func (h *InternalHandler) CheckEnrollment(c *fiber.Ctx) error {
 		return handleServiceError(c, err)
 	}
 
+	var isPaid bool
+	if isEnrolled {
+		enrollment, _ := h.courseService.GetEnrollment(c.Context(), courseID, userID)
+		if enrollment != nil {
+			isPaid = enrollment.IsPaid
+		}
+	}
+
 	return c.JSON(fiber.Map{
 		"success": true,
 		"data": fiber.Map{
 			"isEnrolled": isEnrolled,
+			"isPaid":     isPaid,
 		},
 	})
 }
+
 

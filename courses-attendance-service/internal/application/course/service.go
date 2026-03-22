@@ -263,6 +263,12 @@ func (s *Service) EnrollStudent(ctx context.Context, courseID, studentID uuid.UU
 	return enrollment, nil
 }
 
+
+func (s *Service) GetEnrollment(ctx context.Context, courseID, studentID uuid.UUID) (*courseDomain.Enrollment, error) {
+	return s.enrollmentRepo.GetByCourseAndUser(ctx, courseID, studentID)
+}
+
+
 // AddAssistant adds an assistant to a course
 func (s *Service) AddAssistant(ctx context.Context, courseID, teacherID, assistantID uuid.UUID) (*courseDomain.CourseAssistant, error) {
 	// Verify course and ownership
@@ -400,17 +406,36 @@ func (s *Service) MarkEnrollmentPaid(ctx context.Context, courseID, studentID uu
 	if err != nil {
 		return err
 	}
+	
+	now := s.clock.Now()
+	
 	if enrollment == nil {
-		return ErrEnrollmentNotFound
+		// Auto-enroll if missing
+		course, err := s.courseRepo.GetByID(ctx, courseID)
+		if err != nil || course == nil {
+			return errors.New("course not found")
+		}
+		
+		enrollment = &courseDomain.Enrollment{
+			ID:         uuid.New(),
+			CourseID:   courseID,
+			UserID:     studentID,
+			IsActive:   true,
+			IsPaid:     true,
+			PaidAt:     &now,
+			EnrolledAt: now,
+			UpdatedAt:  now,
+		}
+		return s.enrollmentRepo.Create(ctx, enrollment)
 	}
 
-	now := s.clock.Now()
 	enrollment.IsPaid = true
 	enrollment.PaidAt = &now
 	enrollment.UpdatedAt = now
 
 	return s.enrollmentRepo.Update(ctx, enrollment)
 }
+
 
 // GetCourseAssistants returns all assistants for a course
 func (s *Service) GetCourseAssistants(ctx context.Context, courseID uuid.UUID) ([]courseDomain.CourseAssistant, error) {
@@ -442,3 +467,26 @@ func (s *Service) RemoveAssistant(ctx context.Context, courseID, teacherID, assi
 
 	return s.assistantRepo.Delete(ctx, courseID, assistantID)
 }
+
+
+func (s *Service) ListSubjects(ctx context.Context) ([]courseDomain.Subject, error) {
+	return s.subjectRepo.GetAll(ctx)
+}
+
+func (s *Service) CreateSubject(ctx context.Context, name, description, icon string) (*courseDomain.Subject, error) {
+	subject := &courseDomain.Subject{
+		ID:          uuid.New(),
+		Name:        name,
+		Description: description,
+		Icon:        icon,
+		CreatedAt:   s.clock.Now(),
+		UpdatedAt:   s.clock.Now(),
+	}
+
+	if err := s.subjectRepo.Create(ctx, subject); err != nil {
+		return nil, err
+	}
+
+	return subject, nil
+}
+

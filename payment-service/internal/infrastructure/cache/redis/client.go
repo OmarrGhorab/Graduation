@@ -62,3 +62,12 @@ func (c *Client) GetPaymentSession(ctx context.Context, orderID string) (string,
 	key := fmt.Sprintf("payment:session:%s", orderID)
 	return c.client.Get(ctx, key).Result()
 }
+
+func (c *Client) Set(ctx context.Context, key string, value interface{}, expiration time.Duration) *redis.StatusCmd {
+	return c.client.Set(ctx, key, value, expiration)
+}
+
+func (c *Client) Get(ctx context.Context, key string) *redis.StringCmd {
+	return c.client.Get(ctx, key)
+}
+

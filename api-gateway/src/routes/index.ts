@@ -181,7 +181,9 @@ export function setupRoutes(app: Express, config: AppConfig): { wsProxy: any } {
     "/api/v1/absences",
     "/api/v1/progress",
     "/api/v1/calendar",
+    "/api/v1/internal",
   ];
+
 
   coursePaths.forEach(path => {
     app.use(

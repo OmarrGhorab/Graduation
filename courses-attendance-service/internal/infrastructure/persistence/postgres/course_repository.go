@@ -79,6 +79,11 @@ func (r *SubjectRepository) GetAll(ctx context.Context) ([]course.Subject, error
 	return subjects, err
 }
 
+func (r *SubjectRepository) Create(ctx context.Context, s *course.Subject) error {
+	return r.db.WithContext(ctx).Create(s).Error
+}
+
+
 func (r *SubjectRepository) GetByID(ctx context.Context, id uuid.UUID) (*course.Subject, error) {
 	var s course.Subject
 	err := r.db.WithContext(ctx).First(&s, "id = ?", id).Error

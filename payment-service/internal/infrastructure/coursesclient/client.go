@@ -86,7 +86,7 @@ func (c *Client) ActivateEnrollment(ctx context.Context, userID, courseID string
 	return nil
 }
 
-func (c *Client) CheckEnrollment(ctx context.Context, userID, courseID string) (bool, error) {
+func (c *Client) CheckEnrollment(ctx context.Context, userID, courseID string) (bool, bool, error) {
 	url := fmt.Sprintf("%s/api/v1/internal/enrollments/check?userId=%s&courseId=%s", c.baseURL, userID, courseID)
 
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
@@ -94,24 +94,51 @@ func (c *Client) CheckEnrollment(ctx context.Context, userID, courseID string) (
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return false, err
+		return false, false, err
 	}
+
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return false, fmt.Errorf("failed to check enrollment: %d", resp.StatusCode)
+		return false, false, fmt.Errorf("failed to check enrollment: %d", resp.StatusCode)
 	}
 
 	var result struct {
 		Success bool `json:"success"`
 		Data    struct {
 			IsEnrolled bool `json:"isEnrolled"`
+			IsPaid     bool `json:"isPaid"`
 		} `json:"data"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return false, err
+		return false, false, err
 	}
 
-	return result.Data.IsEnrolled, nil
+	return result.Data.IsEnrolled, result.Data.IsPaid, nil
 }
 
+func (c *Client) EnrollStudent(ctx context.Context, userID, courseID string) error {
+
+	url := fmt.Sprintf("%s/api/v1/internal/enrollments", c.baseURL)
+
+	body, _ := json.Marshal(map[string]string{
+		"userId":   userID,
+		"courseId": courseID,
+	})
+
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("x-internal-service-secret", c.internalSecret)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+		return fmt.Errorf("failed to enroll student: %d", resp.StatusCode)
+	}
+
+	return nil
+}

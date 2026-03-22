@@ -15,8 +15,10 @@ import (
 	"github.com/OmarrGhorab/payment-service/internal/infrastructure/messaging/kafka"
 	"github.com/OmarrGhorab/payment-service/internal/infrastructure/paymob"
 	"github.com/OmarrGhorab/payment-service/internal/infrastructure/persistence/postgres"
+	"github.com/OmarrGhorab/payment-service/internal/interfaces/http/dto"
 	"github.com/google/uuid"
 )
+
 
 type Service struct {
 	repo          *postgres.PaymentRepository
@@ -67,12 +69,21 @@ func (s *Service) CreatePayment(ctx context.Context, opts CreatePaymentOptions) 
 	}
 
 	// Check if already enrolled
-	isEnrolled, err := s.coursesClient.CheckEnrollment(ctx, opts.UserID.String(), opts.CourseID.String())
+	isEnrolled, isPaid, err := s.coursesClient.CheckEnrollment(ctx, opts.UserID.String(), opts.CourseID.String())
 	if err != nil {
 		log.Printf("Warning: failed to check enrollment: %v", err)
-	} else if isEnrolled {
-		return "", uuid.Nil, errors.New("you are already enrolled in this course")
+	} else if isEnrolled && isPaid {
+		return "", uuid.Nil, errors.New("you are already enrolled and paid for this course")
 	}
+
+	// Auto-enroll if not enrolled
+	if !isEnrolled {
+		if err := s.coursesClient.EnrollStudent(ctx, opts.UserID.String(), opts.CourseID.String()); err != nil {
+			return "", uuid.Nil, fmt.Errorf("failed to auto-enroll student: %w", err)
+		}
+	}
+
+
 
 
 	amountCents := int64(math.Round(course.Price * 100))
@@ -244,3 +255,31 @@ func (s *Service) GetOrderStatus(ctx context.Context, userID uuid.UUID, orderID 
 
 	return order, nil
 }
+
+func (s *Service) GetIdempotentResponse(ctx context.Context, userID, courseID, key string) (*dto.CreatePaymentResponse, error) {
+	redisKey := fmt.Sprintf("idempotency:payment:%s:%s:%s", userID, courseID, key)
+	data, err := s.redisClient.Get(ctx, redisKey).Result()
+	if err != nil {
+		return nil, err
+	}
+
+	var resp dto.CreatePaymentResponse
+	if err := json.Unmarshal([]byte(data), &resp); err != nil {
+		return nil, err
+	}
+
+	return &resp, nil
+}
+
+func (s *Service) CacheIdempotentResponse(ctx context.Context, userID, courseID, key string, resp dto.CreatePaymentResponse) {
+	redisKey := fmt.Sprintf("idempotency:payment:%s:%s:%s", userID, courseID, key)
+	data, _ := json.Marshal(resp)
+	s.redisClient.Set(ctx, redisKey, string(data), 1*time.Hour)
+}
+
+
+func (s *Service) GetEnrollmentStatus(ctx context.Context, userID, courseID string) (bool, bool, error) {
+	return s.coursesClient.CheckEnrollment(ctx, userID, courseID)
+}
+
+

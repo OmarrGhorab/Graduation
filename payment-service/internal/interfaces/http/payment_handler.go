@@ -39,6 +39,27 @@ func (h *PaymentHandler) CreatePayment(c *fiber.Ctx) error {
 	userID, _ := uuid.Parse(userIDStr)
 	courseID, _ := uuid.Parse(req.CourseID)
 
+	// 1. Check live database/service first (Highest priority)
+	isEnrolled, isPaid, err := h.paymentService.GetEnrollmentStatus(c.Context(), userIDStr, req.CourseID)
+	if err == nil && isEnrolled && isPaid {
+		return c.Status(fiber.StatusConflict).JSON(fiber.Map{
+			"success": false,
+			"error":   "You are already enrolled/paid for this course",
+		})
+	}
+
+	// 2. Check for idempotency key (Medium priority)
+	idempotencyKey := c.Get("Idempotency-Key")
+	if idempotencyKey != "" {
+		if cached, _ := h.paymentService.GetIdempotentResponse(c.Context(), userIDStr, req.CourseID, idempotencyKey); cached != nil {
+			return c.JSON(fiber.Map{
+				"success": true,
+				"data":    cached,
+			})
+		}
+	}
+
+
 	paymentURL, orderID, err := h.paymentService.CreatePayment(c.Context(), payment.CreatePaymentOptions{
 		UserID:        userID,
 		CourseID:      courseID,
@@ -67,12 +88,20 @@ func (h *PaymentHandler) CreatePayment(c *fiber.Ctx) error {
 		})
 	}
 
+	response := dto.CreatePaymentResponse{
+		PaymentURL:     paymentURL,
+		PaymentOrderID: orderID.String(),
+	}
+
+	// Cache for idempotency if key was provided
+	if idempotencyKey != "" {
+		h.paymentService.CacheIdempotentResponse(c.Context(), userIDStr, req.CourseID, idempotencyKey, response)
+	}
+
+
 	return c.JSON(fiber.Map{
 		"success": true,
-		"data": dto.CreatePaymentResponse{
-			PaymentURL:     paymentURL,
-			PaymentOrderID: orderID.String(),
-		},
+		"data":    response,
 	})
 }
 

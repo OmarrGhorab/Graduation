@@ -2,7 +2,9 @@ package http
 
 import (
 	"errors"
+	"fmt"
 	"time"
+
 
 	courseApp "github.com/OmarrGhorab/courses-attendance-service/internal/application/course"
 	lessonApp "github.com/OmarrGhorab/courses-attendance-service/internal/application/lesson"
@@ -92,7 +94,9 @@ func (h *CourseHandler) RegisterRoutes(router fiber.Router) {
 
 	// Subject routes
 	router.Get("/subjects", auth, h.GetSubjects)
+	router.Post("/subjects", auth, teacherOnly, h.CreateSubject)
 }
+
 
 // CreateCourse godoc
 // @Summary Create a new course
@@ -657,7 +661,7 @@ func (h *CourseHandler) GetCourseEnrollments(c *fiber.Ctx) error {
 // @Success 200 {array} dto.SubjectResponse
 // @Router /api/v1/subjects [get]
 func (h *CourseHandler) GetSubjects(c *fiber.Ctx) error {
-	subjects, err := h.courseService.GetSubjects(c.Context())
+	subjects, err := h.courseService.ListSubjects(c.Context())
 	if err != nil {
 		return handleServiceError(c, err)
 	}
@@ -672,6 +676,32 @@ func (h *CourseHandler) GetSubjects(c *fiber.Ctx) error {
 		"data":    responses,
 	})
 }
+
+func (h *CourseHandler) CreateSubject(c *fiber.Ctx) error {
+	var req struct {
+		Name        string `json:"name" validate:"required"`
+		Description string `json:"description"`
+		Icon        string `json:"icon"`
+	}
+
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"success": false,
+			"error":   "Invalid request body",
+		})
+	}
+
+	subject, err := h.courseService.CreateSubject(c.Context(), req.Name, req.Description, req.Icon)
+	if err != nil {
+		return handleServiceError(c, err)
+	}
+
+	return c.Status(fiber.StatusCreated).JSON(fiber.Map{
+		"success": true,
+		"data":    dto.ToSubjectResponse(subject),
+	})
+}
+
 
 // Helper functions
 
@@ -1392,11 +1422,25 @@ func (h *CourseHandler) CreateCourseReview(c *fiber.Ctx) error {
 
 	// Check if student is enrolled and has paid
 	if h.enrollmentRepo != nil {
-		enrollment, _ := h.enrollmentRepo.GetByCourseAndUser(c.Context(), courseID, studentID)
-		if enrollment == nil || !enrollment.IsActive {
+		enrollment, err := h.enrollmentRepo.GetByCourseAndUser(c.Context(), courseID, studentID)
+		if err != nil {
 			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
 				"success": false,
-				"error":   "You must be enrolled in this course to leave a review",
+				"error":   "Enrollment check failed: " + err.Error(),
+			})
+		}
+		
+		if enrollment == nil {
+			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+				"success": false,
+				"error":   fmt.Sprintf("No enrollment record found for Student [%s] in Course [%s]", studentID, courseID),
+			})
+		}
+		
+		if !enrollment.IsActive {
+			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+				"success": false,
+				"error":   "Your enrollment is currently inactive",
 			})
 		}
 		
@@ -1405,10 +1449,12 @@ func (h *CourseHandler) CreateCourseReview(c *fiber.Ctx) error {
 		if course != nil && course.IsPaid && !enrollment.IsPaid {
 			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
 				"success": false,
-				"error":   "You must purchase the course before leaving a review",
+				"error":   "PAYMENT_REQUIRED: This is a paid course and your enrollment status is still UNPAID.",
 			})
 		}
 	}
+
+
 
 	// Check if student already reviewed this course
 	if h.courseRatingRepo != nil {
