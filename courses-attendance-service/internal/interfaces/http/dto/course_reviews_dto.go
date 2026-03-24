@@ -20,15 +20,17 @@ type UpdateCourseReviewRequest struct {
 
 // CourseReviewResponse represents a single course review
 type CourseReviewResponse struct {
-	ID             uuid.UUID `json:"id"`
-	StudentID      uuid.UUID `json:"studentId"`
-	StudentName    string    `json:"studentName"`
-	StudentProfile string    `json:"studentProfile,omitempty"`
-	Rating         float64   `json:"rating"`
-	Review         string    `json:"review"`
-	CreatedAt      time.Time `json:"createdAt"`
-	UpdatedAt      time.Time `json:"updatedAt"`
+	ID              uuid.UUID `json:"id"`
+	StudentID       uuid.UUID `json:"studentId"`
+	StudentName     string    `json:"studentName"`
+	StudentUsername string    `json:"studentUsername"`
+	StudentProfile  string    `json:"studentProfile,omitempty"`
+	Rating          float64   `json:"rating"`
+	Review          string    `json:"review"`
+	CreatedAt       time.Time `json:"createdAt"`
+	UpdatedAt       time.Time `json:"updatedAt"`
 }
+
 
 // RatingBreakdown represents the distribution of ratings
 type RatingBreakdown struct {

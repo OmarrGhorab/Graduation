@@ -27,7 +27,7 @@ type CreateCourseRequest struct {
 	IsPaid                  bool     `json:"isPaid"`
 	BillingType             string   `json:"billingType" validate:"omitempty,oneof=ONE_TIME MONTHLY"`
 	FreeTrialLessons        int      `json:"freeTrialLessons"` // Number of free lessons for trial
-	AttendanceWeight        float64  `json:"attendanceWeight"`
+	AttendanceWeight        float64  `json:"attendanceWeight" validate:"omitempty,min=0,max=1"`
 }
 
 type UpdateCourseRequest struct {

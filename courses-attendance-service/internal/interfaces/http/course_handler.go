@@ -1238,9 +1238,11 @@ func (h *CourseHandler) GetCourseReviews(c *fiber.Ctx) error {
 			userInfo, err := h.authClient.GetUserInfo(c.Context(), review.StudentID.String())
 			if err == nil && userInfo != nil {
 				reviewResp.StudentName = userInfo.Name
+				reviewResp.StudentUsername = userInfo.Username
 				reviewResp.StudentProfile = userInfo.ProfileImg
 			}
 		}
+
 
 		reviewResponses = append(reviewResponses, reviewResp)
 	}
@@ -1500,9 +1502,11 @@ func (h *CourseHandler) CreateCourseReview(c *fiber.Ctx) error {
 		userInfo, _ := h.authClient.GetUserInfo(c.Context(), studentID.String())
 		if userInfo != nil {
 			response.StudentName = userInfo.Name
+			response.StudentUsername = userInfo.Username
 			response.StudentProfile = userInfo.ProfileImg
 		}
 	}
+
 
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{
 		"success": true,
@@ -1603,9 +1607,11 @@ func (h *CourseHandler) UpdateCourseReview(c *fiber.Ctx) error {
 		userInfo, _ := h.authClient.GetUserInfo(c.Context(), studentID.String())
 		if userInfo != nil {
 			response.StudentName = userInfo.Name
+			response.StudentUsername = userInfo.Username
 			response.StudentProfile = userInfo.ProfileImg
 		}
 	}
+
 
 	return c.JSON(fiber.Map{
 		"success": true,
