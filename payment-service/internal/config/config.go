@@ -15,6 +15,7 @@ type Config struct {
 	Auth     AuthConfig
 	Paymob   PaymobConfig
 	Courses  CoursesConfig
+	Email    EmailConfig
 }
 
 type ServerConfig struct {
@@ -60,6 +61,12 @@ type CoursesConfig struct {
 	ServiceURL string
 }
 
+type EmailConfig struct {
+	ResendAPIKey string
+	FromEmail    string
+	FromName     string
+}
+
 func Load() (*Config, error) {
 	redisDB, _ := strconv.Atoi(getEnv("REDIS_DB", "0"))
 
@@ -99,6 +106,11 @@ func Load() (*Config, error) {
 		},
 		Courses: CoursesConfig{
 			ServiceURL: getEnv("COURSES_SERVICE_URL", "http://localhost:8085"),
+		},
+		Email: EmailConfig{
+			ResendAPIKey: getEnv("RESEND_API_KEY", ""),
+			FromEmail:    getEnv("EMAIL_FROM", "onboarding@resend.dev"),
+			FromName:     getEnv("EMAIL_FROM_NAME", "Payment Service"),
 		},
 	}
 

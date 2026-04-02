@@ -288,7 +288,9 @@ services:
       - PAYMOB_IFRAME_ID=${PAYMOB_IFRAME_ID}
       - PAYMOB_HMAC_SECRET=${PAYMOB_HMAC_SECRET}
       - COURSES_SERVICE_URL=http://courses-service-1:8085
-
+      - RESEND_API_KEY=${RESEND_API_KEY}
+      - EMAIL_FROM=${EMAIL_FROM:-onboarding@resend.dev}
+      - EMAIL_FROM_NAME=${EMAIL_FROM_NAME:-Payment Service}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
@@ -298,6 +300,8 @@ services:
         condition: service_healthy
       kafka:
         condition: service_started
+      courses-service-1:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:8090/health"]
       interval: 10s

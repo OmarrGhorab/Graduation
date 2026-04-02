@@ -1,18 +1,27 @@
 package bootstrap
 
 import (
+	"context"
 	"fmt"
 	"log"
+	"time"
 
+	cartApp "github.com/OmarrGhorab/payment-service/internal/application/cart"
+	"github.com/OmarrGhorab/payment-service/internal/application/jobs"
 	paymentApp "github.com/OmarrGhorab/payment-service/internal/application/payment"
+	subscriptionApp "github.com/OmarrGhorab/payment-service/internal/application/subscription"
 	"github.com/OmarrGhorab/payment-service/internal/config"
+	cartDomain "github.com/OmarrGhorab/payment-service/internal/domain/cart"
+	paymentDomain "github.com/OmarrGhorab/payment-service/internal/domain/payment"
+	paymentMethodDomain "github.com/OmarrGhorab/payment-service/internal/domain/paymentmethod"
+	subscriptionDomain "github.com/OmarrGhorab/payment-service/internal/domain/subscription"
 	"github.com/OmarrGhorab/payment-service/internal/infrastructure/authclient"
 	"github.com/OmarrGhorab/payment-service/internal/infrastructure/cache/redis"
 	"github.com/OmarrGhorab/payment-service/internal/infrastructure/coursesclient"
 	"github.com/OmarrGhorab/payment-service/internal/infrastructure/messaging/kafka"
+	"github.com/OmarrGhorab/payment-service/internal/infrastructure/notification"
 	"github.com/OmarrGhorab/payment-service/internal/infrastructure/paymob"
 	"github.com/OmarrGhorab/payment-service/internal/infrastructure/persistence/postgres"
-	paymentDomain "github.com/OmarrGhorab/payment-service/internal/domain/payment"
 	"github.com/OmarrGhorab/payment-service/internal/interfaces/http"
 	"github.com/gofiber/fiber/v2"
 )
@@ -23,7 +32,10 @@ type Container struct {
 	DB     *postgres.Database
 
 	// Repositories
-	PaymentRepo *postgres.PaymentRepository
+	PaymentRepo       *postgres.PaymentRepository
+	CartRepo          *postgres.CartRepository
+	SubscriptionRepo  *postgres.SubscriptionRepository
+	PaymentMethodRepo *postgres.PaymentMethodRepository
 
 	// Infrastructure
 	Redis         *redis.Client
@@ -31,9 +43,19 @@ type Container struct {
 	CoursesClient *coursesclient.Client
 	PaymobClient  *paymob.Client
 	KafkaProducer *kafka.Producer
+	EmailService  *notification.EmailService
 
 	// Services
-	PaymentService *paymentApp.Service
+	PaymentService      *paymentApp.Service
+	CartService         *cartApp.Service
+	SubscriptionService *subscriptionApp.Service
+
+	// Jobs
+	BillingJob *jobs.SubscriptionBillingJob
+
+	// Context for background jobs
+	jobCtx    context.Context
+	jobCancel context.CancelFunc
 }
 
 func New() (*Container, error) {
@@ -54,24 +76,36 @@ func New() (*Container, error) {
 		return nil, fmt.Errorf("failed to connect to Redis: %w", err)
 	}
 
+	jobCtx, jobCancel := context.WithCancel(context.Background())
+
 	container := &Container{
-		Config: cfg,
-		App:    app,
-		DB:     db,
-		Redis:  redisClient,
+		Config:    cfg,
+		App:       app,
+		DB:        db,
+		Redis:     redisClient,
+		jobCtx:    jobCtx,
+		jobCancel: jobCancel,
 	}
 
 	// Auto-migrate tables
-	if err := db.DB.AutoMigrate(&paymentDomain.PaymentOrder{}, &paymentDomain.PaymentTransaction{}); err != nil {
+	if err := db.DB.AutoMigrate(
+		&paymentDomain.PaymentOrder{},
+		&paymentDomain.PaymentTransaction{},
+		&paymentDomain.PaymentOrderItem{},
+		&cartDomain.Cart{},
+		&cartDomain.CartItem{},
+		&subscriptionDomain.Subscription{},
+		&paymentMethodDomain.PaymentMethod{},
+	); err != nil {
 		return nil, fmt.Errorf("failed to auto-migrate: %w", err)
 	}
-
-
 
 	container.initInfrastructure()
 	container.initRepositories()
 	container.initServices()
+	container.initJobs()
 	container.registerRoutes()
+	container.startBackgroundJobs()
 
 	return container, nil
 }
@@ -87,19 +121,49 @@ func (c *Container) initInfrastructure() {
 		c.Config.Paymob.HMACSecret,
 	)
 	c.KafkaProducer = kafka.NewProducer(c.Config.Kafka.Brokers)
+	c.EmailService = notification.NewEmailService(
+		c.Config.Email.ResendAPIKey,
+		c.Config.Email.FromEmail,
+		c.Config.Email.FromName,
+	)
 }
 
 func (c *Container) initRepositories() {
 	c.PaymentRepo = postgres.NewPaymentRepository(c.DB)
+	c.CartRepo = postgres.NewCartRepository(c.DB.DB)
+	c.SubscriptionRepo = postgres.NewSubscriptionRepository(c.DB.DB)
+	c.PaymentMethodRepo = postgres.NewPaymentMethodRepository(c.DB.DB)
 }
 
 func (c *Container) initServices() {
 	c.PaymentService = paymentApp.NewService(
 		c.PaymentRepo,
+		c.CartRepo,
+		c.SubscriptionRepo,
 		c.PaymobClient,
 		c.CoursesClient,
 		c.Redis,
 		c.KafkaProducer,
+	)
+
+	c.CartService = cartApp.NewService(
+		c.CartRepo,
+		c.CoursesClient,
+	)
+
+	c.SubscriptionService = subscriptionApp.NewService(
+		c.SubscriptionRepo,
+		c.CoursesClient,
+	)
+}
+
+func (c *Container) initJobs() {
+	c.BillingJob = jobs.NewSubscriptionBillingJob(
+		c.SubscriptionService,
+		c.PaymentService,
+		c.SubscriptionRepo,
+		c.PaymentMethodRepo,
+		c.EmailService,
 	)
 }
 
@@ -112,8 +176,21 @@ func (c *Container) registerRoutes() {
 	paymentHandler := http.NewPaymentHandler(c.PaymentService, c.AuthClient)
 	paymentHandler.RegisterRoutes(apiV1)
 
+	cartHandler := http.NewCartHandler(c.CartService, c.PaymentService, c.AuthClient)
+	cartHandler.RegisterRoutes(apiV1)
+
+	subscriptionHandler := http.NewSubscriptionHandler(c.SubscriptionService, c.AuthClient)
+	subscriptionHandler.RegisterRoutes(apiV1)
+
 	webhookHandler := http.NewWebhookHandler(c.PaymentService)
 	webhookHandler.RegisterRoutes(apiV1)
+}
+
+func (c *Container) startBackgroundJobs() {
+	// Start subscription billing job (runs daily at 2 AM)
+	// For testing, you can change this to a shorter interval like 1*time.Hour
+	go c.BillingJob.StartScheduler(c.jobCtx, 24*time.Hour)
+	log.Println("Subscription billing job scheduler started")
 }
 
 func (c *Container) Start() error {
@@ -124,6 +201,11 @@ func (c *Container) Start() error {
 
 func (c *Container) Shutdown() error {
 	log.Println("Shutting down Payment Service...")
+
+	// Cancel background jobs
+	if c.jobCancel != nil {
+		c.jobCancel()
+	}
 
 	if c.Redis != nil {
 		c.Redis.Close()

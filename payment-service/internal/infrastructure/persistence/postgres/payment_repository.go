@@ -20,9 +20,31 @@ func (r *PaymentRepository) CreateOrder(ctx context.Context, order *payment.Paym
 	return r.db.WithContext(ctx).Create(order).Error
 }
 
+func (r *PaymentRepository) CreateOrderWithItems(ctx context.Context, order *payment.PaymentOrder, items []payment.PaymentOrderItem) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(order).Error; err != nil {
+			return err
+		}
+
+		for i := range items {
+			items[i].PaymentOrderID = order.ID
+		}
+
+		if len(items) > 0 {
+			if err := tx.Create(&items).Error; err != nil {
+				return err
+			}
+		}
+
+		return nil
+	})
+}
+
 func (r *PaymentRepository) GetOrderByID(ctx context.Context, id uuid.UUID) (*payment.PaymentOrder, error) {
 	var order payment.PaymentOrder
-	err := r.db.WithContext(ctx).First(&order, "id = ?", id).Error
+	err := r.db.WithContext(ctx).
+		Preload("Items").
+		First(&order, "id = ?", id).Error
 	if err != nil {
 		return nil, err
 	}
@@ -31,7 +53,9 @@ func (r *PaymentRepository) GetOrderByID(ctx context.Context, id uuid.UUID) (*pa
 
 func (r *PaymentRepository) GetOrderByPaymobID(ctx context.Context, paymobOrderID string) (*payment.PaymentOrder, error) {
 	var order payment.PaymentOrder
-	err := r.db.WithContext(ctx).First(&order, "paymob_order_id = ?", paymobOrderID).Error
+	err := r.db.WithContext(ctx).
+		Preload("Items").
+		First(&order, "paymob_order_id = ?", paymobOrderID).Error
 	if err != nil {
 		return nil, err
 	}

@@ -124,12 +124,18 @@ func (h *PaymentHandler) GetStatus(c *fiber.Ctx) error {
 		})
 	}
 
+	// Get first course ID from order items for backward compatibility
+	courseID := ""
+	if len(order.Items) > 0 {
+		courseID = order.Items[0].CourseID.String()
+	}
+
 	return c.JSON(fiber.Map{
 		"success": true,
 		"data": dto.PaymentStatusResponse{
 			OrderID:   order.ID.String(),
 			UserID:    order.UserID.String(),
-			CourseID:  order.CourseID.String(),
+			CourseID:  courseID,
 			Amount:    order.AmountCents,
 			Currency:  order.Currency,
 			Status:    string(order.Status),
