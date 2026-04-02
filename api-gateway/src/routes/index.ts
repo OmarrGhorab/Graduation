@@ -190,6 +190,8 @@ export function setupRoutes(app: Express, config: AppConfig): { wsProxy: any } {
       path,
       proxy(() => getNextServiceUrl(config.services.courses, "courses"), {
         proxyReqPathResolver: (req) => req.originalUrl,
+        parseReqBody: false, // Let the underlying service handle the body
+        limit: "2gb" // Set limit for the proxy as well
       })
     );
   });

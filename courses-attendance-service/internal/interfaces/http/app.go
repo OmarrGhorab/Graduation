@@ -12,7 +12,7 @@ func NewApp() *fiber.App {
 	app := fiber.New(fiber.Config{
 		AppName:      "Courses & Attendance Service",
 		ErrorHandler: errorHandler,
-		BodyLimit:    500 * 1024 * 1024, // 500MB for video uploads
+		BodyLimit:    2 * 1024 * 1024 * 1024, // 2GB for large video uploads
 	})
 
 	// Global middleware

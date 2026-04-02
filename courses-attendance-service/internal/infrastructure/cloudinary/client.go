@@ -135,10 +135,10 @@ func (c *Client) generatePublicID(filename, subfolder string) string {
 
 // ValidateVideoFile checks if the file is a valid video
 func ValidateVideoFile(header *multipart.FileHeader) error {
-	// Check file size (max 500MB)
-	maxSize := int64(500 * 1024 * 1024)
+	// Check file size (max 2GB)
+	maxSize := int64(2048 * 1024 * 1024)
 	if header.Size > maxSize {
-		return fmt.Errorf("video file too large (max 500MB)")
+		return fmt.Errorf("video file too large (max 2GB)")
 	}
 
 	// Check content type
