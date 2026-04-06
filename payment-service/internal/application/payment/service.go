@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/OmarrGhorab/payment-service/internal/domain/payment"
+	"github.com/OmarrGhorab/payment-service/internal/domain/paymentmethod"
 	"github.com/OmarrGhorab/payment-service/internal/domain/subscription"
 	"github.com/OmarrGhorab/payment-service/internal/infrastructure/cache/redis"
 	"github.com/OmarrGhorab/payment-service/internal/infrastructure/coursesclient"
@@ -22,32 +23,35 @@ import (
 
 
 type Service struct {
-	repo             *postgres.PaymentRepository
-	cartRepo         *postgres.CartRepository
-	subscriptionRepo *postgres.SubscriptionRepository
-	paymobClient     *paymob.Client
-	coursesClient    *coursesclient.Client
-	redisClient      *redis.Client
-	kafkaProducer    *kafka.Producer
+	repo                *postgres.PaymentRepository
+	cartRepo            *postgres.CartRepository
+	subscriptionRepo    *postgres.SubscriptionRepository
+	paymentMethodRepo   *postgres.PaymentMethodRepository
+	paymobClient        *paymob.Client
+	coursesClient       *coursesclient.Client
+	redisClient         *redis.Client
+	kafkaProducer       *kafka.Producer
 }
 
 func NewService(
 	repo *postgres.PaymentRepository,
 	cartRepo *postgres.CartRepository,
 	subscriptionRepo *postgres.SubscriptionRepository,
+	paymentMethodRepo *postgres.PaymentMethodRepository,
 	paymobClient *paymob.Client,
 	coursesClient *coursesclient.Client,
 	redisClient *redis.Client,
 	kafkaProducer *kafka.Producer,
 ) *Service {
 	return &Service{
-		repo:             repo,
-		cartRepo:         cartRepo,
-		subscriptionRepo: subscriptionRepo,
-		paymobClient:     paymobClient,
-		coursesClient:    coursesClient,
-		redisClient:      redisClient,
-		kafkaProducer:    kafkaProducer,
+		repo:                repo,
+		cartRepo:            cartRepo,
+		subscriptionRepo:    subscriptionRepo,
+		paymentMethodRepo:   paymentMethodRepo,
+		paymobClient:        paymobClient,
+		coursesClient:       coursesClient,
+		redisClient:         redisClient,
+		kafkaProducer:       kafkaProducer,
 	}
 }
 
@@ -57,6 +61,7 @@ type CreatePaymentOptions struct {
 	PaymentMethod string // "CARD" or "WALLET"
 	PhoneNumber   string // Required for WALLET
 	BillingData   paymob.BillingData
+	SaveCard      bool
 }
 
 func (s *Service) CreatePayment(ctx context.Context, opts CreatePaymentOptions) (string, uuid.UUID, error) {
@@ -142,7 +147,7 @@ func (s *Service) CreatePayment(ctx context.Context, opts CreatePaymentOptions) 
 		integrationID = s.paymobClient.GetWalletIntegrationID()
 	}
 
-	paymentToken, err := s.paymobClient.CreatePaymentKey(ctx, authToken, paymobOrderID, amountCents, course.Currency, integrationID, opts.BillingData)
+	paymentToken, err := s.paymobClient.CreatePaymentKey(ctx, authToken, paymobOrderID, amountCents, course.Currency, integrationID, opts.BillingData, opts.SaveCard)
 	if err != nil {
 		return "", uuid.Nil, fmt.Errorf("paymob create payment key failed: %w", err)
 	}
@@ -164,6 +169,7 @@ func (s *Service) CreatePayment(ctx context.Context, opts CreatePaymentOptions) 
 		"courseID":     opts.CourseID,
 		"amountCents":  amountCents,
 		"paymentToken": paymentToken,
+		"saveCard":     opts.SaveCard,
 	})
 	s.redisClient.SetPaymentSession(ctx, order.ID.String(), string(sessionData), 30*time.Minute)
 
@@ -206,7 +212,7 @@ func (s *Service) HandleWebhook(ctx context.Context, data map[string]interface{}
 	amountCents := int64(obj["amount_cents"].(float64))
 
 	sourceData := obj["source_data"].(map[string]interface{})
-	paymentMethod := fmt.Sprintf("%v", sourceData["sub_type"])
+	paymentMethodType := fmt.Sprintf("%v", sourceData["sub_type"])
 
 	// 3. Idempotency Lock
 	locked, err := s.redisClient.AcquireIdempotencyLock(ctx, paymobTransactionID, 1*time.Hour)
@@ -230,7 +236,7 @@ func (s *Service) HandleWebhook(ctx context.Context, data map[string]interface{}
 	transaction := &payment.PaymentTransaction{
 		PaymentOrderID:      order.ID,
 		PaymobTransactionID: paymobTransactionID,
-		PaymentMethod:       paymentMethod,
+		PaymentMethod:       paymentMethodType,
 		AmountCents:         amountCents,
 		Success:             success,
 		RawResponse:         rawResp,
@@ -238,6 +244,45 @@ func (s *Service) HandleWebhook(ctx context.Context, data map[string]interface{}
 
 	if err := s.repo.CreateTransaction(ctx, transaction); err != nil {
 		return fmt.Errorf("failed to store transaction: %w", err)
+	}
+
+	// 6. Save Payment Method if tokenization was requested and successful
+	if success {
+		// Extract tokenization data from source_data if present
+		// Paymob sends 'token' and card info in source_data or at top level in some cases.
+		// For card tokenization, look for 'token' in the object.
+		token, tokenOk := obj["token"].(string)
+		if !tokenOk {
+			// Try payment_token as fallback
+			token, _ = obj["payment_token"].(string)
+		}
+
+		if token != "" {
+			pan := fmt.Sprintf("%v", sourceData["pan"])
+			lastFour := ""
+			if len(pan) >= 4 {
+				lastFour = pan[len(pan)-4:]
+			}
+
+			brand := fmt.Sprintf("%v", sourceData["sub_type"])
+			
+			pm := &paymentmethod.PaymentMethod{
+				UserID:      order.UserID,
+				PaymentType: paymentmethod.PaymentTypeCard,
+				Token:       token,
+				LastFour:    lastFour,
+				CardBrand:   brand,
+				IsActive:    true,
+				IsDefault:   true, // Make it default if it's the first one or requested
+			}
+			
+			// Save to repo
+			if err := s.paymentMethodRepo.Create(ctx, pm); err != nil {
+				log.Printf("WARNING: Failed to save payment method for user %s: %v", order.UserID, err)
+			} else {
+				log.Printf("SUCCESS: Saved payment method %s (****%s) for user %s", brand, lastFour, order.UserID)
+			}
+		}
 	}
 
 	// 6. Update Order and Activate Enrollment
@@ -383,6 +428,10 @@ func (s *Service) CacheIdempotentResponse(ctx context.Context, userID, courseID,
 
 func (s *Service) GetEnrollmentStatus(ctx context.Context, userID, courseID string) (bool, bool, error) {
 	return s.coursesClient.CheckEnrollment(ctx, userID, courseID)
+}
+
+func (s *Service) GetUserPaymentMethods(ctx context.Context, userID uuid.UUID) ([]paymentmethod.PaymentMethod, error) {
+	return s.paymentMethodRepo.GetUserPaymentMethods(ctx, userID)
 }
 
 

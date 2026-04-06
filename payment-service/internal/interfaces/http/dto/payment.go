@@ -14,6 +14,7 @@ type CreatePaymentRequest struct {
 	City          string `json:"city" validate:"omitempty"`
 	State         string `json:"state" validate:"omitempty"`
 	Country       string `json:"country" validate:"omitempty"`
+	SaveCard      bool   `json:"saveCard" validate:"omitempty"`
 }
 
 type CreatePaymentResponse struct {

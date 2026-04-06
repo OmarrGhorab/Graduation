@@ -31,6 +31,7 @@ func (h *PaymentHandler) RegisterRoutes(router fiber.Router) {
 	// Authenticated routes
 	payments := router.Group("/payments", middleware.Authenticate(h.authClient))
 	payments.Post("/create", h.CreatePayment)
+	payments.Get("/methods", h.ListPaymentMethods)
 }
 
 func (h *PaymentHandler) CreatePayment(c *fiber.Ctx) error {
@@ -82,6 +83,7 @@ func (h *PaymentHandler) CreatePayment(c *fiber.Ctx) error {
 			State:       h.defaultIfEmpty(req.State, "N/A"),
 			Country:     h.defaultIfEmpty(req.Country, "Egypt"),
 		},
+		SaveCard: req.SaveCard,
 	})
 
 
@@ -173,5 +175,23 @@ func (h *PaymentHandler) defaultIfEmpty(val, def string) string {
 		return def
 	}
 	return val
+}
+
+func (h *PaymentHandler) ListPaymentMethods(c *fiber.Ctx) error {
+	userIDStr := c.Locals("user_id").(string)
+	userID, _ := uuid.Parse(userIDStr)
+
+	methods, err := h.paymentService.GetUserPaymentMethods(c.Context(), userID)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"success": false,
+			"error":   err.Error(),
+		})
+	}
+
+	return c.JSON(fiber.Map{
+		"success": true,
+		"data":    methods,
+	})
 }
 

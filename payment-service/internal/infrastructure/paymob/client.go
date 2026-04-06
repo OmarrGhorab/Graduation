@@ -116,7 +116,7 @@ type BillingData struct {
 	State       string `json:"state"`
 }
 
-func (c *Client) CreatePaymentKey(ctx context.Context, authToken string, orderID int64, amountCents int64, currency string, integrationID string, billing BillingData) (string, error) {
+func (c *Client) CreatePaymentKey(ctx context.Context, authToken string, orderID int64, amountCents int64, currency string, integrationID string, billing BillingData, tokenization bool) (string, error) {
 	url := fmt.Sprintf("%s/acceptance/payment_keys", c.baseURL)
 	reqBody, _ := json.Marshal(map[string]interface{}{
 		"auth_token":           authToken,
@@ -127,6 +127,7 @@ func (c *Client) CreatePaymentKey(ctx context.Context, authToken string, orderID
 		"currency":             currency,
 		"integration_id":       integrationID,
 		"lock_order_when_paid": "false",
+		"tokenization":         tokenization,
 	})
 
 	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewBuffer(reqBody))

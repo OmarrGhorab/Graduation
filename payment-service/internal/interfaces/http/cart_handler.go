@@ -174,6 +174,7 @@ func (h *CartHandler) CheckoutCart(c *fiber.Ctx) error {
 			State:       h.defaultIfEmpty(req.State, "N/A"),
 			Country:     h.defaultIfEmpty(req.Country, "Egypt"),
 		},
+		SaveCard: req.SaveCard,
 	})
 
 	if err != nil {

@@ -18,6 +18,7 @@ type CheckoutCartOptions struct {
 	PaymentMethod string
 	PhoneNumber   string
 	BillingData   paymob.BillingData
+	SaveCard      bool
 }
 
 func (s *Service) CheckoutCart(ctx context.Context, opts CheckoutCartOptions) (string, uuid.UUID, error) {
@@ -112,7 +113,7 @@ func (s *Service) CheckoutCart(ctx context.Context, opts CheckoutCartOptions) (s
 		integrationID = s.paymobClient.GetWalletIntegrationID()
 	}
 
-	paymentToken, err := s.paymobClient.CreatePaymentKey(ctx, authToken, paymobOrderID, totalAmount, currency, integrationID, opts.BillingData)
+	paymentToken, err := s.paymobClient.CreatePaymentKey(ctx, authToken, paymobOrderID, totalAmount, currency, integrationID, opts.BillingData, opts.SaveCard)
 	if err != nil {
 		return "", uuid.Nil, fmt.Errorf("paymob create payment key failed: %w", err)
 	}

@@ -62,7 +62,7 @@ func (s *Service) RenewSubscription(ctx context.Context, opts RenewSubscriptionO
 
 	integrationID := s.paymobClient.GetCardIntegrationID()
 
-	paymentToken, err := s.paymobClient.CreatePaymentKey(ctx, authToken, paymobOrderID, sub.PriceCents, sub.Currency, integrationID, opts.BillingData)
+	paymentToken, err := s.paymobClient.CreatePaymentKey(ctx, authToken, paymobOrderID, sub.PriceCents, sub.Currency, integrationID, opts.BillingData, true)
 	if err != nil {
 		return "", uuid.Nil, fmt.Errorf("paymob create payment key failed: %w", err)
 	}

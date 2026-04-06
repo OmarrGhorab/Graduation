@@ -140,6 +140,7 @@ func (c *Container) initServices() {
 		c.PaymentRepo,
 		c.CartRepo,
 		c.SubscriptionRepo,
+		c.PaymentMethodRepo,
 		c.PaymobClient,
 		c.CoursesClient,
 		c.Redis,
