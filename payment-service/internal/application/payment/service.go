@@ -120,12 +120,13 @@ func (s *Service) GetUserPurchaseHistory(ctx context.Context, userID uuid.UUID) 
 }
 
 type CreatePaymentOptions struct {
-	UserID        uuid.UUID
-	CourseID      uuid.UUID
-	PaymentMethod string // "CARD" or "WALLET"
-	PhoneNumber   string // Required for WALLET
-	BillingData   paymob.BillingData
-	SaveCard      bool
+	UserID          uuid.UUID
+	CourseID        uuid.UUID
+	PaymentMethod   string
+	PaymentMethodID uuid.UUID // New: for one-click pay
+	PhoneNumber     string
+	BillingData     paymob.BillingData
+	SaveCard        bool
 }
 
 func (s *Service) CreatePayment(ctx context.Context, opts CreatePaymentOptions) (string, uuid.UUID, error) {
@@ -159,9 +160,6 @@ func (s *Service) CreatePayment(ctx context.Context, opts CreatePaymentOptions) 
 		}
 	}
 
-
-
-
 	amountCents := int64(math.Round(course.Price * 100))
 
 	// 2. Create order item for single course
@@ -169,10 +167,10 @@ func (s *Service) CreatePayment(ctx context.Context, opts CreatePaymentOptions) 
 		CourseID:    opts.CourseID,
 		PriceCents:  amountCents,
 		Currency:    course.Currency,
-		BillingType: "ONE_TIME",
+		BillingType: course.BillingType,
 	}
 
-	// 2. Create local PaymentOrder with items (This handles both order and items in one transaction)
+	// 3. Create local PaymentOrder with items (This handles both order and items in one transaction)
 	order := &payment.PaymentOrder{
 		ID:            uuid.New(),
 		UserID:        opts.UserID,
@@ -186,8 +184,9 @@ func (s *Service) CreatePayment(ctx context.Context, opts CreatePaymentOptions) 
 	if err := s.repo.CreateOrderWithItems(ctx, order, []payment.PaymentOrderItem{orderItem}); err != nil {
 		return "", uuid.Nil, fmt.Errorf("failed to create order items: %w", err)
 	}
+	order.Items = []payment.PaymentOrderItem{orderItem}
 
-	// 3. Paymob Flow
+	// 4. Paymob Flow
 	authToken, err := s.paymobClient.Authenticate(ctx)
 	if err != nil {
 		return "", uuid.Nil, fmt.Errorf("paymob auth failed: %w", err)
@@ -195,13 +194,16 @@ func (s *Service) CreatePayment(ctx context.Context, opts CreatePaymentOptions) 
 
 	paymobOrderID, err := s.paymobClient.CreateOrder(ctx, authToken, amountCents, course.Currency)
 	if err != nil {
-		return "", uuid.Nil, fmt.Errorf("paymob create order failed: %w", err)
+		return "", uuid.Nil, fmt.Errorf("paymob order creation failed: %w", err)
 	}
 
-	// Update order with Paymob order ID
+	// Update order with paymob ID
 	paymobOrderIDStr := fmt.Sprintf("%d", paymobOrderID)
-	s.repo.UpdateOrderStatus(ctx, order.ID, payment.OrderStatusPending, &paymobOrderIDStr)
+	if err := s.repo.UpdateOrderStatus(ctx, order.ID, payment.OrderStatusPending, &paymobOrderIDStr); err != nil {
+		return "", uuid.Nil, fmt.Errorf("failed to update order: %w", err)
+	}
 
+	// Create Payment Key
 	integrationID := s.paymobClient.GetCardIntegrationID()
 	if opts.PaymentMethod == "WALLET" {
 		integrationID = s.paymobClient.GetWalletIntegrationID()
@@ -209,11 +211,40 @@ func (s *Service) CreatePayment(ctx context.Context, opts CreatePaymentOptions) 
 
 	paymentToken, err := s.paymobClient.CreatePaymentKey(ctx, authToken, paymobOrderID, amountCents, course.Currency, integrationID, opts.BillingData, opts.SaveCard)
 	if err != nil {
-		return "", uuid.Nil, fmt.Errorf("paymob create payment key failed: %w", err)
+		return "", uuid.Nil, fmt.Errorf("paymob payment key creation failed: %w", err)
 	}
 
 	var paymentURL string
-	if opts.PaymentMethod == "WALLET" {
+
+	// 5. Handle One-Click or Regular flow
+	if opts.PaymentMethod == "CARD" && opts.PaymentMethodID != uuid.Nil {
+		pm, err := s.paymentMethodRepo.GetByID(ctx, opts.PaymentMethodID)
+		if err != nil {
+			return "", uuid.Nil, fmt.Errorf("payment method not found: %w", err)
+		}
+		if pm.UserID != opts.UserID {
+			return "", uuid.Nil, errors.New("unauthorized payment method")
+		}
+
+		resp, err := s.paymobClient.PayWithToken(ctx, paymentToken, pm.Token)
+		if err != nil {
+			return "", uuid.Nil, fmt.Errorf("one-click payment failed: %w", err)
+		}
+
+		paymentURL = resp.RedirectURL
+		if paymentURL == "" {
+			paymentURL = resp.IframeRedirectURL
+		}
+
+		// Update order status if immediately known
+		if bool(resp.Success) {
+			if err := s.repo.UpdateOrderStatus(ctx, order.ID, payment.OrderStatusPaid, nil); err == nil {
+				s.completeSuccessfulPayment(ctx, order, amountCents)
+			}
+		} else if !bool(resp.Pending) {
+			s.repo.UpdateOrderStatus(ctx, order.ID, payment.OrderStatusFailed, nil)
+		}
+	} else if opts.PaymentMethod == "WALLET" {
 		paymentURL, err = s.paymobClient.PayWithWallet(ctx, paymentToken, opts.PhoneNumber)
 		if err != nil {
 			return "", uuid.Nil, fmt.Errorf("paymob wallet pay failed: %w", err)
@@ -222,7 +253,7 @@ func (s *Service) CreatePayment(ctx context.Context, opts CreatePaymentOptions) 
 		paymentURL = s.paymobClient.GetCardPaymentURL(paymentToken)
 	}
 
-	// 4. Cache session in Redis
+	// 6. Cache session in Redis
 	sessionData, _ := json.Marshal(map[string]interface{}{
 		"orderID":      order.ID,
 		"userID":       opts.UserID,
@@ -411,72 +442,10 @@ func (s *Service) HandleWebhook(ctx context.Context, data map[string]interface{}
 			return fmt.Errorf("failed to update order status: %w", err)
 		}
 
-		// Handle different order types
-		switch order.OrderType {
-		case payment.OrderTypeCartCheckout:
-			// Activate all enrollments and create subscriptions for monthly items
-			for _, item := range order.Items {
-				if err := s.coursesClient.ActivateEnrollment(ctx, order.UserID.String(), item.CourseID.String()); err != nil {
-					log.Printf("ERROR: Failed to activate enrollment for user %s, course %s: %v", order.UserID, item.CourseID, err)
-				}
-
-				// Create subscription for monthly billing
-				if item.BillingType == "MONTHLY" {
-					sub := &subscription.Subscription{
-						UserID:          order.UserID,
-						CourseID:        item.CourseID,
-						Status:          subscription.StatusActive,
-						PriceCents:      item.PriceCents,
-						Currency:        item.Currency,
-						BillingCycle:    subscription.BillingCycleMonthly,
-						NextBillingDate: time.Now().AddDate(0, 1, 0),
-						StartedAt:       time.Now(),
-					}
-					if err := s.subscriptionRepo.Create(ctx, sub); err != nil {
-						log.Printf("ERROR: Failed to create subscription for user %s, course %s: %v", order.UserID, item.CourseID, err)
-					}
-				}
-			}
-
-			// Clear cart after successful checkout
-			if err := s.cartRepo.ClearCart(ctx, order.UserID); err != nil {
-				log.Printf("WARNING: Failed to clear cart for user %s: %v", order.UserID, err)
-			}
-
-		case payment.OrderTypeSubscriptionRenewal:
-			// Update subscription billing date
-			if order.SubscriptionID != nil {
-				now := time.Now()
-				nextBilling := now.AddDate(0, 1, 0)
-				if err := s.subscriptionRepo.UpdateBillingDate(ctx, *order.SubscriptionID, now, nextBilling); err != nil {
-					log.Printf("ERROR: Failed to update subscription billing date: %v", err)
-				}
-			}
-
-		default: // OrderTypeSingleCourse (legacy)
-			// For backward compatibility with old single-course orders
-			if len(order.Items) > 0 {
-				courseID := order.Items[0].CourseID
-				if err := s.coursesClient.ActivateEnrollment(ctx, order.UserID.String(), courseID.String()); err != nil {
-					log.Printf("ERROR: Failed to activate enrollment for user %s, course %s: %v", order.UserID, courseID, err)
-				}
-			}
+		// 6. Complete the payment process (enrollment, subscriptions, etc.)
+		if err := s.completeSuccessfulPayment(ctx, order, amountCents); err != nil {
+			log.Printf("ERROR: Failed to complete payment actions for order %s: %v", order.ID, err)
 		}
-
-		// 7. Emit Kafka Event
-		event := map[string]interface{}{
-			"event_type": "payment.completed",
-			"user_id":    order.UserID.String(),
-			"payment_id": order.ID.String(),
-			"amount":     amountCents,
-			"currency":   order.Currency,
-			"order_type": order.OrderType,
-		}
-		if err := s.kafkaProducer.Publish(ctx, "payments.completed.v1", order.ID.String(), event); err != nil {
-			log.Printf("ERROR: Failed to publish Kafka event: %v", err)
-		}
-
-		log.Printf("SUCCESS: Payment completed for order %s, user %s", order.ID, order.UserID)
 	} else {
 		s.repo.UpdateOrderStatus(ctx, order.ID, payment.OrderStatusFailed, nil)
 		
@@ -548,5 +517,87 @@ func (s *Service) GetEnrollmentStatus(ctx context.Context, userID, courseID stri
 func (s *Service) GetUserPaymentMethods(ctx context.Context, userID uuid.UUID) ([]paymentmethod.PaymentMethod, error) {
 	return s.paymentMethodRepo.GetUserPaymentMethods(ctx, userID)
 }
+
+func (s *Service) completeSuccessfulPayment(ctx context.Context, order *payment.PaymentOrder, amountCents int64) error {
+	// 1. Activate Enrollments / Create Subscriptions
+	switch order.OrderType {
+	case payment.OrderTypeCartCheckout:
+		for _, item := range order.Items {
+			if err := s.coursesClient.ActivateEnrollment(ctx, order.UserID.String(), item.CourseID.String()); err != nil {
+				log.Printf("ERROR: Failed to activate enrollment for user %s, course %s: %v", order.UserID, item.CourseID, err)
+			}
+
+			if item.BillingType == "MONTHLY" {
+				s.ensureSubscription(ctx, order.UserID, item)
+			}
+		}
+		if err := s.cartRepo.ClearCart(ctx, order.UserID); err != nil {
+			log.Printf("WARNING: Failed to clear cart for user %s: %v", order.UserID, err)
+		}
+
+	case payment.OrderTypeSubscriptionRenewal:
+		if order.SubscriptionID != nil {
+			now := time.Now()
+			nextBilling := now.AddDate(0, 1, 0)
+			if err := s.subscriptionRepo.UpdateBillingDate(ctx, *order.SubscriptionID, now, nextBilling); err != nil {
+				log.Printf("ERROR: Failed to update subscription: %v", err)
+			}
+		}
+
+	default: // OrderTypeSingleCourse
+		for _, item := range order.Items {
+			if err := s.coursesClient.ActivateEnrollment(ctx, order.UserID.String(), item.CourseID.String()); err != nil {
+				log.Printf("ERROR: Failed to activate enrollment for user %s, course %s: %v", order.UserID, item.CourseID, err)
+			}
+
+			if item.BillingType == "MONTHLY" {
+				s.ensureSubscription(ctx, order.UserID, item)
+			}
+		}
+	}
+
+	// 2. Emit Kafka Event
+	event := map[string]interface{}{
+		"event_type": "payment.completed",
+		"user_id":    order.UserID.String(),
+		"payment_id": order.ID.String(),
+		"amount":     amountCents,
+		"currency":   order.Currency,
+		"order_type": string(order.OrderType),
+	}
+	if err := s.kafkaProducer.Publish(ctx, "payments.completed.v1", order.ID.String(), event); err != nil {
+		log.Printf("ERROR: Failed to publish Kafka event: %v", err)
+	}
+
+	log.Printf("SUCCESS: Payment completed for order %s, user %s", order.ID, order.UserID)
+	return nil
+}
+
+func (s *Service) ensureSubscription(ctx context.Context, userID uuid.UUID, item payment.PaymentOrderItem) {
+	// Check if already exists to avoid unique constraint error
+	existing, _ := s.subscriptionRepo.GetByUserAndCourse(ctx, userID, item.CourseID)
+	if existing != nil {
+		if existing.Status != subscription.StatusActive {
+			s.subscriptionRepo.UpdateStatus(ctx, existing.ID, subscription.StatusActive)
+		}
+		return
+	}
+
+	sub := &subscription.Subscription{
+		ID:              uuid.New(),
+		UserID:          userID,
+		CourseID:        item.CourseID,
+		Status:          subscription.StatusActive,
+		PriceCents:      item.PriceCents,
+		Currency:        item.Currency,
+		BillingCycle:    subscription.BillingCycleMonthly,
+		NextBillingDate: time.Now().AddDate(0, 1, 0),
+		StartedAt:       time.Now(),
+	}
+	if err := s.subscriptionRepo.Create(ctx, sub); err != nil {
+		log.Printf("ERROR: Failed to create subscription for user %s, course %s: %v", userID, item.CourseID, err)
+	}
+}
+
 
 

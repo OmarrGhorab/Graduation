@@ -65,12 +65,17 @@ func (h *PaymentHandler) CreatePayment(c *fiber.Ctx) error {
 		}
 	}
 
+	paymentMethodID := uuid.Nil
+	if req.PaymentMethodID != "" {
+		paymentMethodID, _ = uuid.Parse(req.PaymentMethodID)
+	}
 
 	paymentURL, orderID, err := h.paymentService.CreatePayment(c.Context(), payment.CreatePaymentOptions{
-		UserID:        userID,
-		CourseID:      courseID,
-		PaymentMethod: req.PaymentMethod,
-		PhoneNumber:   req.PhoneNumber,
+		UserID:          userID,
+		CourseID:        courseID,
+		PaymentMethod:   req.PaymentMethod,
+		PaymentMethodID: paymentMethodID,
+		PhoneNumber:     req.PhoneNumber,
 		BillingData: paymob.BillingData{
 			FirstName:   req.FirstName,
 			LastName:    req.LastName,

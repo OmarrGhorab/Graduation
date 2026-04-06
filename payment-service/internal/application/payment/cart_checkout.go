@@ -14,11 +14,12 @@ import (
 )
 
 type CheckoutCartOptions struct {
-	UserID        uuid.UUID
-	PaymentMethod string
-	PhoneNumber   string
-	BillingData   paymob.BillingData
-	SaveCard      bool
+	UserID          uuid.UUID
+	PaymentMethod   string
+	PaymentMethodID uuid.UUID
+	PhoneNumber     string
+	BillingData     paymob.BillingData
+	SaveCard        bool
 }
 
 func (s *Service) CheckoutCart(ctx context.Context, opts CheckoutCartOptions) (string, uuid.UUID, error) {
@@ -82,6 +83,7 @@ func (s *Service) CheckoutCart(ctx context.Context, opts CheckoutCartOptions) (s
 
 	// 3. Create payment order
 	order := &payment.PaymentOrder{
+		ID:            uuid.New(),
 		UserID:        opts.UserID,
 		AmountCents:   totalAmount,
 		Currency:      currency,
@@ -113,19 +115,46 @@ func (s *Service) CheckoutCart(ctx context.Context, opts CheckoutCartOptions) (s
 		integrationID = s.paymobClient.GetWalletIntegrationID()
 	}
 
-	paymentToken, err := s.paymobClient.CreatePaymentKey(ctx, authToken, paymobOrderID, totalAmount, currency, integrationID, opts.BillingData, opts.SaveCard)
+	paymentKey, err := s.paymobClient.CreatePaymentKey(ctx, authToken, paymobOrderID, totalAmount, currency, integrationID, opts.BillingData, opts.SaveCard)
 	if err != nil {
 		return "", uuid.Nil, fmt.Errorf("paymob create payment key failed: %w", err)
 	}
 
 	var paymentURL string
-	if opts.PaymentMethod == "WALLET" {
-		paymentURL, err = s.paymobClient.PayWithWallet(ctx, paymentToken, opts.PhoneNumber)
+	
+	// Handle One-Click or Regular flow
+	if opts.PaymentMethod == "CARD" && opts.PaymentMethodID != uuid.Nil {
+		pm, err := s.paymentMethodRepo.GetByID(ctx, opts.PaymentMethodID)
+		if err != nil {
+			return "", uuid.Nil, fmt.Errorf("payment method not found: %w", err)
+		}
+		if pm.UserID != opts.UserID {
+			return "", uuid.Nil, errors.New("unauthorized payment method")
+		}
+
+		resp, err := s.paymobClient.PayWithToken(ctx, paymentKey, pm.Token)
+		if err != nil {
+			return "", uuid.Nil, fmt.Errorf("one-click payment failed: %w", err)
+		}
+
+		paymentURL = resp.RedirectURL
+		if paymentURL == "" {
+			paymentURL = resp.IframeRedirectURL
+		}
+
+		// Update order status if immediately known
+		if bool(resp.Success) {
+			s.repo.UpdateOrderStatus(ctx, order.ID, payment.OrderStatusPaid, nil)
+		} else if !bool(resp.Pending) {
+			s.repo.UpdateOrderStatus(ctx, order.ID, payment.OrderStatusFailed, nil)
+		}
+	} else if opts.PaymentMethod == "WALLET" {
+		paymentURL, err = s.paymobClient.PayWithWallet(ctx, paymentKey, opts.PhoneNumber)
 		if err != nil {
 			return "", uuid.Nil, fmt.Errorf("paymob wallet pay failed: %w", err)
 		}
 	} else {
-		paymentURL = s.paymobClient.GetCardPaymentURL(paymentToken)
+		paymentURL = s.paymobClient.GetCardPaymentURL(paymentKey)
 	}
 
 	// 5. Cache session in Redis
@@ -133,7 +162,7 @@ func (s *Service) CheckoutCart(ctx context.Context, opts CheckoutCartOptions) (s
 		"orderID":      order.ID,
 		"userID":       opts.UserID,
 		"amountCents":  totalAmount,
-		"paymentToken": paymentToken,
+		"paymentToken": paymentKey,
 		"monthlyItems": monthlyItems,
 	})
 	s.redisClient.SetPaymentSession(ctx, order.ID.String(), string(sessionData), 30*time.Minute)

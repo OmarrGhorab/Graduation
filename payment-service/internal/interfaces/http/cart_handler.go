@@ -157,10 +157,16 @@ func (h *CartHandler) CheckoutCart(c *fiber.Ctx) error {
 	userIDStr := c.Locals("userId").(string)
 	userID, _ := uuid.Parse(userIDStr)
 
+	pmID := uuid.Nil
+	if req.PaymentMethodID != "" {
+		pmID, _ = uuid.Parse(req.PaymentMethodID)
+	}
+
 	paymentURL, orderID, err := h.paymentService.CheckoutCart(c.Context(), payment.CheckoutCartOptions{
-		UserID:        userID,
-		PaymentMethod: req.PaymentMethod,
-		PhoneNumber:   req.PhoneNumber,
+		UserID:          userID,
+		PaymentMethod:   req.PaymentMethod,
+		PaymentMethodID: pmID,
+		PhoneNumber:     req.PhoneNumber,
 		BillingData: paymob.BillingData{
 			FirstName:   req.FirstName,
 			LastName:    req.LastName,

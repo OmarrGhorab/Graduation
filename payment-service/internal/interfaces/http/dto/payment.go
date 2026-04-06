@@ -13,8 +13,9 @@ type CreatePaymentRequest struct {
 	Street        string `json:"street" validate:"omitempty"`
 	City          string `json:"city" validate:"omitempty"`
 	State         string `json:"state" validate:"omitempty"`
-	Country       string `json:"country" validate:"omitempty"`
-	SaveCard      bool   `json:"saveCard" validate:"omitempty"`
+	Country         string `json:"country" validate:"omitempty"`
+	SaveCard        bool   `json:"saveCard" validate:"omitempty"`
+	PaymentMethodID string `json:"paymentMethodId" validate:"omitempty,uuid"`
 }
 
 type CreatePaymentResponse struct {

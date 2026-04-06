@@ -14,6 +14,28 @@ import (
 	"time"
 )
 
+type FlexibleBool bool
+
+func (fb *FlexibleBool) UnmarshalJSON(data []byte) error {
+	var v interface{}
+	if err := json.Unmarshal(data, &v); err != nil {
+		return err
+	}
+
+	switch val := v.(type) {
+	case bool:
+		*fb = FlexibleBool(val)
+	case string:
+		str := strings.ToLower(strings.TrimSpace(val))
+		*fb = FlexibleBool(str == "true" || str == "1" || str == "yes")
+	case float64:
+		*fb = FlexibleBool(val != 0)
+	default:
+		*fb = false
+	}
+	return nil
+}
+
 type Client struct {
 	apiKey              string
 	cardIntegrationID   string
@@ -154,6 +176,48 @@ func (c *Client) CreatePaymentKey(ctx context.Context, authToken string, orderID
 	return result.Token, nil
 }
 
+type PayWithTokenResponse struct {
+	ID                int64        `json:"id"`
+	Success           FlexibleBool `json:"success"`
+	Pending           FlexibleBool `json:"pending"`
+	RedirectURL       string       `json:"redirection_url"`
+	IframeRedirectURL string       `json:"iframe_redirection_url"`
+}
+
+func (c *Client) PayWithToken(ctx context.Context, paymentToken string, cardToken string) (*PayWithTokenResponse, error) {
+	url := fmt.Sprintf("%s/acceptance/payments/pay", c.baseURL)
+	reqBody, _ := json.Marshal(map[string]interface{}{
+		"source": map[string]string{
+			"identifier": cardToken,
+			"subtype":    "TOKEN",
+		},
+		"payment_token": paymentToken,
+	})
+
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewBuffer(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	fmt.Printf("[Paymob Debug] Token Pay Response: %s\n", string(body))
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+		return nil, fmt.Errorf("token pay failed with status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var result PayWithTokenResponse
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, err
+	}
+
+	return &result, nil
+}
+
 // 4. Wallet Pay
 func (c *Client) PayWithWallet(ctx context.Context, paymentToken string, phoneNumber string) (string, error) {
 	url := fmt.Sprintf("%s/acceptance/payments/pay", c.baseURL)
@@ -180,7 +244,7 @@ func (c *Client) PayWithWallet(ctx context.Context, paymentToken string, phoneNu
 	}
 
 	var result struct {
-		RedirectURL       string `json:"redirect_url"`
+		RedirectURL       string `json:"redirection_url"`
 		IframeRedirectURL string `json:"iframe_redirection_url"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
