@@ -18,8 +18,8 @@ FROM alpine:latest AS production
 
 WORKDIR /app
 
-# Install certificates for HTTPS requests
-RUN apk --no-cache add ca-certificates
+# Install certificates and wget for healthchecks
+RUN apk --no-cache add ca-certificates wget
 
 # Copy the binary from the builder stage
 COPY --from=builder /app/main .

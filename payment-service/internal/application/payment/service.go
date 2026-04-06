@@ -167,15 +167,25 @@ func (s *Service) CreatePayment(ctx context.Context, opts CreatePaymentOptions) 
 	})
 	s.redisClient.SetPaymentSession(ctx, order.ID.String(), string(sessionData), 30*time.Minute)
 
+	fmt.Printf("[Payment Debug] Generated Token: %s\n", paymentToken)
+	fmt.Printf("[Payment Debug] Final URL: %s\n", paymentURL)
+
 	return paymentURL, order.ID, nil
 }
 
 func (s *Service) HandleWebhook(ctx context.Context, data map[string]interface{}, hmacHeader string) error {
 	// 1. Verify HMAC
 	valid, err := s.paymobClient.VerifyHMAC(hmacHeader, data)
-	if err != nil || !valid {
+	if err != nil {
+		fmt.Printf("[Webhook Debug] Verification Error: %v\n", err)
+		return err
+	}
+	if !valid {
+		fmt.Printf("[Webhook Debug] Invalid HMAC Signature\n")
 		return errors.New("invalid HMAC signature")
 	}
+
+	fmt.Printf("[Webhook Debug] HMAC Verified Successfully\n")
 
 	// 2. Extract transaction data
 	obj, ok := data["obj"].(map[string]interface{})
@@ -184,8 +194,15 @@ func (s *Service) HandleWebhook(ctx context.Context, data map[string]interface{}
 	}
 
 	success := obj["success"].(bool)
-	paymobTransactionID := fmt.Sprintf("%v", obj["id"])
-	paymobOrderID := fmt.Sprintf("%v", obj["order"])
+	paymobTransactionID := fmt.Sprintf("%.0f", obj["id"])
+
+	paymobOrderID := ""
+	if o, ok := obj["order"].(map[string]interface{}); ok {
+		paymobOrderID = fmt.Sprintf("%.0f", o["id"])
+	} else {
+		paymobOrderID = fmt.Sprintf("%.0f", obj["order"])
+	}
+
 	amountCents := int64(obj["amount_cents"].(float64))
 
 	sourceData := obj["source_data"].(map[string]interface{})
@@ -323,13 +340,19 @@ func (s *Service) HandleWebhook(ctx context.Context, data map[string]interface{}
 	return nil
 }
 
+func (s *Service) GetOrderByPaymobID(ctx context.Context, paymobOrderID string) (*payment.PaymentOrder, error) {
+	return s.repo.GetOrderByPaymobID(ctx, paymobOrderID)
+}
+
 func (s *Service) GetOrderStatus(ctx context.Context, userID uuid.UUID, orderID uuid.UUID) (*payment.PaymentOrder, error) {
 	order, err := s.repo.GetOrderByID(ctx, orderID)
 	if err != nil {
 		return nil, err
 	}
 
-	if order.UserID != userID {
+	// If a userID is provided, we must verify ownership.
+	// If userID is Nil (public access), we allow the check by orderID only.
+	if userID != uuid.Nil && order.UserID != userID {
 		return nil, errors.New("unauthorized")
 	}
 

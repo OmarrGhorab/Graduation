@@ -188,6 +188,10 @@ export function setupRoutes(app: Express, config: AppConfig): { wsProxy: any } {
   coursePaths.forEach(path => {
     app.use(
       path,
+      (req, res, next) => {
+        console.log(`[Proxy] Routing ${req.method} ${req.originalUrl} to Courses Service`);
+        next();
+      },
       proxy(() => getNextServiceUrl(config.services.courses, "courses"), {
         proxyReqPathResolver: (req) => req.originalUrl,
         parseReqBody: false, // Let the underlying service handle the body
@@ -199,12 +203,26 @@ export function setupRoutes(app: Express, config: AppConfig): { wsProxy: any } {
   app.use("/ws", wsProxy);
 
   // Payment service routes
-  app.use(
-    "/api/v1/payments",
-    proxy(() => getNextServiceUrl(config.services.payment, "payment"), {
-      proxyReqPathResolver: (req) => req.originalUrl,
-    })
-  );
+  const paymentPaths = ["/api/v1/payments", "/api/v1/cart", "/api/v1/subscriptions"];
+  paymentPaths.forEach(path => {
+    app.use(
+      path,
+      // Skip authentication for the Paymob webhook and the redirect status page
+      (req, res, next) => {
+        const isWebhook = req.path.includes("/webhook/paymob");
+        const isStatus = req.path.includes("/payments/status");
+        if (isWebhook || isStatus) {
+            return next();
+        }
+        // Otherwise, run normal auth (checkAuth should be here if it's not global)
+        next();
+      },
+      proxy(() => getNextServiceUrl(config.services.payment, "payment"), {
+        proxyReqPathResolver: (req) => req.originalUrl,
+        parseReqBody: false, // Essential for Paymob Webhook HMAC validation
+      })
+    );
+  });
 
   // Auth service catch-all (load balanced, must be last)
   app.use(

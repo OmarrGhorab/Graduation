@@ -5,6 +5,8 @@ import (
 	"os"
 	"strconv"
 	"time"
+
+	"github.com/joho/godotenv"
 )
 
 type Config struct {
@@ -62,6 +64,8 @@ type CloudinaryConfig struct {
 }
 
 func Load() (*Config, error) {
+	_ = godotenv.Load() // Load .env if it exists, ignore errors
+	
 	redisDB, err := strconv.Atoi(getEnv("REDIS_DB", "0"))
 	if err != nil {
 		redisDB = 0

@@ -250,6 +250,13 @@ export function loadConfig(): AppConfig {
     },
   };
 
+  // Log loaded URLs for debugging
+  console.log("[Config] Loaded Service URLs:", {
+    auth: config.services.auth.map(s => s.url),
+    courses: config.services.courses.map(s => s.url),
+    payment: config.services.payment.map(s => s.url),
+  });
+
   // Validate the configuration
   validateConfig(config);
 

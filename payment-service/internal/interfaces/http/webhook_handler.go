@@ -20,6 +20,10 @@ func (h *WebhookHandler) RegisterRoutes(router fiber.Router) {
 func (h *WebhookHandler) PaymobWebhook(c *fiber.Ctx) error {
 	hmacHeader := c.Get("hmac")
 	if hmacHeader == "" {
+		hmacHeader = c.Query("hmac")
+	}
+
+	if hmacHeader == "" {
 		return c.Status(fiber.StatusUnauthorized).SendString("HMAC header missing")
 	}
 

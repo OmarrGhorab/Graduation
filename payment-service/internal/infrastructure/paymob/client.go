@@ -201,6 +201,12 @@ func (c *Client) GetCardPaymentURL(paymentToken string) string {
 // HMAC Verification
 func (c *Client) VerifyHMAC(hmacHeader string, data map[string]interface{}) (bool, error) {
 	// Paymob HMAC verification logic
+	// If this is a webhook, actual data is in "obj"
+	sourceData := data
+	if obj, ok := data["obj"].(map[string]interface{}); ok {
+		sourceData = obj
+	}
+
 	// Keys to include in HMAC calculation (order matters)
 	keys := []string{
 		"amount_cents",
@@ -227,17 +233,49 @@ func (c *Client) VerifyHMAC(hmacHeader string, data map[string]interface{}) (boo
 
 	var values []string
 	for _, key := range keys {
-		val := getNestedValue(data, key)
-		values = append(values, fmt.Sprintf("%v", val))
+		val := getNestedValue(sourceData, key)
+
+		// Fix for "order" being a map in webhooks
+		if key == "order" {
+			if m, ok := val.(map[string]interface{}); ok {
+				val = m["id"]
+			}
+		}
+
+		var valStr string
+		switch v := val.(type) {
+		case nil:
+			valStr = ""
+		case bool:
+			valStr = fmt.Sprintf("%v", v) // "true" or "false"
+		case float64:
+			// JSON numbers are float64. Format as integer to avoid scientific notation.
+			valStr = fmt.Sprintf("%.0f", v)
+		case int, int64:
+			valStr = fmt.Sprintf("%d", v)
+		default:
+			valStr = fmt.Sprintf("%v", v)
+		}
+		values = append(values, valStr)
 	}
 
 	concatString := strings.Join(values, "")
+	// fmt.Printf("[Paymob Debug] HMAC Concat String: %s\n", concatString)
 
 	h := hmac.New(sha512.New, []byte(c.hmacSecret))
 	h.Write([]byte(concatString))
 	expectedHMAC := hex.EncodeToString(h.Sum(nil))
 
-	return strings.ToLower(hmacHeader) == strings.ToLower(expectedHMAC), nil
+	isValid := strings.ToLower(hmacHeader) == strings.ToLower(expectedHMAC)
+	if !isValid {
+		// Log detailed info for debugging if needed
+		fmt.Printf("[Paymob Debug] HMAC Mismatch!\n")
+		fmt.Printf("  Concat: %s\n", concatString)
+		fmt.Printf("  Received: %s\n", hmacHeader)
+		fmt.Printf("  Expected: %s\n", expectedHMAC)
+	}
+
+	return isValid, nil
 }
 
 func getNestedValue(data map[string]interface{}, path string) interface{} {

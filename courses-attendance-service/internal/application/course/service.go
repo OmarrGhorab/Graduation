@@ -67,6 +67,7 @@ type CreateCourseInput struct {
 	Currency                string
 	IsPaid                  bool
 	BillingType             courseDomain.BillingType
+	FreeTrialLessons        int
 	AttendanceWeight        float64
 }
 
@@ -116,6 +117,7 @@ func (s *Service) CreateCourse(ctx context.Context, input CreateCourseInput) (*c
 		Currency:                input.Currency,
 		IsPaid:                  input.IsPaid,
 		BillingType:             input.BillingType,
+		FreeTrialLessons:        input.FreeTrialLessons,
 		Status:                  courseDomain.CourseStatusActive,
 		AttendanceWeight:        input.AttendanceWeight,
 		CreatedAt:               s.clock.Now(),
@@ -159,6 +161,7 @@ type UpdateCourseInput struct {
 	GeofenceRadiusM         *int
 	AttendanceWindowMinutes *int
 	Price                   *float64
+	FreeTrialLessons        *int
 	BillingType             *courseDomain.BillingType
 	Status                  *courseDomain.CourseStatus
 }
@@ -200,6 +203,9 @@ func (s *Service) UpdateCourse(ctx context.Context, courseID uuid.UUID, teacherI
 	}
 	if input.Price != nil {
 		course.Price = *input.Price
+	}
+	if input.FreeTrialLessons != nil {
+		course.FreeTrialLessons = *input.FreeTrialLessons
 	}
 	if input.BillingType != nil {
 		course.BillingType = *input.BillingType

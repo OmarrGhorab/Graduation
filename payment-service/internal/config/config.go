@@ -5,6 +5,8 @@ import (
 	"os"
 	"strconv"
 	"time"
+
+	"github.com/joho/godotenv"
 )
 
 type Config struct {
@@ -68,6 +70,7 @@ type EmailConfig struct {
 }
 
 func Load() (*Config, error) {
+	_ = godotenv.Load()
 	redisDB, _ := strconv.Atoi(getEnv("REDIS_DB", "0"))
 
 	cfg := &Config{

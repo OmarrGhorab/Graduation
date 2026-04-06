@@ -149,6 +149,8 @@ func (h *CourseHandler) CreateCourse(c *fiber.Ctx) error {
 		Price:                   req.Price,
 		Currency:                req.Currency,
 		IsPaid:                  req.IsPaid,
+		BillingType:             courseDomain.BillingType(req.BillingType),
+		FreeTrialLessons:        req.FreeTrialLessons,
 		AttendanceWeight:        req.AttendanceWeight,
 	}
 
@@ -505,6 +507,11 @@ func (h *CourseHandler) UpdateCourse(c *fiber.Ctx) error {
 		GeofenceRadiusM:         req.GeofenceRadiusM,
 		AttendanceWindowMinutes: req.AttendanceWindowMinutes,
 		Price:                   req.Price,
+		FreeTrialLessons:        req.FreeTrialLessons,
+	}
+	if req.BillingType != nil {
+		billingType := courseDomain.BillingType(*req.BillingType)
+		input.BillingType = &billingType
 	}
 	if req.Status != nil {
 		status := courseDomain.CourseStatus(*req.Status)

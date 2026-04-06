@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/OmarrGhorab/payment-service/internal/infrastructure/authclient"
@@ -9,6 +10,14 @@ import (
 
 func Authenticate(authClient *authclient.Client) fiber.Handler {
 	return func(c *fiber.Ctx) error {
+		path := c.Path()
+		fmt.Printf("[Auth Debug] Request Path: %s\n", path)
+		
+		// Skip authentication for Paymob webhook and public status checks
+		if strings.Contains(path, "/webhook/paymob") || strings.EqualFold(path, "/api/v1/payments/status") || strings.HasSuffix(path, "/status") {
+			return c.Next()
+		}
+
 		authHeader := c.Get("Authorization")
 		if authHeader == "" {
 			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{

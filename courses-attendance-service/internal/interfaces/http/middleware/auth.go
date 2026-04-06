@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/OmarrGhorab/courses-attendance-service/internal/infrastructure/authclient"
@@ -30,11 +31,14 @@ func Authenticate(authClient *authclient.Client) fiber.Handler {
 
 		resp, err := authClient.ValidateToken(c.Context(), token)
 		if err != nil {
+			fmt.Printf("[Auth Debug] Token validation failed: %v\n", err)
 			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
 				"success": false,
 				"error":   "Invalid or expired token",
 			})
 		}
+		
+		fmt.Printf("[Auth Debug] Validation response: Valid=%v, UserID=%s\n", resp.Valid, resp.UserID)
 
 		if !resp.Valid {
 			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{

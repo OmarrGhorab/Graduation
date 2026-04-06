@@ -2,6 +2,7 @@ package http
 
 import (
 	"github.com/OmarrGhorab/payment-service/internal/application/payment"
+	paymentDomain "github.com/OmarrGhorab/payment-service/internal/domain/payment"
 	"github.com/OmarrGhorab/payment-service/internal/infrastructure/authclient"
 	"github.com/OmarrGhorab/payment-service/internal/infrastructure/paymob"
 	"github.com/OmarrGhorab/payment-service/internal/interfaces/http/dto"
@@ -23,10 +24,13 @@ func NewPaymentHandler(svc *payment.Service, auth *authclient.Client) *PaymentHa
 }
 
 func (h *PaymentHandler) RegisterRoutes(router fiber.Router) {
-	payments := router.Group("/payments", middleware.Authenticate(h.authClient))
+	// Public routes
+	router.Get("/payments/:id/status", h.GetStatus)
+	router.Get("/payments/status", h.GetStatus)
 
+	// Authenticated routes
+	payments := router.Group("/payments", middleware.Authenticate(h.authClient))
 	payments.Post("/create", h.CreatePayment)
-	payments.Get("/:id/status", h.GetStatus)
 }
 
 func (h *PaymentHandler) CreatePayment(c *fiber.Ctx) error {
@@ -106,17 +110,37 @@ func (h *PaymentHandler) CreatePayment(c *fiber.Ctx) error {
 }
 
 func (h *PaymentHandler) GetStatus(c *fiber.Ctx) error {
-	userIDStr := c.Locals("userId").(string)
-	userID, _ := uuid.Parse(userIDStr)
-	orderID, err := uuid.Parse(c.Params("id"))
-	if err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"success": false,
-			"error":   "Invalid order ID",
-		})
+	idParam := c.Params("id")
+	if idParam == "" {
+		idParam = c.Query("id")
 	}
 
-	order, err := h.paymentService.GetOrderStatus(c.Context(), userID, orderID)
+	// Try to get userID from locals if authenticated
+	var userID uuid.UUID
+	if val := c.Locals("userId"); val != nil {
+		if id, ok := val.(string); ok {
+			userID, _ = uuid.Parse(id)
+		}
+	}
+
+	// 1. Try to parse as UUID (Our internal ID)
+	orderID, err := uuid.Parse(idParam)
+	var order *paymentDomain.PaymentOrder
+	
+	if err == nil {
+		// Found UUID, fetch by internal ID
+		order, err = h.paymentService.GetOrderStatus(c.Context(), userID, orderID)
+	} else {
+		// Not a UUID, check if it's a numeric Paymob ID (either 'id' or 'order' param)
+		paymobOrderID := c.Query("order")
+		if paymobOrderID == "" {
+			paymobOrderID = idParam // Fallback to the main ID param
+		}
+		
+		// If it's numeric, we skip the UUID check and fetch from service by Paymob ID
+		order, err = h.paymentService.GetOrderByPaymobID(c.Context(), paymobOrderID)
+	}
+
 	if err != nil {
 		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
 			"success": false,

@@ -26,7 +26,7 @@ func (h *SubscriptionHandler) RegisterRoutes(router fiber.Router) {
 
 	subs.Get("/", h.GetUserSubscriptions)
 	subs.Get("/:id", h.GetSubscription)
-	subs.Post("/cancel", h.CancelSubscription)
+	subs.Post("/:id/cancel", h.CancelSubscription)
 }
 
 func (h *SubscriptionHandler) GetUserSubscriptions(c *fiber.Ctx) error {
@@ -122,16 +122,19 @@ func (h *SubscriptionHandler) GetSubscription(c *fiber.Ctx) error {
 }
 
 func (h *SubscriptionHandler) CancelSubscription(c *fiber.Ctx) error {
-	var req dto.CancelSubscriptionRequest
-	if err := parseAndValidate(c, &req); err != nil {
-		return err
-	}
+	subscriptionIDStr := c.Params("id")
 
 	userIDStr := c.Locals("userId").(string)
 	userID, _ := uuid.Parse(userIDStr)
-	subscriptionID, _ := uuid.Parse(req.SubscriptionID)
+	subscriptionID, err := uuid.Parse(subscriptionIDStr)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"success": false,
+			"error":   "Invalid subscription ID",
+		})
+	}
 
-	err := h.subscriptionService.CancelSubscription(c.Context(), userID, subscriptionID)
+	err = h.subscriptionService.CancelSubscription(c.Context(), userID, subscriptionID)
 	if err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 			"success": false,
