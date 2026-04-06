@@ -27,14 +27,17 @@ var (
 type Service struct {
 	lessonRepo      *postgres.LessonRepository
 	courseRepo      *postgres.CourseRepository
+	enrollmentRepo  *postgres.EnrollmentRepository
 	progressService *progressApp.Service
 	events          *notificationevents.EventDispatcher
 	clock           clock.Clock
 }
 
+
 func NewService(
 	lessonRepo *postgres.LessonRepository,
 	courseRepo *postgres.CourseRepository,
+	enrollmentRepo *postgres.EnrollmentRepository,
 	progressService *progressApp.Service,
 	events *notificationevents.EventDispatcher,
 	clk clock.Clock,
@@ -42,11 +45,13 @@ func NewService(
 	return &Service{
 		lessonRepo:      lessonRepo,
 		courseRepo:      courseRepo,
+		enrollmentRepo:  enrollmentRepo,
 		progressService: progressService,
 		events:          events,
 		clock:           clk,
 	}
 }
+
 
 // CreateLessonInput represents input for creating a lesson
 type CreateLessonInput struct {
@@ -146,9 +151,60 @@ func (s *Service) GetLesson(ctx context.Context, id uuid.UUID) (*lessonDomain.Le
 	return lesson, nil
 }
 
-// GetCourseLessons retrieves all lessons for a course
-func (s *Service) GetCourseLessons(ctx context.Context, courseID uuid.UUID) ([]lessonDomain.Lesson, error) {
-	return s.lessonRepo.GetByCourseID(ctx, courseID)
+// GetCourseLessons retrieves all lessons for a course, filtered by payment periods for students
+func (s *Service) GetCourseLessons(ctx context.Context, courseID uuid.UUID, userID uuid.UUID, userRole string) ([]lessonDomain.Lesson, error) {
+	lessons, err := s.lessonRepo.GetByCourseID(ctx, courseID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Teachers and Instructors see everything
+	if userRole == "TEACHER" || userRole == "INSTRUCTOR" || userRole == "ADMIN" {
+		return lessons, nil
+	}
+
+	// Check if this course has monthly billing
+	course, err := s.courseRepo.GetByID(ctx, courseID)
+	if err != nil || course == nil {
+		return lessons, nil // Fallback to all if course info missing
+	}
+
+	if course.BillingType != "MONTHLY" {
+		return lessons, nil // One-time courses allow access to all content
+	}
+
+	// For students in monthly courses, filter content by paid periods
+	enrollment, err := s.enrollmentRepo.GetByCourseAndUser(ctx, courseID, userID)
+	if err != nil || enrollment == nil {
+		return []lessonDomain.Lesson{}, nil
+	}
+
+	paidPeriods, err := s.enrollmentRepo.GetPeriods(ctx, enrollment.ID)
+	if err != nil {
+		return nil, err
+	}
+
+	paidMap := make(map[string]bool)
+	for _, p := range paidPeriods {
+		paidMap[p.PeriodKey] = true
+	}
+
+	var filtered []lessonDomain.Lesson
+	for _, l := range lessons {
+		// Free lessons are always visible
+		if l.IsFree {
+			filtered = append(filtered, l)
+			continue
+		}
+
+		// Check if the lesson's month is paid
+		periodKey := l.ScheduledAt.Format("2006-01")
+		if paidMap[periodKey] {
+			filtered = append(filtered, l)
+		}
+	}
+
+	return filtered, nil
 }
 
 // StartLesson starts a lesson (sets status to LIVE)

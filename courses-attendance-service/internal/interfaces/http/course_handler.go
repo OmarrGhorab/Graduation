@@ -875,7 +875,9 @@ func (h *CourseHandler) GetCourseDetails(c *fiber.Ctx) error {
 	// 2. Get lessons (if lesson service is available)
 	var lessons []dto.LessonInfo
 	if h.lessonService != nil {
-		lessonList, err := h.lessonService.GetCourseLessons(c.Context(), courseID)
+		role := c.Locals("userRole").(string)
+		lessonList, err := h.lessonService.GetCourseLessons(c.Context(), courseID, currentUserID, role)
+
 		if err == nil {
 			// Collect lesson IDs for batch attendance lookup
 			lessonIDs := make([]uuid.UUID, 0, len(lessonList))

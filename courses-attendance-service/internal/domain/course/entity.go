@@ -129,3 +129,19 @@ type Enrollment struct {
 func (Enrollment) TableName() string {
 	return "enrollments"
 }
+
+// EnrollmentPeriod represents a specifically paid month for an enrollment
+type EnrollmentPeriod struct {
+	ID           uuid.UUID  `gorm:"type:uuid;primary_key;default:gen_random_uuid()"`
+	EnrollmentID uuid.UUID  `gorm:"type:uuid;not null"`
+	PeriodKey    string     `gorm:"type:varchar(10);not null"` // Format: YYYY-MM
+	IsPaid       bool       `gorm:"not null;default:false"`
+	PaidAt       *time.Time `gorm:"type:timestamptz"`
+	CreatedAt    time.Time  `gorm:"not null;default:now()"`
+	UpdatedAt    time.Time  `gorm:"not null;default:now()"`
+}
+
+func (EnrollmentPeriod) TableName() string {
+	return "enrollment_periods"
+}
+

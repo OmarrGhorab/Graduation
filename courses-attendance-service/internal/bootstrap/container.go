@@ -159,10 +159,12 @@ func (c *Container) initServices() {
 	c.LessonService = lessonApp.NewService(
 		c.LessonRepo,
 		c.CourseRepo,
+		c.EnrollmentRepo,
 		c.ProgressService,
 		c.EventDispatcher,
 		c.Clock,
 	)
+
 
 	c.AttendanceService = attendanceApp.NewService(
 		c.LessonRepo,

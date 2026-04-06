@@ -79,8 +79,9 @@ func (h *InternalHandler) GetCourse(c *fiber.Ctx) error {
 
 func (h *InternalHandler) ActivateEnrollment(c *fiber.Ctx) error {
 	var req struct {
-		UserID   string `json:"userId"`
-		CourseID string `json:"courseId"`
+		UserID    string `json:"userId"`
+		CourseID  string `json:"courseId"`
+		PeriodKey string `json:"periodKey"`
 	}
 
 	if err := c.BodyParser(&req); err != nil {
@@ -106,10 +107,11 @@ func (h *InternalHandler) ActivateEnrollment(c *fiber.Ctx) error {
 		})
 	}
 
-	err = h.courseService.MarkEnrollmentPaid(c.Context(), courseID, userID)
+	err = h.courseService.MarkEnrollmentPaid(c.Context(), courseID, userID, req.PeriodKey)
 	if err != nil {
 		return handleServiceError(c, err)
 	}
+
 
 	return c.JSON(fiber.Map{
 		"success": true,

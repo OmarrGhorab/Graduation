@@ -406,22 +406,22 @@ func (s *Service) IsTeacherOrAssistant(ctx context.Context, courseID, userID uui
 	return false, false, nil
 }
 
-// MarkEnrollmentPaid marks an enrollment as paid
-func (s *Service) MarkEnrollmentPaid(ctx context.Context, courseID, studentID uuid.UUID) error {
+// MarkEnrollmentPaid marks an enrollment as paid, optionally for a specific period (YYYY-MM)
+func (s *Service) MarkEnrollmentPaid(ctx context.Context, courseID, studentID uuid.UUID, periodKey string) error {
 	enrollment, err := s.enrollmentRepo.GetByCourseAndUser(ctx, courseID, studentID)
 	if err != nil {
 		return err
 	}
-	
+
 	now := s.clock.Now()
-	
+
 	if enrollment == nil {
 		// Auto-enroll if missing
 		course, err := s.courseRepo.GetByID(ctx, courseID)
 		if err != nil || course == nil {
 			return errors.New("course not found")
 		}
-		
+
 		enrollment = &courseDomain.Enrollment{
 			ID:         uuid.New(),
 			CourseID:   courseID,
@@ -432,15 +432,47 @@ func (s *Service) MarkEnrollmentPaid(ctx context.Context, courseID, studentID uu
 			EnrolledAt: now,
 			UpdatedAt:  now,
 		}
-		return s.enrollmentRepo.Create(ctx, enrollment)
+		if err := s.enrollmentRepo.Create(ctx, enrollment); err != nil {
+			return err
+		}
+	} else {
+		enrollment.IsPaid = true
+		enrollment.PaidAt = &now
+		enrollment.UpdatedAt = now
+		if err := s.enrollmentRepo.Update(ctx, enrollment); err != nil {
+			return err
+		}
 	}
 
-	enrollment.IsPaid = true
-	enrollment.PaidAt = &now
-	enrollment.UpdatedAt = now
+	// If a specific period is provided (for monthly billing), mark it as paid
+	if periodKey != "" {
+		existingPeriod, err := s.enrollmentRepo.GetPeriod(ctx, enrollment.ID, periodKey)
+		if err != nil {
+			return err
+		}
 
-	return s.enrollmentRepo.Update(ctx, enrollment)
+		if existingPeriod == nil {
+			period := &courseDomain.EnrollmentPeriod{
+				ID:           uuid.New(),
+				EnrollmentID: enrollment.ID,
+				PeriodKey:    periodKey,
+				IsPaid:       true,
+				PaidAt:       &now,
+				CreatedAt:    now,
+				UpdatedAt:    now,
+			}
+			return s.enrollmentRepo.CreatePeriod(ctx, period)
+		} else {
+			existingPeriod.IsPaid = true
+			existingPeriod.PaidAt = &now
+			existingPeriod.UpdatedAt = now
+			return s.enrollmentRepo.UpdatePeriod(ctx, existingPeriod)
+		}
+	}
+
+	return nil
 }
+
 
 
 // GetCourseAssistants returns all assistants for a course

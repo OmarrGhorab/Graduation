@@ -62,13 +62,16 @@ func (c *Client) GetCourseByID(ctx context.Context, courseID string) (*CourseInf
 	return &result.Data, nil
 }
 
-func (c *Client) ActivateEnrollment(ctx context.Context, userID, courseID string) error {
+func (c *Client) ActivateEnrollment(ctx context.Context, userID, courseID string, periodKey string) error {
 	url := fmt.Sprintf("%s/api/v1/internal/enrollments/activate", c.baseURL)
 
-	reqBody, _ := json.Marshal(map[string]string{
-		"userId":   userID,
-		"courseId": courseID,
-	})
+	payload := map[string]string{
+		"userId":    userID,
+		"courseId":  courseID,
+		"periodKey": periodKey,
+	}
+	reqBody, _ := json.Marshal(payload)
+
 
 	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewBuffer(reqBody))
 	req.Header.Set("Content-Type", "application/json")

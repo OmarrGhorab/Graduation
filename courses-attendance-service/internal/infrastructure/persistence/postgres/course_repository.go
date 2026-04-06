@@ -140,6 +140,30 @@ func (r *EnrollmentRepository) Update(ctx context.Context, e *course.Enrollment)
 	return r.db.WithContext(ctx).Save(e).Error
 }
 
+func (r *EnrollmentRepository) CreatePeriod(ctx context.Context, p *course.EnrollmentPeriod) error {
+	return r.db.WithContext(ctx).Create(p).Error
+}
+
+func (r *EnrollmentRepository) GetPeriods(ctx context.Context, enrollmentID uuid.UUID) ([]course.EnrollmentPeriod, error) {
+	var periods []course.EnrollmentPeriod
+	err := r.db.WithContext(ctx).Where("enrollment_id = ? AND is_paid = true", enrollmentID).Find(&periods).Error
+	return periods, err
+}
+
+func (r *EnrollmentRepository) GetPeriod(ctx context.Context, enrollmentID uuid.UUID, periodKey string) (*course.EnrollmentPeriod, error) {
+	var p course.EnrollmentPeriod
+	err := r.db.WithContext(ctx).First(&p, "enrollment_id = ? AND period_key = ?", enrollmentID, periodKey).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	return &p, err
+}
+
+func (r *EnrollmentRepository) UpdatePeriod(ctx context.Context, p *course.EnrollmentPeriod) error {
+	return r.db.WithContext(ctx).Save(p).Error
+}
+
+
 // CourseAssistantRepository implements course assistant data access
 type CourseAssistantRepository struct {
 	db *Database

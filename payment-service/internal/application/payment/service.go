@@ -519,11 +519,13 @@ func (s *Service) GetUserPaymentMethods(ctx context.Context, userID uuid.UUID) (
 }
 
 func (s *Service) completeSuccessfulPayment(ctx context.Context, order *payment.PaymentOrder, amountCents int64) error {
+	periodKey := time.Now().Format("2006-01")
+
 	// 1. Activate Enrollments / Create Subscriptions
 	switch order.OrderType {
 	case payment.OrderTypeCartCheckout:
 		for _, item := range order.Items {
-			if err := s.coursesClient.ActivateEnrollment(ctx, order.UserID.String(), item.CourseID.String()); err != nil {
+			if err := s.coursesClient.ActivateEnrollment(ctx, order.UserID.String(), item.CourseID.String(), periodKey); err != nil {
 				log.Printf("ERROR: Failed to activate enrollment for user %s, course %s: %v", order.UserID, item.CourseID, err)
 			}
 
@@ -542,11 +544,19 @@ func (s *Service) completeSuccessfulPayment(ctx context.Context, order *payment.
 			if err := s.subscriptionRepo.UpdateBillingDate(ctx, *order.SubscriptionID, now, nextBilling); err != nil {
 				log.Printf("ERROR: Failed to update subscription: %v", err)
 			}
+
+			// Unlock the new month's content
+			for _, item := range order.Items {
+				if err := s.coursesClient.ActivateEnrollment(ctx, order.UserID.String(), item.CourseID.String(), periodKey); err != nil {
+					log.Printf("ERROR: Failed to activate enrollment for renewal %s, course %s: %v", order.ID, item.CourseID, err)
+				}
+			}
 		}
+
 
 	default: // OrderTypeSingleCourse
 		for _, item := range order.Items {
-			if err := s.coursesClient.ActivateEnrollment(ctx, order.UserID.String(), item.CourseID.String()); err != nil {
+			if err := s.coursesClient.ActivateEnrollment(ctx, order.UserID.String(), item.CourseID.String(), periodKey); err != nil {
 				log.Printf("ERROR: Failed to activate enrollment for user %s, course %s: %v", order.UserID, item.CourseID, err)
 			}
 
@@ -555,6 +565,7 @@ func (s *Service) completeSuccessfulPayment(ctx context.Context, order *payment.
 			}
 		}
 	}
+
 
 	// 2. Emit Kafka Event
 	event := map[string]interface{}{

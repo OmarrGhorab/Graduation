@@ -157,7 +157,12 @@ func (h *LessonHandler) GetCourseLessons(c *fiber.Ctx) error {
 		})
 	}
 
-	lessons, err := h.lessonService.GetCourseLessons(c.Context(), courseID)
+	userID, _ := getUserIDFromContext(c)
+	userRole := c.Locals("userRole").(string)
+
+	lessons, err := h.lessonService.GetCourseLessons(c.Context(), courseID, userID, userRole)
+
+
 	if err != nil {
 		return handleLessonServiceError(c, err)
 	}
