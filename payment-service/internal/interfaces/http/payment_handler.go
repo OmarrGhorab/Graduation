@@ -32,6 +32,7 @@ func (h *PaymentHandler) RegisterRoutes(router fiber.Router) {
 	payments := router.Group("/payments", middleware.Authenticate(h.authClient))
 	payments.Post("/create", h.CreatePayment)
 	payments.Get("/methods", h.ListPaymentMethods)
+	payments.Get("/history", h.GetPurchaseHistory)
 }
 
 func (h *PaymentHandler) CreatePayment(c *fiber.Ctx) error {
@@ -178,7 +179,13 @@ func (h *PaymentHandler) defaultIfEmpty(val, def string) string {
 }
 
 func (h *PaymentHandler) ListPaymentMethods(c *fiber.Ctx) error {
-	userIDStr := c.Locals("user_id").(string)
+	userIDStr, ok := c.Locals("userId").(string)
+	if !ok {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"success": false,
+			"error":   "User ID not found in session",
+		})
+	}
 	userID, _ := uuid.Parse(userIDStr)
 
 	methods, err := h.paymentService.GetUserPaymentMethods(c.Context(), userID)
@@ -192,6 +199,30 @@ func (h *PaymentHandler) ListPaymentMethods(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{
 		"success": true,
 		"data":    methods,
+	})
+}
+
+func (h *PaymentHandler) GetPurchaseHistory(c *fiber.Ctx) error {
+	userIDStr, ok := c.Locals("userId").(string)
+	if !ok {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"success": false,
+			"error":   "User ID not found in session",
+		})
+	}
+	userID, _ := uuid.Parse(userIDStr)
+
+	history, err := h.paymentService.GetUserPurchaseHistory(c.Context(), userID)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"success": false,
+			"error":   err.Error(),
+		})
+	}
+
+	return c.JSON(fiber.Map{
+		"success": true,
+		"data":    history,
 	})
 }
 

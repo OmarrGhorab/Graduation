@@ -209,27 +209,43 @@ func (c *Client) VerifyHMAC(hmacHeader string, data map[string]interface{}) (boo
 	}
 
 	// Keys to include in HMAC calculation (order matters)
-	keys := []string{
-		"amount_cents",
-		"created_at",
-		"currency",
-		"error_occured",
-		"has_parent_transaction",
-		"id",
-		"integration_id",
-		"is_3d_secure",
-		"is_auth",
-		"is_capture",
-		"is_refunded",
-		"is_standalone_payment",
-		"is_voided",
-		"order",
-		"owner",
-		"pending",
-		"source_data.pan",
-		"source_data.sub_type",
-		"source_data.type",
-		"success",
+	var keys []string
+	eventType, _ := data["type"].(string)
+
+	if eventType == "TOKEN" {
+		keys = []string{
+			"card_subtype",
+			"created_at",
+			"email",
+			"id",
+			"masked_pan",
+			"merchant_id",
+			"order_id",
+			"token",
+		}
+	} else {
+		keys = []string{
+			"amount_cents",
+			"created_at",
+			"currency",
+			"error_occured",
+			"has_parent_transaction",
+			"id",
+			"integration_id",
+			"is_3d_secure",
+			"is_auth",
+			"is_capture",
+			"is_refunded",
+			"is_standalone_payment",
+			"is_voided",
+			"order",
+			"owner",
+			"pending",
+			"source_data.pan",
+			"source_data.sub_type",
+			"source_data.type",
+			"success",
+		}
 	}
 
 	var values []string
@@ -267,7 +283,7 @@ func (c *Client) VerifyHMAC(hmacHeader string, data map[string]interface{}) (boo
 	h.Write([]byte(concatString))
 	expectedHMAC := hex.EncodeToString(h.Sum(nil))
 
-	isValid := strings.ToLower(hmacHeader) == strings.ToLower(expectedHMAC)
+	isValid := strings.EqualFold(hmacHeader, expectedHMAC)
 	if !isValid {
 		// Log detailed info for debugging if needed
 		fmt.Printf("[Paymob Debug] HMAC Mismatch!\n")

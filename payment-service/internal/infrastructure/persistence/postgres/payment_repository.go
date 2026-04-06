@@ -87,3 +87,15 @@ func (r *PaymentRepository) GetTransactionByPaymobID(ctx context.Context, paymob
 	}
 	return &tx, nil
 }
+func (r *PaymentRepository) GetUserOrders(ctx context.Context, userID uuid.UUID) ([]payment.PaymentOrder, error) {
+	var orders []payment.PaymentOrder
+	err := r.db.WithContext(ctx).
+		Preload("Items").
+		Where("user_id = ? AND status = ?", userID, payment.OrderStatusPaid).
+		Order("created_at DESC").
+		Find(&orders).Error
+	if err != nil {
+		return nil, err
+	}
+	return orders, nil
+}

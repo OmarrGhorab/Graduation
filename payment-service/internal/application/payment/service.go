@@ -55,6 +55,70 @@ func NewService(
 	}
 }
 
+type PurchaseHistoryItem struct {
+	OrderID        uuid.UUID                   `json:"orderId"`
+	AmountCents    int64                       `json:"amountCents"`
+	Currency       string                      `json:"currency"`
+	Status         payment.OrderStatus         `json:"status"`
+	OrderType      payment.OrderType           `json:"orderType"`
+	CreatedAt      time.Time                   `json:"createdAt"`
+	PaymentMethod  *paymentmethod.PaymentMethod `json:"paymentMethod,omitempty"`
+	Items          []PurchaseHistoryCourseItem `json:"items"`
+}
+
+type PurchaseHistoryCourseItem struct {
+	CourseID   uuid.UUID `json:"courseId"`
+	Title      string    `json:"title"`
+	PriceCents int64     `json:"priceCents"`
+}
+
+func (s *Service) GetUserPurchaseHistory(ctx context.Context, userID uuid.UUID) ([]PurchaseHistoryItem, error) {
+	orders, err := s.repo.GetUserOrders(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+
+	history := make([]PurchaseHistoryItem, 0, len(orders))
+	for _, order := range orders {
+		item := PurchaseHistoryItem{
+			OrderID:     order.ID,
+			AmountCents:  order.AmountCents,
+			Currency:    order.Currency,
+			Status:      order.Status,
+			OrderType:   order.OrderType,
+			CreatedAt:   order.CreatedAt,
+			Items:       make([]PurchaseHistoryCourseItem, 0, len(order.Items)),
+		}
+
+		// Fetch payment method if available
+		if order.PaymentMethodID != nil {
+			pm, err := s.paymentMethodRepo.GetByID(ctx, *order.PaymentMethodID)
+			if err == nil {
+				item.PaymentMethod = pm
+			}
+		}
+
+		// Fetch course details for each item
+		for _, orderItem := range order.Items {
+			course, err := s.coursesClient.GetCourseByID(ctx, orderItem.CourseID.String())
+			courseTitle := "Unknown Course"
+			if err == nil {
+				courseTitle = course.Title
+			}
+
+			item.Items = append(item.Items, PurchaseHistoryCourseItem{
+				CourseID:   orderItem.CourseID,
+				Title:      courseTitle,
+				PriceCents: orderItem.PriceCents,
+			})
+		}
+
+		history = append(history, item)
+	}
+
+	return history, nil
+}
+
 type CreatePaymentOptions struct {
 	UserID        uuid.UUID
 	CourseID      uuid.UUID
@@ -100,27 +164,23 @@ func (s *Service) CreatePayment(ctx context.Context, opts CreatePaymentOptions) 
 
 	amountCents := int64(math.Round(course.Price * 100))
 
-	// 2. Create local PaymentOrder
+	// 2. Create order item for single course
+	orderItem := payment.PaymentOrderItem{
+		CourseID:    opts.CourseID,
+		PriceCents:  amountCents,
+		Currency:    course.Currency,
+		BillingType: "ONE_TIME",
+	}
+
+	// 2. Create local PaymentOrder with items (This handles both order and items in one transaction)
 	order := &payment.PaymentOrder{
+		ID:            uuid.New(),
 		UserID:        opts.UserID,
 		AmountCents:   amountCents,
 		Currency:      course.Currency,
 		Status:        payment.OrderStatusPending,
 		OrderType:     payment.OrderTypeSingleCourse,
 		PaymentMethod: opts.PaymentMethod,
-	}
-
-	if err := s.repo.CreateOrder(ctx, order); err != nil {
-		return "", uuid.Nil, fmt.Errorf("failed to create payment order: %w", err)
-	}
-
-	// Create order item for single course
-	orderItem := payment.PaymentOrderItem{
-		PaymentOrderID: order.ID,
-		CourseID:       opts.CourseID,
-		PriceCents:     amountCents,
-		Currency:       course.Currency,
-		BillingType:    "ONE_TIME",
 	}
 
 	if err := s.repo.CreateOrderWithItems(ctx, order, []payment.PaymentOrderItem{orderItem}); err != nil {
@@ -194,12 +254,56 @@ func (s *Service) HandleWebhook(ctx context.Context, data map[string]interface{}
 	fmt.Printf("[Webhook Debug] HMAC Verified Successfully\n")
 
 	// 2. Extract transaction data
+	eventType, _ := data["type"].(string)
+	fmt.Printf("[Webhook Debug] Event Type: %s\n", eventType)
+
 	obj, ok := data["obj"].(map[string]interface{})
 	if !ok {
-		return errors.New("invalid webhook payload structure")
+		return errors.New("invalid webhook payload structure: 'obj' not found")
 	}
 
-	success := obj["success"].(bool)
+	// Handle TOKEN specific event
+	if eventType == "TOKEN" {
+		token, _ := obj["token"].(string)
+		pan, _ := obj["masked_pan"].(string)
+		cardSubType, _ := obj["card_subtype"].(string)
+		paymobOrderID := fmt.Sprintf("%v", obj["order_id"])
+
+		log.Printf("[Webhook Debug] Processing TOKEN: %s, Order: %s", pan, paymobOrderID)
+
+		// Find the order to get the UserID
+		order, err := s.repo.GetOrderByPaymobID(ctx, paymobOrderID)
+		if err != nil {
+			return fmt.Errorf("failed to find order for token: %w", err)
+		}
+
+		lastFour := ""
+		if len(pan) >= 4 {
+			lastFour = pan[len(pan)-4:]
+		}
+
+		pm := &paymentmethod.PaymentMethod{
+			ID:          uuid.New(),
+			UserID:      order.UserID,
+			PaymentType: paymentmethod.PaymentTypeCard,
+			Token:       token,
+			LastFour:    lastFour,
+			CardBrand:   cardSubType,
+			IsActive:    true,
+			IsDefault:   true,
+		}
+
+		if err := s.paymentMethodRepo.Create(ctx, pm); err != nil {
+			log.Printf("WARNING: Failed to save payment method from TOKEN event: %v", err)
+			return nil // Don't fail the webhook if PM save fails but it's a valid event
+		}
+
+		log.Printf("SUCCESS: Saved payment method %s (****%s) for user %s via TOKEN event", cardSubType, lastFour, order.UserID)
+		return nil // Done with TOKEN event
+	}
+
+	// For TRANSACTION events (existing logic)
+	success, _ := obj["success"].(bool)
 	paymobTransactionID := fmt.Sprintf("%.0f", obj["id"])
 
 	paymobOrderID := ""
@@ -211,8 +315,11 @@ func (s *Service) HandleWebhook(ctx context.Context, data map[string]interface{}
 
 	amountCents := int64(obj["amount_cents"].(float64))
 
-	sourceData := obj["source_data"].(map[string]interface{})
-	paymentMethodType := fmt.Sprintf("%v", sourceData["sub_type"])
+	sourceData, _ := obj["source_data"].(map[string]interface{})
+	paymentMethodType := "CARD"
+	if sourceData != nil {
+		paymentMethodType = fmt.Sprintf("%v", sourceData["sub_type"])
+	}
 
 	// 3. Idempotency Lock
 	locked, err := s.redisClient.AcquireIdempotencyLock(ctx, paymobTransactionID, 1*time.Hour)
@@ -246,14 +353,10 @@ func (s *Service) HandleWebhook(ctx context.Context, data map[string]interface{}
 		return fmt.Errorf("failed to store transaction: %w", err)
 	}
 
-	// 6. Save Payment Method if tokenization was requested and successful
-	if success {
-		// Extract tokenization data from source_data if present
-		// Paymob sends 'token' and card info in source_data or at top level in some cases.
-		// For card tokenization, look for 'token' in the object.
-		token, tokenOk := obj["token"].(string)
-		if !tokenOk {
-			// Try payment_token as fallback
+	// 6. Save Payment Method if tokenization was requested and successful (Fallback/Alternative during TRANSACTION)
+	if success && sourceData != nil {
+		token, _ := obj["token"].(string)
+		if token == "" {
 			token, _ = obj["payment_token"].(string)
 		}
 
@@ -267,20 +370,32 @@ func (s *Service) HandleWebhook(ctx context.Context, data map[string]interface{}
 			brand := fmt.Sprintf("%v", sourceData["sub_type"])
 			
 			pm := &paymentmethod.PaymentMethod{
+				ID:          uuid.New(),
 				UserID:      order.UserID,
 				PaymentType: paymentmethod.PaymentTypeCard,
 				Token:       token,
 				LastFour:    lastFour,
 				CardBrand:   brand,
 				IsActive:    true,
-				IsDefault:   true, // Make it default if it's the first one or requested
+				IsDefault:   true,
 			}
 			
-			// Save to repo
-			if err := s.paymentMethodRepo.Create(ctx, pm); err != nil {
-				log.Printf("WARNING: Failed to save payment method for user %s: %v", order.UserID, err)
-			} else {
-				log.Printf("SUCCESS: Saved payment method %s (****%s) for user %s", brand, lastFour, order.UserID)
+			// Check if already exists to avoid duplicates if TOKEN event already fired
+			existing, _ := s.paymentMethodRepo.GetUserPaymentMethods(ctx, order.UserID)
+			alreadyExists := false
+			for _, e := range existing {
+				if e.Token == token {
+					alreadyExists = true
+					break
+				}
+			}
+
+			if !alreadyExists {
+				if err := s.paymentMethodRepo.Create(ctx, pm); err != nil {
+					log.Printf("WARNING: Failed to save payment method for user %s: %v", order.UserID, err)
+				} else {
+					log.Printf("SUCCESS: Saved payment method %s (****%s) for user %s during TRANSACTION", brand, lastFour, order.UserID)
+				}
 			}
 		}
 	}
