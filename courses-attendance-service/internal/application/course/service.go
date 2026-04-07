@@ -7,6 +7,7 @@ import (
 	courseDomain "github.com/OmarrGhorab/courses-attendance-service/internal/domain/course"
 	"github.com/OmarrGhorab/courses-attendance-service/internal/domain/events"
 	"github.com/OmarrGhorab/courses-attendance-service/internal/infrastructure/clock"
+	"github.com/OmarrGhorab/courses-attendance-service/internal/infrastructure/authclient"
 	"github.com/OmarrGhorab/courses-attendance-service/internal/infrastructure/notificationevents"
 	"github.com/OmarrGhorab/courses-attendance-service/internal/infrastructure/persistence/postgres"
 	"github.com/google/uuid"
@@ -27,8 +28,55 @@ type Service struct {
 	subjectRepo    *postgres.SubjectRepository
 	enrollmentRepo *postgres.EnrollmentRepository
 	assistantRepo  *postgres.CourseAssistantRepository
-	events         *notificationevents.EventDispatcher
-	clock          clock.Clock
+	events          *notificationevents.EventDispatcher
+	clock           clock.Clock
+	teacherRatingRepo *postgres.TeacherRatingRepository
+	progressRepo    *postgres.ProgressSnapshotRepository
+	authClient      *authclient.Client
+}
+
+// ChildAnalytics represents a summary of a child's progress for a parent
+type ChildAnalytics struct {
+	ChildID         uuid.UUID        `json:"childId"`
+	Name            string           `json:"name"`
+	ProfileImg      string           `json:"profileImg"`
+	EnrolledCourses int              `json:"enrolledCourses"`
+	Courses         []CourseProgress `json:"courses"`
+}
+
+// CourseProgress represents a child's details in a specific course
+type CourseProgress struct {
+	CourseID        uuid.UUID `json:"courseId"`
+	Title           string    `json:"title"`
+	TeacherName     string    `json:"teacherName"`
+	TeacherRating   float64   `json:"teacherRating"`
+	Progress        float64   `json:"progress"`         // Overall progress %
+	Attendance      float64   `json:"attendance"`       // Attendance %
+	LessonsCompleted int       `json:"lessonsCompleted"`
+	TotalLessons    int       `json:"totalLessons"`
+	Status          string    `json:"status"`           // Course status
+}
+
+// TeacherAnalytics represents the top-level stats for a teacher
+type TeacherAnalytics struct {
+	TotalCourses      int               `json:"totalCourses"`
+	TotalStudents     int               `json:"totalStudents"`
+	TotalActiveShared int               `json:"totalActiveShared"` // Students across all courses
+	TotalRevenue      float64           `json:"totalRevenue"`
+	TotalAssistants   int               `json:"totalAssistants"`
+	AverageRating     float64           `json:"averageRating"`
+	CourseBreakdown   []CourseBreakdown `json:"courseBreakdown"`
+}
+
+// CourseBreakdown represents stats for a single course in the teacher's dashboard
+type CourseBreakdown struct {
+	CourseID       uuid.UUID `json:"courseId"`
+	Title          string    `json:"title"`
+	StudentCount   int       `json:"studentCount"`
+	AssistantCount int       `json:"assistantCount"`
+	Revenue        float64   `json:"revenue"`
+	DeliveryType   string    `json:"deliveryType"`
+	Status         string    `json:"status"`
 }
 
 func NewService(
@@ -37,15 +85,21 @@ func NewService(
 	enrollmentRepo *postgres.EnrollmentRepository,
 	assistantRepo *postgres.CourseAssistantRepository,
 	events *notificationevents.EventDispatcher,
+	teacherRatingRepo *postgres.TeacherRatingRepository,
+	progressRepo *postgres.ProgressSnapshotRepository,
+	authClient *authclient.Client,
 	clk clock.Clock,
 ) *Service {
 	return &Service{
-		courseRepo:     courseRepo,
-		subjectRepo:    subjectRepo,
-		enrollmentRepo: enrollmentRepo,
-		assistantRepo:  assistantRepo,
-		events:         events,
-		clock:          clk,
+		courseRepo:        courseRepo,
+		subjectRepo:       subjectRepo,
+		enrollmentRepo:    enrollmentRepo,
+		assistantRepo:     assistantRepo,
+		events:            events,
+		teacherRatingRepo: teacherRatingRepo,
+		progressRepo:      progressRepo,
+		authClient:        authClient,
+		clock:             clk,
 	}
 }
 
@@ -528,3 +582,157 @@ func (s *Service) CreateSubject(ctx context.Context, name, description, icon str
 	return subject, nil
 }
 
+
+// GetTeacherAnalytics aggregates all analytics for a teacher
+func (s *Service) GetTeacherAnalytics(ctx context.Context, teacherID uuid.UUID) (*TeacherAnalytics, error) {
+	// 1. Get all courses for this teacher
+	courses, err := s.courseRepo.GetByTeacherID(ctx, teacherID)
+	if err != nil {
+		return nil, err
+	}
+
+	analytics := &TeacherAnalytics{
+		TotalCourses:    len(courses),
+		CourseBreakdown: []CourseBreakdown{},
+	}
+
+	totalStudentSet := make(map[uuid.UUID]bool)
+	assistantSet := make(map[uuid.UUID]bool)
+
+	for _, c := range courses {
+		// Get enrollments for this course
+		enrollments, err := s.enrollmentRepo.GetByCourseID(ctx, c.ID)
+		if err != nil {
+			continue
+		}
+
+		studentCount := len(enrollments)
+		analytics.TotalStudents += studentCount
+
+		// Unique students across all courses
+		for _, e := range enrollments {
+			totalStudentSet[e.UserID] = true
+		}
+
+		// Calculate revenue for this course
+		courseRevenue := 0.0
+		for _, e := range enrollments {
+			if e.IsPaid {
+				if c.BillingType == courseDomain.BillingTypeOneTime {
+					courseRevenue += c.Price
+				} else if c.BillingType == courseDomain.BillingTypeMonthly {
+					// For monthly, we need to count individual paid periods
+					periods, _ := s.enrollmentRepo.GetPeriods(ctx, e.ID)
+					courseRevenue += c.Price * float64(len(periods))
+				}
+			}
+		}
+		analytics.TotalRevenue += courseRevenue
+
+		// Get assistants for this course
+		assistants, err := s.assistantRepo.GetByCourseID(ctx, c.ID)
+		if err == nil {
+			for _, a := range assistants {
+				assistantSet[a.AssistantID] = true
+			}
+		}
+
+		analytics.CourseBreakdown = append(analytics.CourseBreakdown, CourseBreakdown{
+			CourseID:       c.ID,
+			Title:          c.Title,
+			StudentCount:   studentCount,
+			AssistantCount: len(assistants),
+			Revenue:        courseRevenue,
+			DeliveryType:   string(c.DeliveryType),
+			Status:         string(c.Status),
+		})
+	}
+
+	analytics.TotalActiveShared = len(totalStudentSet)
+	analytics.TotalAssistants = len(assistantSet)
+
+	// Get teacher's average rating
+	rating, _ := s.teacherRatingRepo.GetTeacherAvgRating(ctx, teacherID)
+	if rating != nil {
+		analytics.AverageRating = rating.AvgRating
+	}
+
+	return analytics, nil
+}
+
+// GetParentAnalytics gets analytics for all children of a parent
+func (s *Service) GetParentAnalytics(ctx context.Context, parentID uuid.UUID) ([]ChildAnalytics, error) {
+	// 1. Get all children linked to this parent from auth service
+	children, err := s.authClient.GetChildren(ctx, parentID.String())
+	if err != nil {
+		return nil, err
+	}
+
+	result := []ChildAnalytics{}
+
+	for _, childInfo := range children {
+		childID, err := uuid.Parse(childInfo.ID)
+		if err != nil {
+			continue
+		}
+
+		// 2. Get enrollments for this child
+		enrollments, err := s.enrollmentRepo.GetByUserID(ctx, childID)
+		if err != nil {
+			continue
+		}
+
+		childAnalytic := ChildAnalytics{
+			ChildID:         childID,
+			Name:            childInfo.Name,
+			ProfileImg:      childInfo.ProfileImg,
+			EnrolledCourses: len(enrollments),
+			Courses:         []CourseProgress{},
+		}
+
+		for _, e := range enrollments {
+			// Get course info
+			course, err := s.courseRepo.GetByID(ctx, e.CourseID)
+			if err != nil || course == nil {
+				continue
+			}
+
+			// Get progress snapshot
+			progress, err := s.progressRepo.GetByCourseAndStudent(ctx, e.CourseID, childID)
+			
+			// Get teacher info
+			var teacherName string
+			var teacherRating float64
+			teacherInfo, err := s.authClient.GetUserInfo(ctx, course.TeacherID.String())
+			if err == nil && teacherInfo != nil {
+				teacherName = teacherInfo.Name
+			}
+			
+			rating, _ := s.teacherRatingRepo.GetTeacherAvgRating(ctx, course.TeacherID)
+			if rating != nil {
+				teacherRating = rating.AvgRating
+			}
+
+			cp := CourseProgress{
+				CourseID:      course.ID,
+				Title:         course.Title,
+				TeacherName:   teacherName,
+				TeacherRating: teacherRating,
+				Status:        string(course.Status),
+			}
+
+			if progress != nil {
+				cp.Progress = progress.OverallProgress
+				cp.Attendance = progress.AttendanceRatio * 100
+				cp.LessonsCompleted = progress.CompletedLessons
+				cp.TotalLessons = progress.TotalLessons
+			}
+
+			childAnalytic.Courses = append(childAnalytic.Courses, cp)
+		}
+
+		result = append(result, childAnalytic)
+	}
+
+	return result, nil
+}

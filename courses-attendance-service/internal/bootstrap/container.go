@@ -10,6 +10,7 @@ import (
 	courseApp "github.com/OmarrGhorab/courses-attendance-service/internal/application/course"
 	lessonApp "github.com/OmarrGhorab/courses-attendance-service/internal/application/lesson"
 	progressApp "github.com/OmarrGhorab/courses-attendance-service/internal/application/progress"
+	watchtimeApp "github.com/OmarrGhorab/courses-attendance-service/internal/application/watchtime"
 	"github.com/OmarrGhorab/courses-attendance-service/internal/config"
 	"github.com/OmarrGhorab/courses-attendance-service/internal/infrastructure/authclient"
 	"github.com/OmarrGhorab/courses-attendance-service/internal/infrastructure/cache/redis"
@@ -42,6 +43,7 @@ type Container struct {
 	ProgressSnapshotRepo  *postgres.ProgressSnapshotRepository
 	TeacherRatingRepo     *postgres.TeacherRatingRepository
 	CourseRatingRepo      *postgres.CourseRatingRepository
+	WatchTimeRepo         *postgres.WatchTimeRepository
 
 	// Infrastructure
 	Redis           *redis.Client
@@ -59,6 +61,7 @@ type Container struct {
 	AbsenceService    *absenceApp.Service
 	ProgressService   *progressApp.Service
 	CalendarService   *calendarApp.Service
+	WatchTimeService  *watchtimeApp.Service
 }
 
 // New creates a new dependency injection container.
@@ -135,6 +138,7 @@ func (c *Container) initRepositories() {
 	c.ProgressSnapshotRepo = postgres.NewProgressSnapshotRepository(c.DB)
 	c.TeacherRatingRepo = postgres.NewTeacherRatingRepository(c.DB)
 	c.CourseRatingRepo = postgres.NewCourseRatingRepository(c.DB)
+	c.WatchTimeRepo = postgres.NewWatchTimeRepository(c.DB)
 }
 
 func (c *Container) initServices() {
@@ -144,6 +148,9 @@ func (c *Container) initServices() {
 		c.EnrollmentRepo,
 		c.AssistantRepo,
 		c.EventDispatcher,
+		c.TeacherRatingRepo,
+		c.ProgressSnapshotRepo,
+		c.AuthClient,
 		c.Clock,
 	)
 
@@ -152,6 +159,7 @@ func (c *Container) initServices() {
 		c.AttendanceRecordRepo,
 		c.CourseRepo,
 		c.LessonRepo,
+		c.WatchTimeRepo,
 		c.EventDispatcher,
 		c.Clock,
 	)
@@ -198,6 +206,14 @@ func (c *Container) initServices() {
 		c.LessonRepo,
 		c.CourseRepo,
 		c.EnrollmentRepo,
+	)
+
+	c.WatchTimeService = watchtimeApp.NewService(
+		c.WatchTimeRepo,
+		c.LessonRepo,
+		c.CourseRepo,
+		c.EnrollmentRepo,
+		c.Clock,
 	)
 }
 
@@ -251,6 +267,10 @@ func (c *Container) registerRoutes() {
 	// Calendar routes
 	calendarHandler := http.NewCalendarHandler(c.CalendarService, c.AuthClient)
 	calendarHandler.RegisterRoutes(apiV1)
+
+	// Watch time tracking routes
+	watchTimeHandler := http.NewWatchTimeHandler(c.WatchTimeService, c.AuthClient)
+	watchTimeHandler.RegisterRoutes(apiV1)
 }
 
 // Start starts the HTTP server.

@@ -108,6 +108,27 @@ func (h *LessonHandler) CreateLesson(c *fiber.Ctx) error {
 		return handleLessonServiceError(c, err)
 	}
 
+	// NEW: Check if a video file is attached in the creation request
+	if req.DeliveryType == "ONLINE" {
+		fileHeader, err := c.FormFile("video")
+		if err == nil && fileHeader != nil {
+			// A video was provided during creation
+			file, err := fileHeader.Open()
+			if err == nil {
+				defer file.Close()
+				// Upload to Cloudinary
+				result, err := h.cloudinaryClient.UploadVideo(c.Context(), file, fileHeader.Filename)
+				if err == nil {
+					// Update lesson with Cloudinary data (HLS Manifest URL, PublicID, and Dynamic Duration)
+					lesson.VideoURL = result.StreamingURL
+					lesson.VideoPublicID = result.PublicID
+					lesson.Duration = result.Duration
+					_ = h.lessonService.UpdateLesson(c.Context(), lesson)
+				}
+			}
+		}
+	}
+
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{
 		"success": true,
 		"data":    dto.ToLessonResponse(lesson),
@@ -533,7 +554,7 @@ func (h *LessonHandler) UploadVideo(c *fiber.Ctx) error {
 	}
 
 	// Update lesson
-	lesson.VideoURL = result.URL
+	lesson.VideoURL = result.StreamingURL
 	lesson.VideoPublicID = result.PublicID
 	lesson.Duration = result.Duration
 

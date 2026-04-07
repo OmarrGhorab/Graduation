@@ -20,6 +20,7 @@ type Service struct {
 	recordRepo   *postgres.AttendanceRecordRepository
 	courseRepo   *postgres.CourseRepository
 	lessonRepo   *postgres.LessonRepository
+	watchRepo    *postgres.WatchTimeRepository
 	events       *notificationevents.EventDispatcher
 	clock        clock.Clock
 }
@@ -29,6 +30,7 @@ func NewService(
 	recordRepo *postgres.AttendanceRecordRepository,
 	courseRepo *postgres.CourseRepository,
 	lessonRepo *postgres.LessonRepository,
+	watchRepo *postgres.WatchTimeRepository,
 	events *notificationevents.EventDispatcher,
 	clk clock.Clock,
 ) *Service {
@@ -37,6 +39,7 @@ func NewService(
 		recordRepo:   recordRepo,
 		courseRepo:   courseRepo,
 		lessonRepo:   lessonRepo,
+		watchRepo:    watchRepo,
 		events:       events,
 		clock:        clk,
 	}
@@ -80,17 +83,30 @@ func (s *Service) RecomputeProgress(ctx context.Context, courseID, studentID uui
 		snapshot.ID = uuid.New()
 	}
 
-	// Count completed lessons (lessons that are COMPLETED)
+	// Count completed lessons
+	// For OFFLINE lessons: count by lesson status (COMPLETED)
+	// For ONLINE lessons: count by watch completion (is_completed in user_lesson_progress)
 	completedCount := 0
+	onlineWatchedAsPresent := 0
 	for _, l := range lessons {
-		if l.Status == lessonDomain.LessonStatusCompleted {
+		if l.DeliveryType == lessonDomain.DeliveryTypeOnline {
+			// For online lessons, check watch progress completion
+			if s.watchRepo != nil {
+				wp, err := s.watchRepo.GetUserLessonProgress(ctx, studentID, l.ID)
+				if err == nil && wp != nil && wp.IsCompleted {
+					completedCount++
+					onlineWatchedAsPresent++ // Count watch completion as "present"
+				}
+			}
+		} else if l.Status == lessonDomain.LessonStatusCompleted {
 			completedCount++
 		}
 	}
 	snapshot.CompletedLessons = completedCount
 
-	// Use counts from repo
-	snapshot.PresentCount = counts[attendanceDomain.AttendanceStatusPresent]
+	// Use counts from attendance repo (offline lessons)
+	// Add online watch completions to present count
+	snapshot.PresentCount = counts[attendanceDomain.AttendanceStatusPresent] + onlineWatchedAsPresent
 	snapshot.LateCount = counts[attendanceDomain.AttendanceStatusLate]
 	snapshot.AbsentCount = counts[attendanceDomain.AttendanceStatusAbsent]
 	snapshot.ExcusedCount = counts[attendanceDomain.AttendanceStatusExcused]

@@ -220,6 +220,9 @@ type LessonResponse struct {
 	LocationLat     *float64   `json:"locationLat,omitempty"`
 	LocationLng     *float64   `json:"locationLng,omitempty"`
 	GeofenceRadiusM *int       `json:"geofenceRadiusM,omitempty"`
+	VideoURL        string     `json:"videoUrl,omitempty"`
+	MaterialsURL    string     `json:"materialsUrl,omitempty"`
+	Duration        *int       `json:"duration,omitempty"` // in seconds
 	CreatedAt       time.Time  `json:"createdAt"`
 	UpdatedAt       time.Time  `json:"updatedAt"`
 }
@@ -241,6 +244,9 @@ func ToLessonResponse(l *lessonDomain.Lesson) LessonResponse {
 		LocationLat:     l.LocationLat,
 		LocationLng:     l.LocationLng,
 		GeofenceRadiusM: l.GeofenceRadiusM,
+		VideoURL:        l.VideoURL,
+		MaterialsURL:    l.MaterialsURL,
+		Duration:        l.Duration,
 		CreatedAt:       l.CreatedAt,
 		UpdatedAt:       l.UpdatedAt,
 	}

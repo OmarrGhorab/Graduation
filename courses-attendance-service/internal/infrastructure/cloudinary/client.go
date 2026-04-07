@@ -27,6 +27,7 @@ type UploadResult struct {
 	Format       string
 	Duration     *int // For videos, duration in seconds
 	Bytes        int64
+	StreamingURL string // NEW: The .m3u8 master playlist URL
 }
 
 // NewClient creates a new Cloudinary client
@@ -48,16 +49,29 @@ func (c *Client) UploadVideo(ctx context.Context, file multipart.File, filename 
 	publicID := c.generatePublicID(filename, "videos")
 
 	overwrite := false
+	isAsync := true
+	
+	// Create Eager transformations for HLS
+	isEagerAsync := true
 	uploadParams := uploader.UploadParams{
 		PublicID:     publicID,
 		Folder:       c.folder,
 		ResourceType: "video",
 		Overwrite:    &overwrite,
+		Async:        &isAsync,        // Process in background
+		Eager:        "f_m3u8,sp_full_hd", // Master playlist + Streaming Profile
+		EagerAsync:   &isEagerAsync,
 	}
 
 	result, err := c.cld.Upload.Upload(ctx, file, uploadParams)
 	if err != nil {
 		return nil, fmt.Errorf("failed to upload video: %w", err)
+	}
+
+	streamingURL := result.SecureURL
+	// If HLS was generated, use the eager transformation URL for the master playlist
+	if len(result.Eager) > 0 {
+		streamingURL = result.Eager[0].SecureURL
 	}
 
 	uploadResult := &UploadResult{
@@ -66,6 +80,7 @@ func (c *Client) UploadVideo(ctx context.Context, file multipart.File, filename 
 		ResourceType: result.ResourceType,
 		Format:       result.Format,
 		Bytes:        int64(result.Bytes),
+		StreamingURL: streamingURL,
 	}
 
 	// Note: Duration extraction from Cloudinary response varies by SDK version

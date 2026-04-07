@@ -78,6 +78,8 @@ func (h *CourseHandler) RegisterRoutes(router fiber.Router) {
 	courses.Get("/:id/assistants", teacherOnly, h.GetCourseAssistants)
 	courses.Delete("/:id/assistants/:assistantId", teacherOnly, h.RemoveAssistant)
 	courses.Get("/:id/enrollments", teacherOnly, h.GetCourseEnrollments)
+	courses.Get("/teacher/analytics", teacherOnly, h.GetTeacherAnalytics)
+	courses.Get("/parent/analytics", middleware.RequireRole("PARENT"), h.GetParentAnalytics)
 
 	// Public/Shared routes (but still authenticated)
 	courses.Get("/", h.ListCourses)
@@ -658,6 +660,59 @@ func (h *CourseHandler) GetCourseEnrollments(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{
 		"success": true,
 		"data":    responses,
+	})
+}
+
+
+// GetTeacherAnalytics godoc
+// @Summary Get teacher dashboard analytics
+// @Tags teacher
+// @Produce json
+// @Success 200 {object} fiber.Map
+// @Router /api/v1/courses/teacher/analytics [get]
+func (h *CourseHandler) GetTeacherAnalytics(c *fiber.Ctx) error {
+	teacherID, err := getUserIDFromContext(c)
+	if err != nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"success": false,
+			"error":   "Unauthorized",
+		})
+	}
+
+	analytics, err := h.courseService.GetTeacherAnalytics(c.Context(), teacherID)
+	if err != nil {
+		return handleServiceError(c, err)
+	}
+
+	return c.JSON(fiber.Map{
+		"success": true,
+		"data":    analytics,
+	})
+}
+
+// GetParentAnalytics godoc
+// @Summary Get parent dashboard with all children analytics
+// @Tags parent
+// @Produce json
+// @Success 200 {object} fiber.Map
+// @Router /api/v1/courses/parent/analytics [get]
+func (h *CourseHandler) GetParentAnalytics(c *fiber.Ctx) error {
+	parentID, err := getUserIDFromContext(c)
+	if err != nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"success": false,
+			"error":   "Unauthorized",
+		})
+	}
+
+	analytics, err := h.courseService.GetParentAnalytics(c.Context(), parentID)
+	if err != nil {
+		return handleServiceError(c, err)
+	}
+
+	return c.JSON(fiber.Map{
+		"success": true,
+		"data":    analytics,
 	})
 }
 
