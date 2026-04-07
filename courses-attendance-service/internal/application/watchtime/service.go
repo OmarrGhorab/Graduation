@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
+	"os"
 
 	"github.com/OmarrGhorab/courses-attendance-service/internal/domain/watchtime"
 	"github.com/OmarrGhorab/courses-attendance-service/internal/infrastructure/clock"
@@ -170,6 +172,36 @@ func (s *Service) recomputeCourseAnalytics(courseID, userID uuid.UUID) {
 	analytics.Recompute(progresses, course.TotalLessons, now)
 
 	_ = s.watchRepo.UpsertUserCourseAnalytics(ctx, analytics)
+
+	// Invalidate recommendation cache so AI re-calculates on next visit
+	go s.invalidateRecommendationCache(userID)
+}
+
+// invalidateRecommendationCache notifies the recommendation service to clear its cache for this user
+func (s *Service) invalidateRecommendationCache(userID uuid.UUID) {
+	// Simple HTTP DELETE call to the Python service
+	// In production, this would use a discovery service or env var
+	recUrl := os.Getenv("RECOMMENDATION_SERVICE_URL")
+	if recUrl == "" {
+		recUrl = "http://recommendation-service:8095" // Docker internal name
+	}
+	secret := os.Getenv("INTERNAL_SERVICE_SECRET")
+
+	url := fmt.Sprintf("%s/api/v1/recommendations/cache/%s", recUrl, userID.String())
+
+	req, err := http.NewRequest("DELETE", url, nil)
+	if err != nil {
+		return
+	}
+
+	req.Header.Set("x-internal-service-secret", secret)
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return
+	}
+	defer resp.Body.Close()
 }
 
 // GetLessonProgress returns a student's watch progress on a specific lesson
@@ -220,6 +252,8 @@ type RecommendationProfile struct {
 	PreferredDevice    string
 	CompletionTendency string
 	AvgCompletionPct   float64
+	UserInterests      []string // From Auth (onboarding)
+	CartSubjects       []string // From Payment/Cart
 }
 
 // GetRecommendationProfile returns structured data for AI course recommendations
@@ -280,8 +314,10 @@ func (s *Service) GetRecommendationProfile(ctx context.Context, userID uuid.UUID
 		AllAnalytics:       analytics,
 		SubjectPreferences: subjects,
 		AvgSessionDuration: avgSession,
-		PreferredDevice:    "MOBILE", // Default; could be calculated from events
+		PreferredDevice:    "MOBILE",
 		CompletionTendency: tendency,
 		AvgCompletionPct:   avgCompletionPct,
+		UserInterests:      []string{"Programming", "Science"}, // Mocked for now
+		CartSubjects:       []string{"Mathematics"},            // Mocked for now
 	}, nil
 }

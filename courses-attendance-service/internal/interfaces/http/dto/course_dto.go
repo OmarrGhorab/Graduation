@@ -100,6 +100,14 @@ func ToCourseResponse(c *course.Course) CourseResponse {
 	return resp
 }
 
+func ToCourseListResponse(courses []course.Course) []CourseResponse {
+	res := make([]CourseResponse, len(courses))
+	for i, c := range courses {
+		res[i] = ToCourseResponse(&c)
+	}
+	return res
+}
+
 // ========== Subject DTOs ==========
 
 type SubjectResponse struct {

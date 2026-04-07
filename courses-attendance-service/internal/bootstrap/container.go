@@ -240,7 +240,7 @@ func (c *Container) registerRoutes() {
 	courseHandler.RegisterRoutes(apiV1)
 
 	// Internal routes
-	internalHandler := http.NewInternalHandler(c.CourseService, c.Config.Auth.InternalSecret)
+	internalHandler := http.NewInternalHandler(c.CourseService, c.WatchTimeService, c.Config.Auth.InternalSecret)
 	internalHandler.RegisterRoutes(apiV1)
 
 

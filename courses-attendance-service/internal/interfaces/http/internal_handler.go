@@ -2,6 +2,7 @@ package http
 
 import (
 	"github.com/OmarrGhorab/courses-attendance-service/internal/application/course"
+	watchtimeApp "github.com/OmarrGhorab/courses-attendance-service/internal/application/watchtime"
 	"github.com/OmarrGhorab/courses-attendance-service/internal/interfaces/http/dto"
 	"github.com/OmarrGhorab/courses-attendance-service/internal/interfaces/http/middleware"
 	"github.com/gofiber/fiber/v2"
@@ -10,12 +11,14 @@ import (
 
 type InternalHandler struct {
 	courseService  *course.Service
+	watchService   *watchtimeApp.Service
 	internalSecret string
 }
 
-func NewInternalHandler(courseService *course.Service, internalSecret string) *InternalHandler {
+func NewInternalHandler(courseService *course.Service, watchService *watchtimeApp.Service, internalSecret string) *InternalHandler {
 	return &InternalHandler{
 		courseService:  courseService,
+		watchService:   watchService,
 		internalSecret: internalSecret,
 	}
 }
@@ -27,6 +30,8 @@ func (h *InternalHandler) RegisterRoutes(router fiber.Router) {
 	internal.Post("/enrollments/activate", h.ActivateEnrollment)
 	internal.Get("/enrollments/check", h.CheckEnrollment)
 	internal.Post("/enrollments", h.InternalEnroll)
+	internal.Get("/courses", h.ListAllCourses)
+	internal.Get("/analytics/user/:userId", h.GetUserAnalytics)
 }
 
 func (h *InternalHandler) InternalEnroll(c *fiber.Ctx) error {
@@ -158,6 +163,38 @@ func (h *InternalHandler) CheckEnrollment(c *fiber.Ctx) error {
 			"isEnrolled": isEnrolled,
 			"isPaid":     isPaid,
 		},
+	})
+}
+
+func (h *InternalHandler) ListAllCourses(c *fiber.Ctx) error {
+	courses, err := h.courseService.ListCourses(c.Context(), nil)
+	if err != nil {
+		return handleServiceError(c, err)
+	}
+
+	return c.JSON(fiber.Map{
+		"success": true,
+		"data":    dto.ToCourseListResponse(courses),
+	})
+}
+
+func (h *InternalHandler) GetUserAnalytics(c *fiber.Ctx) error {
+	userId, err := uuid.Parse(c.Params("userId"))
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"success": false,
+			"error":   "Invalid user ID",
+		})
+	}
+
+	profile, err := h.watchService.GetRecommendationProfile(c.Context(), userId)
+	if err != nil {
+		return handleServiceError(c, err)
+	}
+
+	return c.JSON(fiber.Map{
+		"success": true,
+		"data":    profile,
 	})
 }
 

@@ -25,6 +25,7 @@ const serviceIndexes: Record<string, number> = {
   ws: 0,
   courses: 0,
   payment: 0,
+  recommendation: 0,
 };
 
 /**
@@ -84,6 +85,7 @@ export function setupRoutes(app: Express, config: AppConfig): { wsProxy: any } {
         ...config.services.chat,
         ...config.services.courses,
         ...config.services.payment,
+        ...config.services.recommendation,
       ];
       const healthCheck = await checkAllServices(services);
 
@@ -224,6 +226,44 @@ export function setupRoutes(app: Express, config: AppConfig): { wsProxy: any } {
       })
     );
   });
+
+  // Recommendation service routes
+  app.use(
+    "/api/v1/recommendations",
+    proxy(() => getNextServiceUrl(config.services.recommendation, "recommendation"), {
+      proxyReqPathResolver: (req) => req.originalUrl,
+    })
+  );
+
+  // Auth service with Pre-warming trigger on login
+  app.use(
+    "/api/v1/auth",
+    proxy(() => getNextServiceUrl(config.services.auth, "auth"), {
+      proxyReqPathResolver: (req) => req.originalUrl,
+      userResDecorator: (proxyRes, proxyResData, userReq, userRes) => {
+        // Trigger pre-warming ONLY on successful login
+        if (userReq.path.includes("/login") && proxyRes.statusCode === 200) {
+          try {
+            const data = JSON.parse(proxyResData.toString('utf8'));
+            const token = data.data?.accessToken;
+            
+            if (token) {
+              const recUrl = getNextServiceUrl(config.services.recommendation, "recommendation");
+              console.log(`[PreWarming] Triggering background AI warming for token...`);
+              
+              // Fire and forget (don't await)
+              fetch(`${recUrl}/api/v1/recommendations`, {
+                headers: { 'Authorization': `Bearer ${token}` }
+              }).catch((err: any) => console.error(`[PreWarming] Failed: ${err.message}`));
+            }
+          } catch (e: any) {
+            console.error(`[PreWarming] Error: ${e.message}`);
+          }
+        }
+        return proxyResData;
+      }
+    })
+  );
 
   // Auth service catch-all (load balanced, must be last)
   app.use(

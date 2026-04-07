@@ -308,6 +308,30 @@ services:
       timeout: 5s
       retries: 3
 
+  # ============ RECOMMENDATION SERVICE ============
+  recommendation-service:
+    build: ./recommendation-service
+    ports:
+      - "8095:8095"
+    environment:
+      - SERVER_PORT=8095
+      - DATABASE_URL=postgresql://graduation:graduation_secret@postgres:5432/graduation
+      - REDIS_URL=redis://redis:6379
+      - AI_API_KEY=${AI_API_KEY}
+      - AI_MODEL=${AI_MODEL}
+      - COURSES_SERVICE_URL=http://courses-service-1:8085
+      - AUTH_SERVICE_URL=http://host.docker.internal:6001
+      - INTERNAL_SERVICE_SECRET=graduation-mega-secret-2026
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      courses-service-1:
+        condition: service_healthy
+
 volumes:
   postgres_data:
   redis_data:
