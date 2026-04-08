@@ -17,6 +17,11 @@ type Config struct {
 	Auth      AuthConfig
 	QR        QRConfig
 	Cloudinary CloudinaryConfig
+	AI        AIConfig
+}
+
+type AIConfig struct {
+	RecommendationServiceURL string
 }
 
 type ServerConfig struct {
@@ -111,6 +116,9 @@ func Load() (*Config, error) {
 			APIKey:    getEnv("CLOUDINARY_API_KEY", ""),
 			APISecret: getEnv("CLOUDINARY_API_SECRET", ""),
 			Folder:    getEnv("CLOUDINARY_FOLDER", "course-materials"),
+		},
+		AI: AIConfig{
+			RecommendationServiceURL: getEnv("AI_SERVICE_URL", "http://recommendation-service:8000"),
 		},
 	}
 

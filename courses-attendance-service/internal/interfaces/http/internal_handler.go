@@ -32,6 +32,7 @@ func (h *InternalHandler) RegisterRoutes(router fiber.Router) {
 	internal.Post("/enrollments", h.InternalEnroll)
 	internal.Get("/courses", h.ListAllCourses)
 	internal.Get("/analytics/user/:userId", h.GetUserAnalytics)
+	internal.Get("/reports/student/:userId/weekly", h.GetWeeklyReport)
 }
 
 func (h *InternalHandler) InternalEnroll(c *fiber.Ctx) error {
@@ -195,6 +196,29 @@ func (h *InternalHandler) GetUserAnalytics(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{
 		"success": true,
 		"data":    profile,
+	})
+}
+
+func (h *InternalHandler) GetWeeklyReport(c *fiber.Ctx) error {
+	userId, err := uuid.Parse(c.Params("userId"))
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"success": false,
+			"error":   "Invalid user ID",
+		})
+	}
+
+	reportData, err := h.watchService.GetWeeklyReportData(c.Context(), userId)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"success": false,
+			"error":   err.Error(),
+		})
+	}
+
+	return c.JSON(fiber.Map{
+		"success": true,
+		"data":    reportData,
 	})
 }
 

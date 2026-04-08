@@ -107,6 +107,8 @@ export function setupRoutes(app: Express, config: AppConfig): { wsProxy: any } {
     "/api/v1/conversations",
     proxy(() => getNextServiceUrl(config.services.chat, "chat"), {
       proxyReqPathResolver: (req) => req.originalUrl,
+      parseReqBody: false,
+      limit: "2gb"
     })
   );
 
@@ -121,6 +123,8 @@ export function setupRoutes(app: Express, config: AppConfig): { wsProxy: any } {
     "/api/v1/media",
     proxy(() => getNextServiceUrl(config.services.chat, "chat"), {
       proxyReqPathResolver: (req) => req.originalUrl,
+      parseReqBody: false,
+      limit: "2gb"
     })
   );
 
@@ -232,6 +236,26 @@ export function setupRoutes(app: Express, config: AppConfig): { wsProxy: any } {
     "/api/v1/recommendations",
     proxy(() => getNextServiceUrl(config.services.recommendation, "recommendation"), {
       proxyReqPathResolver: (req) => req.originalUrl,
+      parseReqBody: false,
+      limit: "2gb"
+    })
+  );
+
+  app.use(
+    "/api/v1/chatbot",
+    proxy(() => getNextServiceUrl(config.services.recommendation, "recommendation"), {
+      proxyReqPathResolver: (req) => req.originalUrl,
+      parseReqBody: false,
+      limit: "2gb"
+    })
+  );
+
+  app.use(
+    "/api/v1/reports",
+    proxy(() => getNextServiceUrl(config.services.recommendation, "recommendation"), {
+      proxyReqPathResolver: (req) => req.originalUrl,
+      parseReqBody: false,
+      limit: "2gb"
     })
   );
 

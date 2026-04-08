@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/OmarrGhorab/courses-attendance-service/internal/domain/watchtime"
+	"github.com/OmarrGhorab/courses-attendance-service/internal/infrastructure/aiclient"
 	"github.com/OmarrGhorab/courses-attendance-service/internal/infrastructure/clock"
 	"github.com/OmarrGhorab/courses-attendance-service/internal/infrastructure/persistence/postgres"
 	"github.com/google/uuid"
@@ -35,9 +37,10 @@ type RecordWatchInput struct {
 type Service struct {
 	watchRepo      *postgres.WatchTimeRepository
 	lessonRepo     *postgres.LessonRepository
-	courseRepo      *postgres.CourseRepository
+	courseRepo     *postgres.CourseRepository
 	enrollmentRepo *postgres.EnrollmentRepository
 	clock          clock.Clock
+	aiClient       *aiclient.Client
 }
 
 func NewService(
@@ -46,13 +49,15 @@ func NewService(
 	courseRepo *postgres.CourseRepository,
 	enrollmentRepo *postgres.EnrollmentRepository,
 	clk clock.Clock,
+	aiClient *aiclient.Client,
 ) *Service {
 	return &Service{
 		watchRepo:      watchRepo,
 		lessonRepo:     lessonRepo,
-		courseRepo:      courseRepo,
+		courseRepo:     courseRepo,
 		enrollmentRepo: enrollmentRepo,
 		clock:          clk,
+		aiClient:       aiClient,
 	}
 }
 
@@ -133,7 +138,20 @@ func (s *Service) RecordWatchEvent(ctx context.Context, userID uuid.UUID, input 
 		go s.recomputeCourseAnalytics(lesson.CourseID, userID)
 	}
 
+	// 6. If lesson completed, invalidate AI recommendation cache so recommendations refresh in real-time
+	if input.Completed {
+		go s.invalidateAICache(userID.String())
+	}
+
 	return progress, nil
+}
+
+// invalidateAICache notifies the AI service to refresh recommendations for a user
+func (s *Service) invalidateAICache(userID string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	
+	_ = s.aiClient.InvalidateRecommendationCache(ctx, userID)
 }
 
 // recomputeCourseAnalytics recalculates course-level analytics for a user
@@ -320,4 +338,28 @@ func (s *Service) GetRecommendationProfile(ctx context.Context, userID uuid.UUID
 		UserInterests:      []string{"Programming", "Science"}, // Mocked for now
 		CartSubjects:       []string{"Mathematics"},            // Mocked for now
 	}, nil
+}
+
+// GetWeeklyReportData returns activity analytics for the last 7 days specifically for the AI Parent Report
+func (s *Service) GetWeeklyReportData(ctx context.Context, userID uuid.UUID) (*RecommendationProfile, error) {
+	// Get general profile for baseline
+	profile, err := s.GetRecommendationProfile(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Filter stats for the last 7 days
+	sevenDaysAgo := s.clock.Now().AddDate(0, 0, -7)
+	watchSeconds, completedCount, err := s.watchRepo.GetWeeklyWatchStats(ctx, userID, sevenDaysAgo)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get weekly watch stats: %w", err)
+	}
+
+	// For the parent report, we reuse RecommendationProfile but fill it with weekly data
+	// AvgSessionDuration -> Total watch time this week
+	// AvgCompletionPct -> Lessons completed this week
+	profile.AvgSessionDuration = watchSeconds
+	profile.AvgCompletionPct = float64(completedCount)
+
+	return profile, nil
 }

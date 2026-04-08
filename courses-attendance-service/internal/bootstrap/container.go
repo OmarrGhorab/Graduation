@@ -12,6 +12,7 @@ import (
 	progressApp "github.com/OmarrGhorab/courses-attendance-service/internal/application/progress"
 	watchtimeApp "github.com/OmarrGhorab/courses-attendance-service/internal/application/watchtime"
 	"github.com/OmarrGhorab/courses-attendance-service/internal/config"
+	"github.com/OmarrGhorab/courses-attendance-service/internal/infrastructure/aiclient"
 	"github.com/OmarrGhorab/courses-attendance-service/internal/infrastructure/authclient"
 	"github.com/OmarrGhorab/courses-attendance-service/internal/infrastructure/cache/redis"
 	"github.com/OmarrGhorab/courses-attendance-service/internal/infrastructure/clock"
@@ -52,6 +53,7 @@ type Container struct {
 	KafkaProducer   *kafka.Producer
 	EventDispatcher *notificationevents.EventDispatcher
 	CloudinaryClient *cloudinary.Client
+	AIClient         *aiclient.Client
 	Clock           clock.Clock
 
 	// Services
@@ -119,6 +121,9 @@ func (c *Container) initInfrastructure() {
 		log.Fatalf("Failed to initialize Cloudinary: %v", err)
 	}
 	c.CloudinaryClient = cloudinaryClient
+
+	// AI Service
+	c.AIClient = aiclient.NewClient(c.Config.AI.RecommendationServiceURL, c.Config.Auth.InternalSecret)
 
 	// Messaging
 	c.KafkaProducer = kafka.NewProducer(c.Config.Kafka.Brokers)
@@ -214,6 +219,7 @@ func (c *Container) initServices() {
 		c.CourseRepo,
 		c.EnrollmentRepo,
 		c.Clock,
+		c.AIClient,
 	)
 }
 

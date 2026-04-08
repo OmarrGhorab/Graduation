@@ -46,12 +46,10 @@ export function setupMiddleware(app: Express, config: AppConfig): void {
   const [timeoutMiddleware, haltOnTimeout] = createTimeoutMiddleware(900000);
   app.use(timeoutMiddleware);
 
-  // 3. Body parsing with halt-on-timeout checks between parsers
-  // Parse JSON bodies (up to 2GB for large video uploads)
+  // 3. Body parsing (REMOVED: Body parser consumes the stream, which causes express-http-proxy to hang when proxyReqBody: false)
   // app.use(json({ limit: "2gb" }));
   // app.use(haltOnTimeout);
 
-  // Parse URL-encoded bodies (up to 2GB for large video uploads)
   // app.use(urlencoded({ extended: true, limit: "2gb" }));
   // app.use(haltOnTimeout); // Check timeout after URL-encoded parsing
 

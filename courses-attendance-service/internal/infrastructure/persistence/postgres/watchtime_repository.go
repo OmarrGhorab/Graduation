@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/OmarrGhorab/courses-attendance-service/internal/domain/watchtime"
 	"github.com/google/uuid"
@@ -136,4 +137,20 @@ func (r *WatchTimeRepository) GetAllLessonProgressForUser(ctx context.Context, u
 		Order("last_watched_at DESC").
 		Find(&progresses).Error
 	return progresses, err
+}
+
+// GetWeeklyWatchStats returns watch statistics for a user in the last 7 days
+func (r *WatchTimeRepository) GetWeeklyWatchStats(ctx context.Context, userID uuid.UUID, since time.Time) (int, int, error) {
+	var results struct {
+		TotalTime int `gorm:"column:total_time"`
+		Completed int `gorm:"column:completed_count"`
+	}
+
+	err := r.db.WithContext(ctx).
+		Table("lesson_watch_events").
+		Select("COALESCE(SUM(watched_seconds), 0) as total_time, COUNT(DISTINCT CASE WHEN completed = true THEN lesson_id END) as completed_count").
+		Where("user_id = ? AND created_at >= ?", userID, since).
+		Scan(&results).Error
+
+	return results.TotalTime, results.Completed, err
 }
