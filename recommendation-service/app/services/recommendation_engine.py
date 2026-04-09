@@ -33,33 +33,45 @@ async def get_personalized_recommendations(user_id: str):
 
     # 2. Fetch Data
     logger.info(f"Cache miss for user {user_id}. Fetching fresh data...")
-    user_profile = await course_client.get_user_analytics_profile(user_id)
-    all_courses = await course_client.get_all_courses()
-    
-    if not all_courses:
-        logger.warning("No courses available for recommendation")
-        return []
-
-    # 3. Build Prompt
-    prompt = build_recommendation_prompt(user_profile, all_courses)
-    
-    # 4. Generate with Gemma 4
-    recommendations = await gemma_client.generate_recommendations(prompt)
-    
-    # 5. Enhance data (Optional: merge full course details back if AI only returned IDs)
-    # For now, we assume AI returns a good amount of info as per prompt
-    
-    # 6. Cache Results
     try:
-        await redis_conn.setex(
-            cache_key,
-            settings.RECOMMENDATION_CACHE_TTL,
-            json.dumps(recommendations)
-        )
-    except Exception as e:
-        logger.warning(f"Failed to cache recommendations: {str(e)}")
+        user_profile = await course_client.get_user_analytics_profile(user_id)
+        logger.info(f"Fetched user profile: {user_profile is not None}")
+        
+        all_courses = await course_client.get_all_courses()
+        logger.info(f"Fetched {len(all_courses) if all_courses else 0} courses")
+        
+        if not all_courses:
+            logger.warning("No courses available for recommendation")
+            return []
 
-    return recommendations
+        # 3. Build Prompt
+        logger.info("Building AI prompt...")
+        prompt = build_recommendation_prompt(user_profile, all_courses)
+        logger.info("Prompt built successfully")
+        
+        # 4. Generate with Gemma 4
+        logger.info(f"Calling AI model: {settings.AI_MODEL}")
+        recommendations = await gemma_client.generate_recommendations(prompt)
+        logger.info(f"AI returned {len(recommendations) if isinstance(recommendations, list) else 'invalid'} items")
+        
+        # 5. Enhance data (Optional: merge full course details back if AI only returned IDs)
+        # For now, we assume AI returns a good amount of info as per prompt
+        
+        # 6. Cache Results
+        try:
+            if isinstance(recommendations, list):
+                await redis_conn.setex(
+                    cache_key,
+                    settings.RECOMMENDATION_CACHE_TTL,
+                    json.dumps(recommendations)
+                )
+        except Exception as e:
+            logger.warning(f"Failed to cache recommendations: {str(e)}")
+
+        return recommendations
+    except Exception as e:
+        logger.error(f"CRITICAL: recommendation_engine failure: {str(e)}", exc_info=True)
+        raise
 
 async def clear_cache(user_id: str):
     """Removes the cached recommendations for a specific user."""

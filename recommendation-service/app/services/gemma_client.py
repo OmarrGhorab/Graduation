@@ -17,8 +17,7 @@ class GemmaClient:
         Sends a prompt to Gemma 4 and expects a JSON response.
         """
         try:
-            # Using the simplified direct client call for Gemini/Gemma models
-            # Specifically requesting JSON output
+            logger.info("Engaging AI model for recommendations...")
             response = self.client.models.generate_content(
                 model=self.model_id,
                 contents=prompt,
@@ -28,16 +27,30 @@ class GemmaClient:
             )
             
             if not response.text:
-                logger.error("Empty response from AI model")
+                logger.error("Empty response text from AI model")
                 return []
+
+            logger.info(f"AI response body: {response.text[:200]}...")
 
             # Parse the JSON response
             recommendations = json.loads(response.text)
+            
+            # Defensive check: if it's a dict, convert to list if possible
+            if isinstance(recommendations, dict):
+                # Check for common wrapper fields
+                if "recommendations" in recommendations:
+                    recommendations = recommendations["recommendations"]
+                elif "data" in recommendations:
+                    recommendations = recommendations["data"]
+            
+            if not isinstance(recommendations, list):
+                logger.warning(f"AI returned non-list data: {type(recommendations)}")
+                return []
+                
             return recommendations
         
         except Exception as e:
-            logger.error(f"Error calling AI model: {str(e)}")
-            # Fallback or empty list
+            logger.error(f"Error calling AI model: {str(e)}", exc_info=True)
             return []
 
     async def chat(self, message: str):

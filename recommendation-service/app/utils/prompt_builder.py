@@ -7,22 +7,28 @@ def build_recommendation_prompt(user_profile: Dict, courses: List[Dict]) -> str:
     """
     
     # Extract key analytics
+    user_interests = user_profile.get('UserInterests') or []
+    avg_completion = user_profile.get('AvgCompletionPct') or 0.0
+    engagement_score = user_profile.get('EngagementScore') or 0
+    avg_session = user_profile.get('averageSessionDuration') or 0
+    
     profile_text = f"""
 Student Engagement Profile:
-- Avg Completion Rate: {user_profile.get('AvgCompletionPct', 0):.1f}%
-- Completion Tendency: {user_profile.get('CompletionTendency', 'MEDIUM')}
-- Explicit Interests (Settings): {', '.join(user_profile.get('UserInterests', []))}
+- Avg Completion Rate: {avg_completion:.1f}%
+- Completion Tendency: {user_profile.get('CompletionTendency') or 'MEDIUM'}
+- Explicit Interests (Settings): {', '.join(user_interests)}
 - Known Strengths (High Grades): {', '.join(['Mathematics (Excellence)', 'Physics (Strong)'])} 
 
 Historical Interests (base on watch time):
 """
-    for stat in user_profile.get('SubjectPreferences', []):
+    subject_preferences = user_profile.get('SubjectPreferences') or []
+    for stat in subject_preferences:
         profile_text += f"- {stat.get('SubjectName', 'Unknown')}: {stat.get('TotalWatchMinutes', 0)} mins\n"
     
     # 3. Build Course Catalog for AI
     catalog_text = "AVAILABLE COURSES:\n"
-    for course in courses[:15]: 
-        rating = course.get('Rating', 4.5)
+    for course in (courses or [])[:15]: 
+        rating = course.get('Rating') or 4.5
         catalog_text += f"- ID: {course.get('id')} | {course.get('title')} (Rating: {rating}/5.0)\n"
         catalog_text += f"  Subject: {course.get('subject', {}).get('name', 'N/A')} | Teacher: {course.get('TeacherName', 'Senior Instuctor')}\n"
         catalog_text += f"  Desc: {course.get('description', '')[:80]}...\n\n"
@@ -36,7 +42,7 @@ ADVICE RULES:
 1. Prioritize courses with High Ratings (4.7+).
 2. If the user has a "Strength", suggest a "Next Step" course.
 3. Keep descriptions punchy and exciting.
-4. ONLY return a JSON list of objects: [{{"ID": "...", "Reason": "..."}}]
+4. ONLY return a JSON list of objects: [{{"courseId": "...", "score": 85, "matchReason": "...", "priority": "HIGH"}}]
 """
 
     prompt = f"""
@@ -44,8 +50,8 @@ ADVICE RULES:
 
     ### STUDENT PROFILE
     {profile_text}
-    - Overall Engagement Score: {user_profile.get('EngagementScore', 0)}/100
-    - Behavior: {user_profile.get('averageSessionDuration', 0)} min avg session on {user_profile.get('preferredDevice', 'any')} devices.
+    - Overall Engagement Score: {engagement_score}/100
+    - Behavior: {avg_session} min avg session on {user_profile.get('preferredDevice') or 'any'} devices.
 
     ### AVAILABLE COURSES CATALOG
     {catalog_text}
@@ -58,9 +64,11 @@ ADVICE RULES:
     - Engagement: High-quality matches for high-score students.
 
     ### OUTPUT FORMAT
-    Return ONLY a JSON array of recommendation objects:
+    Return ONLY a JSON array of recommendation objects.
+    
+    Example format:
     [
-      {{"courseId": "uuid", "score": 85, "matchReason": "...", "priority": "HIGH"}}
+      {{"courseId": "...", "score": 85, "matchReason": "...", "priority": "HIGH"}}
     ]
 
     Only include the top 6 courses with a score > 40.
