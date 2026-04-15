@@ -3,6 +3,7 @@ package http
 import (
 	"github.com/OmarrGhorab/courses-attendance-service/internal/application/course"
 	watchtimeApp "github.com/OmarrGhorab/courses-attendance-service/internal/application/watchtime"
+	"github.com/OmarrGhorab/courses-attendance-service/internal/infrastructure/authclient"
 	"github.com/OmarrGhorab/courses-attendance-service/internal/interfaces/http/dto"
 	"github.com/OmarrGhorab/courses-attendance-service/internal/interfaces/http/middleware"
 	"github.com/gofiber/fiber/v2"
@@ -12,13 +13,15 @@ import (
 type InternalHandler struct {
 	courseService  *course.Service
 	watchService   *watchtimeApp.Service
+	authClient     *authclient.Client
 	internalSecret string
 }
 
-func NewInternalHandler(courseService *course.Service, watchService *watchtimeApp.Service, internalSecret string) *InternalHandler {
+func NewInternalHandler(courseService *course.Service, watchService *watchtimeApp.Service, authClient *authclient.Client, internalSecret string) *InternalHandler {
 	return &InternalHandler{
 		courseService:  courseService,
 		watchService:   watchService,
+		authClient:     authClient,
 		internalSecret: internalSecret,
 	}
 }
@@ -77,9 +80,24 @@ func (h *InternalHandler) GetCourse(c *fiber.Ctx) error {
 		return handleServiceError(c, err)
 	}
 
+	resp := dto.ToCourseResponse(course)
+
+	// Populate teacher info
+	if h.authClient != nil {
+		tInfo, _ := h.authClient.GetUserInfo(c.Context(), course.TeacherID.String())
+		if tInfo != nil {
+			resp.TeacherName = tInfo.Name
+			resp.TeacherProfileImg = tInfo.ProfileImg
+		}
+	}
+
+	// Populate teacher authority
+	authority, _ := h.courseService.GetTeacherAuthority(c.Context(), course.TeacherID)
+	resp.TeacherAuthority = authority
+
 	return c.JSON(fiber.Map{
 		"success": true,
-		"data":    dto.ToCourseResponse(course),
+		"data":    resp,
 	})
 }
 
@@ -173,9 +191,37 @@ func (h *InternalHandler) ListAllCourses(c *fiber.Ctx) error {
 		return handleServiceError(c, err)
 	}
 
+	teacherAuthorityMap := make(map[uuid.UUID]int)
+	teacherInfoMap := make(map[uuid.UUID]*authclient.UserInfo)
+	responses := make([]dto.CourseResponse, len(courses))
+
+	for i, crs := range courses {
+		authority, ok := teacherAuthorityMap[crs.TeacherID]
+		if !ok {
+			authority, _ = h.courseService.GetTeacherAuthority(c.Context(), crs.TeacherID)
+			teacherAuthorityMap[crs.TeacherID] = authority
+		}
+		
+		tInfo, ok := teacherInfoMap[crs.TeacherID]
+		if !ok {
+			tInfo, _ = h.authClient.GetUserInfo(c.Context(), crs.TeacherID.String())
+			teacherInfoMap[crs.TeacherID] = tInfo
+		}
+		
+		resp := dto.ToCourseResponse(&crs)
+		resp.TeacherAuthority = authority
+		
+		if tInfo != nil {
+			resp.TeacherName = tInfo.Name
+			resp.TeacherProfileImg = tInfo.ProfileImg
+		}
+
+		responses[i] = resp
+	}
+
 	return c.JSON(fiber.Map{
 		"success": true,
-		"data":    dto.ToCourseListResponse(courses),
+		"data":    responses,
 	})
 }
 

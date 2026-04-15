@@ -177,7 +177,7 @@ func (c *Container) registerRoutes() {
 	paymentHandler := http.NewPaymentHandler(c.PaymentService, c.AuthClient)
 	paymentHandler.RegisterRoutes(apiV1)
 
-	cartHandler := http.NewCartHandler(c.CartService, c.PaymentService, c.AuthClient)
+	cartHandler := http.NewCartHandler(c.CartService, c.PaymentService, c.AuthClient, c.Config.Auth.InternalSecret)
 	cartHandler.RegisterRoutes(apiV1)
 
 	subscriptionHandler := http.NewSubscriptionHandler(c.SubscriptionService, c.AuthClient)

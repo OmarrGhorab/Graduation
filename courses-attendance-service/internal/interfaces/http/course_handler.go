@@ -12,6 +12,7 @@ import (
 	courseDomain "github.com/OmarrGhorab/courses-attendance-service/internal/domain/course"
 	lessonDomain "github.com/OmarrGhorab/courses-attendance-service/internal/domain/lesson"
 	"github.com/OmarrGhorab/courses-attendance-service/internal/infrastructure/authclient"
+	"github.com/OmarrGhorab/courses-attendance-service/internal/infrastructure/cloudinary"
 	"github.com/OmarrGhorab/courses-attendance-service/internal/infrastructure/persistence/postgres"
 	"github.com/OmarrGhorab/courses-attendance-service/internal/interfaces/http/dto"
 	"github.com/OmarrGhorab/courses-attendance-service/internal/interfaces/http/middleware"
@@ -73,6 +74,8 @@ func (h *CourseHandler) RegisterRoutes(router fiber.Router) {
 	// Teacher/Instructor only routes
 	teacherOnly := middleware.RequireRole("TEACHER", "INSTRUCTOR")
 	courses.Post("/", teacherOnly, h.CreateCourse)
+	courses.Post("/upload-image", teacherOnly, h.UploadCourseImage)
+	courses.Post("/upload-video", teacherOnly, h.UploadPreviewVideo)
 	courses.Patch("/:id", teacherOnly, h.UpdateCourse)
 	courses.Post("/:id/assistants", teacherOnly, h.AddAssistant)
 	courses.Get("/:id/assistants", teacherOnly, h.GetCourseAssistants)
@@ -154,16 +157,136 @@ func (h *CourseHandler) CreateCourse(c *fiber.Ctx) error {
 		BillingType:             courseDomain.BillingType(req.BillingType),
 		FreeTrialLessons:        req.FreeTrialLessons,
 		AttendanceWeight:        req.AttendanceWeight,
+		PreviewVideoURL:         req.PreviewVideoURL,
+		PreviewVideoPublicID:    req.PreviewVideoPublicID,
 	}
 
 	course, err := h.courseService.CreateCourse(c.Context(), input)
 	if err != nil {
-		return handleServiceError(c, err)
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"success": false,
+			"error":   err.Error(),
+		})
 	}
 
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{
 		"success": true,
 		"data":    dto.ToCourseResponse(course),
+	})
+}
+
+// UploadCourseImage godoc
+// @Summary Upload course thumbnail image
+// @Tags courses
+// @Accept multipart/form-data
+// @Produce json
+// @Param image formData file true "Image file"
+// @Success 200 {object} map[string]interface{}
+// @Router /api/v1/courses/upload-image [post]
+func (h *CourseHandler) UploadCourseImage(c *fiber.Ctx) error {
+	teacherID, err := getUserIDFromContext(c)
+	if err != nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"success": false,
+			"error":   "Unauthorized",
+		})
+	}
+
+	file, err := c.FormFile("image")
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"success": false,
+			"error":   "No image provided",
+		})
+	}
+
+	if err := cloudinary.ValidateImageFile(file); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"success": false,
+			"error":   err.Error(),
+		})
+	}
+
+	f, err := file.Open()
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"success": false,
+			"error":   "Failed to open image",
+		})
+	}
+	defer f.Close()
+
+	url, err := h.courseService.UploadCourseImage(c.Context(), teacherID, f, file.Filename)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"success": false,
+			"error":   err.Error(),
+		})
+	}
+
+	return c.Status(fiber.StatusOK).JSON(fiber.Map{
+		"success": true,
+		"data": fiber.Map{
+			"url": url,
+		},
+	})
+}
+
+// UploadPreviewVideo godoc
+// @Summary Upload course preview video
+// @Tags courses
+// @Accept multipart/form-data
+// @Produce json
+// @Param video formData file true "Video file"
+// @Success 200 {object} map[string]interface{}
+// @Router /api/v1/courses/upload-video [post]
+func (h *CourseHandler) UploadPreviewVideo(c *fiber.Ctx) error {
+	teacherID, err := getUserIDFromContext(c)
+	if err != nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"success": false,
+			"error":   "Unauthorized",
+		})
+	}
+
+	file, err := c.FormFile("video")
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"success": false,
+			"error":   "No video provided",
+		})
+	}
+
+	if err := cloudinary.ValidateVideoFile(file); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"success": false,
+			"error":   "Invalid video format or size",
+		})
+	}
+
+	f, err := file.Open()
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"success": false,
+			"error":   "Failed to open video",
+		})
+	}
+	defer f.Close()
+
+	url, publicID, err := h.courseService.UploadCourseVideo(c.Context(), teacherID, f, file.Filename)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"success": false,
+			"error":   err.Error(),
+		})
+	}
+
+	return c.Status(fiber.StatusOK).JSON(fiber.Map{
+		"success": true,
+		"data": fiber.Map{
+			"url":      url,
+			"publicId": publicID,
+		},
 	})
 }
 
@@ -518,6 +641,12 @@ func (h *CourseHandler) UpdateCourse(c *fiber.Ctx) error {
 	if req.Status != nil {
 		status := courseDomain.CourseStatus(*req.Status)
 		input.Status = &status
+	}
+	if req.PreviewVideoURL != nil {
+		input.PreviewVideoURL = req.PreviewVideoURL
+	}
+	if req.PreviewVideoPublicID != nil {
+		input.PreviewVideoPublicID = req.PreviewVideoPublicID
 	}
 
 	course, err := h.courseService.UpdateCourse(c.Context(), courseID, teacherID, input)

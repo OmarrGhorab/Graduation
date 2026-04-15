@@ -9,7 +9,8 @@ import (
 	attendanceDomain "github.com/OmarrGhorab/courses-attendance-service/internal/domain/attendance"
 	courseDomain "github.com/OmarrGhorab/courses-attendance-service/internal/domain/course"
 	"github.com/OmarrGhorab/courses-attendance-service/internal/domain/events"
-	lessonDomain "github.com/OmarrGhorab/courses-attendance-service/internal/domain/lesson"
+	lessonDomain 	"github.com/OmarrGhorab/courses-attendance-service/internal/domain/lesson"
+	"github.com/OmarrGhorab/courses-attendance-service/internal/infrastructure/aiclient"
 	"github.com/OmarrGhorab/courses-attendance-service/internal/infrastructure/authclient"
 	"github.com/OmarrGhorab/courses-attendance-service/internal/infrastructure/cache/redis"
 	"github.com/OmarrGhorab/courses-attendance-service/internal/infrastructure/clock"
@@ -35,6 +36,7 @@ var (
 	ErrEmulatorDetected         = errors.New("emulator detected")
 	ErrUnauthorized             = errors.New("unauthorized")
 	ErrAlreadyScanned           = errors.New("attendance already recorded")
+	ErrSharedDeviceViolation    = errors.New("this device has already been used for attendance in this lesson by another student")
 )
 
 // Service handles attendance-related business logic
@@ -47,6 +49,7 @@ type Service struct {
 	recordRepo      *postgres.AttendanceRecordRepository
 	redisClient     *redis.Client
 	authClient      *authclient.Client
+	aiClient        *aiclient.Client
 	qrGenerator     *qr.Generator
 	progressService *progressApp.Service // Injected progress service
 	events          *notificationevents.EventDispatcher
@@ -69,6 +72,7 @@ func NewService(
 	recordRepo *postgres.AttendanceRecordRepository,
 	redisClient *redis.Client,
 	authClient *authclient.Client,
+	aiClient *aiclient.Client,
 	qrGenerator *qr.Generator,
 	progressService *progressApp.Service,
 	events *notificationevents.EventDispatcher,
@@ -84,6 +88,7 @@ func NewService(
 		recordRepo:      recordRepo,
 		redisClient:     redisClient,
 		authClient:      authClient,
+		aiClient:        aiClient,
 		qrGenerator:     qrGenerator,
 		progressService: progressService,
 		events:          events,
@@ -199,6 +204,21 @@ func (s *Service) markAbsentStudents(ctx context.Context, lessonID uuid.UUID) er
 	if len(absentStudentIDs) > 0 {
 		if err := s.recordRepo.BulkCreateAbsent(ctx, lessonID, absentStudentIDs); err != nil {
 			return err
+		}
+
+		// Emit events for each absent student
+		course, _ := s.courseRepo.GetByID(ctx, lesson.CourseID)
+		for _, studentID := range absentStudentIDs {
+			s.events.EmitAttendanceRecorded(ctx, uuid.UUID{}, events.AttendanceRecordedPayload{
+				LessonID:    lessonID,
+				LessonTitle: lesson.Title,
+				CourseID:    lesson.CourseID,
+				CourseTitle: course.Title,
+				StudentID:   studentID,
+				TeacherID:   course.TeacherID,
+				Status:      string(attendanceDomain.AttendanceStatusAbsent),
+				ScannedAt:   s.clock.Now(),
+			})
 		}
 	}
 
@@ -426,6 +446,30 @@ func (s *Service) ScanAttendance(ctx context.Context, input ScanInput) (*ScanRes
 	if existingRecord != nil && existingRecord.Status != attendanceDomain.AttendanceStatusAbsent {
 		return nil, ErrAlreadyScanned
 	}
+	
+	// 9.5. Check for device reuse (Anti-proxy)
+	if input.DeviceID != "" {
+		existingDeviceRecord, err := s.recordRepo.GetByLessonAndDevice(ctx, lessonID, input.DeviceID)
+		if err != nil {
+			return nil, err
+		}
+		// If a record exists for this device ID but for a DIFFERENT student ID, block it
+		if existingDeviceRecord != nil && existingDeviceRecord.StudentID != input.StudentID && existingDeviceRecord.Status != attendanceDomain.AttendanceStatusAbsent {
+			// Emit Fraud Detection Event before returning error
+			s.events.EmitAttendanceFraudDetected(ctx, events.AttendanceFraudDetectedPayload{
+				LessonID:          lessonID,
+				LessonTitle:       lesson.Title,
+				CourseID:          lesson.CourseID,
+				CourseTitle:       course.Title,
+				StudentID:         input.StudentID,
+				ExistingStudentID: existingDeviceRecord.StudentID,
+				DeviceID:          input.DeviceID,
+				TeacherID:         course.TeacherID,
+				DetectedAt:        serverTime,
+			})
+			return nil, ErrSharedDeviceViolation
+		}
+	}
 
 	// 10. Determine attendance status
 	status := s.determineAttendanceStatus(serverTime, lesson, course)
@@ -467,11 +511,20 @@ func (s *Service) ScanAttendance(ctx context.Context, input ScanInput) (*ScanRes
 
 	// 14. Emit event
 	s.events.EmitAttendanceRecorded(ctx, input.StudentID, events.AttendanceRecordedPayload{
-		LessonID:  lessonID,
-		StudentID: input.StudentID,
-		Status:    string(status),
-		ScannedAt: serverTime,
+		LessonID:    lessonID,
+		LessonTitle: lesson.Title,
+		CourseID:    lesson.CourseID,
+		CourseTitle: course.Title,
+		StudentID:   input.StudentID,
+		TeacherID:   course.TeacherID,
+		Status:      string(status),
+		ScannedAt:   serverTime,
 	})
+
+	// Trigger AI recommendation refresh for offline/live attendance
+	if s.aiClient != nil && (status == attendanceDomain.AttendanceStatusPresent || status == attendanceDomain.AttendanceStatusLate) {
+		go s.aiClient.InvalidateRecommendationCache(context.Background(), input.StudentID.String())
+	}
 
 	return &ScanResult{
 		Status:    status,

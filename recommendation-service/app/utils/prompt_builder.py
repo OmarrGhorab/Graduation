@@ -8,70 +8,63 @@ def build_recommendation_prompt(user_profile: Dict, courses: List[Dict]) -> str:
     
     # Extract key analytics
     user_interests = user_profile.get('UserInterests') or []
+    cart_subjects = user_profile.get('CartSubjects') or []
     avg_completion = user_profile.get('AvgCompletionPct') or 0.0
     engagement_score = user_profile.get('EngagementScore') or 0
     avg_session = user_profile.get('averageSessionDuration') or 0
     
     profile_text = f"""
-Student Engagement Profile:
-- Avg Completion Rate: {avg_completion:.1f}%
-- Completion Tendency: {user_profile.get('CompletionTendency') or 'MEDIUM'}
-- Explicit Interests (Settings): {', '.join(user_interests)}
-- Known Strengths (High Grades): {', '.join(['Mathematics (Excellence)', 'Physics (Strong)'])} 
+Student Profile & Intent:
+- Onboarding Interests: {', '.join(user_interests) if user_interests else 'General Learner'}
+- High-Intent Subjects (In Cart): {', '.join(cart_subjects) if cart_subjects else 'None currently'}
+- Avg Course Completion: {avg_completion:.1f}%
+- Learning Behavior: {user_profile.get('CompletionTendency') or 'CONSISTENT'} finisher.
 
-Historical Interests (base on watch time):
+Engagement by Subject (Last 30 Days):
 """
     subject_preferences = user_profile.get('SubjectPreferences') or []
     for stat in subject_preferences:
-        profile_text += f"- {stat.get('SubjectName', 'Unknown')}: {stat.get('TotalWatchMinutes', 0)} mins\n"
+        profile_text += f"- {stat.get('SubjectName', 'Unknown')}: {stat.get('TotalWatchMinutes', 0)} mins (Avg Engagement: {stat.get('AvgEngagement', 0)}%)\n"
     
     # 3. Build Course Catalog for AI
-    catalog_text = "AVAILABLE COURSES:\n"
-    for course in (courses or [])[:15]: 
+    catalog_text = "AVAILABLE COURSES CATALOG:\n"
+    for course in (courses or [])[:20]: 
         rating = course.get('Rating') or 4.5
-        catalog_text += f"- ID: {course.get('id')} | {course.get('title')} (Rating: {rating}/5.0)\n"
-        catalog_text += f"  Subject: {course.get('subject', {}).get('name', 'N/A')} | Teacher: {course.get('TeacherName', 'Senior Instuctor')}\n"
-        catalog_text += f"  Desc: {course.get('description', '')[:80]}...\n\n"
+        enrollment = course.get('enrollmentCount') or 0
+        catalog_text += f"- ID: {course.get('id')} | {course.get('title')}\n"
+        catalog_text += f"  Subject: {course.get('subject', {}).get('name', 'N/A')} | Enrolled Students: {enrollment}\n"
+        catalog_text += f"  Teacher Rating: {rating}/5.0 | Desc: {course.get('description', '')[:80]}...\n\n"
 
-    # 4. Final System Instructions (Optimized for speed)
+    # 4. Final System Instructions
     system_instruction = f"""
-Act as a personal career advisor for an E-Learning platform.
-Goal: Select exactly 6 courses the student will LOVE based on their strength regions and teacher quality.
+Act as a precise Educational Advisor.
+Goal: Predict the next 6 courses this student will likely purchase or engage with most.
 
-ADVICE RULES:
-1. Prioritize courses with High Ratings (4.7+).
-2. If the user has a "Strength", suggest a "Next Step" course.
-3. Keep descriptions punchy and exciting.
-4. ONLY return a JSON list of objects: [{{"courseId": "...", "score": 85, "matchReason": "...", "priority": "HIGH"}}]
+PRIORITIZATION HIERARCHY:
+1. HIGH INTENT: Subjects currently in the student's CART or declared as INTERESTS.
+2. ENGAGEMENT: Subjects where the student has high watch time and >50% completion.
+3. TEACHER AUTHORITY: Prefer courses with high 'Enrolled Students' counts (indicates social proof/quality).
+4. VARIETY: If they are 100% done with a subject, suggest the 'Advanced' version or a related 'Cloud' infrastructure version.
+
+OUTPUT: Return ONLY a JSON list of objects: [{{"courseId": "...", "score": 0-100, "matchReason": "...", "priority": "HIGH/MEDIUM/LOW"}}]
 """
 
     prompt = f"""
     {system_instruction}
 
-    ### STUDENT PROFILE
+    ### DATA INPUTS
     {profile_text}
-    - Overall Engagement Score: {engagement_score}/100
-    - Behavior: {avg_session} min avg session on {user_profile.get('preferredDevice') or 'any'} devices.
+    - Overall System Engagement Score: {engagement_score}/100
+    - Preferred Device: {user_profile.get('preferredDevice') or 'MOBILE'}
 
-    ### AVAILABLE COURSES CATALOG
+    ### CATALOG FOR SELECTION
     {catalog_text}
 
-    ### TASK
-    Rate each available course based on how well it fits the student's profile.
+    ### INSTRUCTION
+    Analyze the overlap between intent (Cart/Interests) and historical success (Engagement). 
+    Weight Cart subjects at 1.5x. Weight Teacher popularity at 1.2x.
     
-    ### SCORING CRITERIA
-    - Subject Affinity: Matches top watched subjects.
-    - Engagement: High-quality matches for high-score students.
-
-    ### OUTPUT FORMAT
-    Return ONLY a JSON array of recommendation objects.
-    
-    Example format:
-    [
-      {{"courseId": "...", "score": 85, "matchReason": "...", "priority": "HIGH"}}
-    ]
-
-    Only include the top 6 courses with a score > 40.
+    Return top 6 recommendations in JSON format.
     """
     
     return prompt

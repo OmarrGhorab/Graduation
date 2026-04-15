@@ -7,6 +7,10 @@ class CreateChatRequest(BaseModel):
     title: Optional[str] = Field(None, max_length=200)
 
 
+class UpdateChatRequest(BaseModel):
+    title: str = Field(..., min_length=1, max_length=200)
+
+
 class MediaPart(BaseModel):
     mimeType: str
     data: str  # Base64 data
@@ -20,6 +24,8 @@ class ChatMessageResponse(BaseModel):
     id: str
     role: str
     content: str
+    mediaUrl: Optional[str] = None
+    mediaType: Optional[str] = None
     createdAt: datetime
 
     class Config:

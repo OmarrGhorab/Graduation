@@ -38,8 +38,35 @@ func NewClient(cfg config.CloudinaryConfig) (*Client, error) {
 	}
 
 	return &Client{
-		cld:    cld,
 		folder: cfg.Folder,
+		cld:    cld,
+	}, nil
+}
+
+// UploadImage uploads an image file (PNG, JPG, etc.) to Cloudinary
+func (c *Client) UploadImage(ctx context.Context, file multipart.File, filename string) (*UploadResult, error) {
+	// Generate unique public ID
+	publicID := c.generatePublicID(filename, "images")
+
+	overwrite := false
+	uploadParams := uploader.UploadParams{
+		PublicID:     publicID,
+		Folder:       c.folder,
+		ResourceType: "image",
+		Overwrite:    &overwrite,
+	}
+
+	result, err := c.cld.Upload.Upload(ctx, file, uploadParams)
+	if err != nil {
+		return nil, fmt.Errorf("failed to upload image: %w", err)
+	}
+
+	return &UploadResult{
+		URL:          result.SecureURL,
+		PublicID:     result.PublicID,
+		ResourceType: result.ResourceType,
+		Format:       result.Format,
+		Bytes:        int64(result.Bytes),
 	}, nil
 }
 
@@ -49,7 +76,7 @@ func (c *Client) UploadVideo(ctx context.Context, file multipart.File, filename 
 	publicID := c.generatePublicID(filename, "videos")
 
 	overwrite := false
-	isAsync := true
+	isAsync := false
 	
 	// Create Eager transformations for HLS
 	isEagerAsync := true
@@ -59,7 +86,7 @@ func (c *Client) UploadVideo(ctx context.Context, file multipart.File, filename 
 		ResourceType: "video",
 		Overwrite:    &overwrite,
 		Async:        &isAsync,        // Process in background
-		Eager:        "f_m3u8,sp_full_hd", // Master playlist + Streaming Profile
+		Eager:        "sp_full_hd/m3u8", // Correct HLS syntax
 		EagerAsync:   &isEagerAsync,
 	}
 
@@ -67,6 +94,8 @@ func (c *Client) UploadVideo(ctx context.Context, file multipart.File, filename 
 	if err != nil {
 		return nil, fmt.Errorf("failed to upload video: %w", err)
 	}
+
+	fmt.Printf("DEBUG: Cloudinary Upload Response: %+v\n", result)
 
 	streamingURL := result.SecureURL
 	// If HLS was generated, use the eager transformation URL for the master playlist
@@ -203,4 +232,30 @@ func ValidateDocumentFile(header *multipart.FileHeader) error {
 	}
 
 	return fmt.Errorf("invalid document format (supported: PDF, DOC, DOCX, PPT, PPTX, ZIP)")
+}
+
+// ValidateImageFile checks if the file is a valid image
+func ValidateImageFile(header *multipart.FileHeader) error {
+	// Check file size (max 5MB)
+	maxSize := int64(5 * 1024 * 1024)
+	if header.Size > maxSize {
+		return fmt.Errorf("image file too large (max 5MB)")
+	}
+
+	// Check content type
+	contentType := header.Header.Get("Content-Type")
+	validTypes := []string{
+		"image/jpeg",
+		"image/png",
+		"image/webp",
+		"image/gif",
+	}
+
+	for _, validType := range validTypes {
+		if contentType == validType {
+			return nil
+		}
+	}
+
+	return fmt.Errorf("invalid image format (supported: JPG, PNG, WEBP, GIF)")
 }

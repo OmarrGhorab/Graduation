@@ -71,9 +71,13 @@ func (r *CartRepository) RemoveItem(ctx context.Context, cartID, courseID uuid.U
 		Delete(&cart.CartItem{}).Error
 }
 
-func (r *CartRepository) ClearCart(ctx context.Context, cartID uuid.UUID) error {
+func (r *CartRepository) ClearCart(ctx context.Context, userID uuid.UUID) error {
+	var c cart.Cart
+	if err := r.db.WithContext(ctx).Where("user_id = ?", userID).First(&c).Error; err != nil {
+		return err
+	}
 	return r.db.WithContext(ctx).
-		Where("cart_id = ?", cartID).
+		Where("cart_id = ?", c.ID).
 		Delete(&cart.CartItem{}).Error
 }
 

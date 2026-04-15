@@ -2,7 +2,7 @@ package dto
 
 type CreatePaymentRequest struct {
 	CourseID      string `json:"courseId" validate:"required,uuid"`
-	PaymentMethod string `json:"paymentMethod" validate:"required,oneof=CARD WALLET"`
+	PaymentMethod string `json:"paymentMethod" validate:"required,oneof=CARD WALLET TOKEN"`
 	PhoneNumber   string `json:"phoneNumber" validate:"required"`
 	FirstName     string `json:"firstName" validate:"required"`
 	LastName      string `json:"lastName" validate:"required"`

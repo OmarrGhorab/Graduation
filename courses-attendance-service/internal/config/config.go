@@ -22,6 +22,7 @@ type Config struct {
 
 type AIConfig struct {
 	RecommendationServiceURL string
+	PaymentServiceURL        string
 }
 
 type ServerConfig struct {
@@ -119,6 +120,7 @@ func Load() (*Config, error) {
 		},
 		AI: AIConfig{
 			RecommendationServiceURL: getEnv("AI_SERVICE_URL", "http://recommendation-service:8000"),
+			PaymentServiceURL:        getEnv("PAYMENT_SERVICE_URL", "http://payment-service:8081"),
 		},
 	}
 

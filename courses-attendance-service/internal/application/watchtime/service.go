@@ -2,6 +2,7 @@ package watchtime
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/OmarrGhorab/courses-attendance-service/internal/domain/watchtime"
 	"github.com/OmarrGhorab/courses-attendance-service/internal/infrastructure/aiclient"
+	"github.com/OmarrGhorab/courses-attendance-service/internal/infrastructure/authclient"
 	"github.com/OmarrGhorab/courses-attendance-service/internal/infrastructure/clock"
 	"github.com/OmarrGhorab/courses-attendance-service/internal/infrastructure/persistence/postgres"
 	"github.com/google/uuid"
@@ -33,14 +35,18 @@ type RecordWatchInput struct {
 	DeviceType     watchtime.DeviceType
 }
 
-// Service handles watch time tracking business logic
+// Service handles watch time and analytics business logic
 type Service struct {
 	watchRepo      *postgres.WatchTimeRepository
 	lessonRepo     *postgres.LessonRepository
 	courseRepo     *postgres.CourseRepository
 	enrollmentRepo *postgres.EnrollmentRepository
+	recordRepo     *postgres.AttendanceRecordRepository
 	clock          clock.Clock
 	aiClient       *aiclient.Client
+	authClient     *authclient.Client
+	paymentURL     string
+	internalSecret string
 }
 
 func NewService(
@@ -48,16 +54,24 @@ func NewService(
 	lessonRepo *postgres.LessonRepository,
 	courseRepo *postgres.CourseRepository,
 	enrollmentRepo *postgres.EnrollmentRepository,
+	recordRepo *postgres.AttendanceRecordRepository,
 	clk clock.Clock,
 	aiClient *aiclient.Client,
+	authClient *authclient.Client,
+	paymentURL string,
+	internalSecret string,
 ) *Service {
 	return &Service{
 		watchRepo:      watchRepo,
 		lessonRepo:     lessonRepo,
 		courseRepo:     courseRepo,
 		enrollmentRepo: enrollmentRepo,
+		recordRepo:     recordRepo,
 		clock:          clk,
 		aiClient:       aiClient,
+		authClient:     authClient,
+		paymentURL:     paymentURL,
+		internalSecret: internalSecret,
 	}
 }
 
@@ -276,10 +290,71 @@ type RecommendationProfile struct {
 
 // GetRecommendationProfile returns structured data for AI course recommendations
 func (s *Service) GetRecommendationProfile(ctx context.Context, userID uuid.UUID) (*RecommendationProfile, error) {
-	// Get all course analytics
+	// 1. Fetch user interests from Auth Service
+	var interests []string
+	userInfo, err := s.authClient.GetUserInfo(ctx, userID.String())
+	if err == nil && userInfo != nil {
+		interests = userInfo.Interests
+	}
+
+	// 2. Fetch cart subjects from Payment Service
+	var cartSubjects []string
+	cartURL := fmt.Sprintf("%s/api/v1/internal/cart/%s", s.paymentURL, userID)
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, cartURL, nil)
+	req.Header.Set("x-internal-service-secret", s.internalSecret)
+	
+	pClient := &http.Client{Timeout: 5 * time.Second}
+	resp, err := pClient.Do(req)
+	if err == nil {
+		defer resp.Body.Close()
+		if resp.StatusCode == http.StatusOK {
+			var result struct {
+				Success bool     `json:"success"`
+				Data    []string `json:"data"`
+			}
+			if err := json.NewDecoder(resp.Body).Decode(&result); err == nil {
+				cartSubjects = result.Data
+			}
+		}
+	}
+
+	// 3. Get all course analytics (Online/Video based)
 	analytics, err := s.watchRepo.GetUserAllCourseAnalytics(ctx, userID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get course analytics: %w", err)
+	}
+
+	// 4. Merge Offline/Live Attendance Completions
+	attendanceRecords, err := s.recordRepo.GetByStudentID(ctx, userID)
+	if err == nil {
+		// Group attendance completions by CourseID
+		courseOfflineCompletions := make(map[uuid.UUID]int)
+		for _, record := range attendanceRecords {
+			// Status PRESENT or LATE counts as completed for an offline/live lesson
+			if record.Status == "PRESENT" || record.Status == "LATE" {
+				lesson, _ := s.lessonRepo.GetByID(ctx, record.LessonID)
+				if lesson != nil {
+					courseOfflineCompletions[lesson.CourseID]++
+				}
+			}
+		}
+
+		// Adjust analytics to include offline completions
+		for i, a := range analytics {
+			if count, exists := courseOfflineCompletions[a.CourseID]; exists {
+				// We don't want to double count if the system already marked it via progress sync
+				// But to be safe for Recommendations, we ensure it's at least this high
+				if count > a.LessonsCompleted {
+					analytics[i].LessonsCompleted = count
+					// Boost completion percentage estimate for offline lessons
+					// (Rough estimate: if offline is completed, we treat as 100% watched)
+					totalLessons, _ := s.courseRepo.GetByID(ctx, a.CourseID)
+					if totalLessons != nil && totalLessons.TotalLessons > 0 {
+						analytics[i].CompletionPct = float64(count) / float64(totalLessons.TotalLessons) * 100
+					}
+				}
+			}
+		}
 	}
 
 	// Get subject preferences
@@ -335,8 +410,8 @@ func (s *Service) GetRecommendationProfile(ctx context.Context, userID uuid.UUID
 		PreferredDevice:    "MOBILE",
 		CompletionTendency: tendency,
 		AvgCompletionPct:   avgCompletionPct,
-		UserInterests:      []string{"Programming", "Science"}, // Mocked for now
-		CartSubjects:       []string{"Mathematics"},            // Mocked for now
+		UserInterests:      interests,
+		CartSubjects:       cartSubjects,
 	}, nil
 }
 

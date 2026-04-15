@@ -32,6 +32,7 @@ func (h *PaymentHandler) RegisterRoutes(router fiber.Router) {
 	payments := router.Group("/payments", middleware.Authenticate(h.authClient))
 	payments.Post("/create", h.CreatePayment)
 	payments.Get("/methods", h.ListPaymentMethods)
+	payments.Delete("/methods/:id", h.DeletePaymentMethod)
 	payments.Get("/history", h.GetPurchaseHistory)
 }
 
@@ -204,6 +205,39 @@ func (h *PaymentHandler) ListPaymentMethods(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{
 		"success": true,
 		"data":    methods,
+	})
+}
+
+func (h *PaymentHandler) DeletePaymentMethod(c *fiber.Ctx) error {
+	userIDStr, ok := c.Locals("userId").(string)
+	if !ok {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"success": false,
+			"error":   "User ID not found in session",
+		})
+	}
+	userID, _ := uuid.Parse(userIDStr)
+
+	idStr := c.Params("id")
+	paymentMethodID, err := uuid.Parse(idStr)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"success": false,
+			"error":   "Invalid payment method ID",
+		})
+	}
+
+	err = h.paymentService.DeletePaymentMethod(c.Context(), userID, paymentMethodID)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"success": false,
+			"error":   err.Error(),
+		})
+	}
+
+	return c.JSON(fiber.Map{
+		"success": true,
+		"message": "Payment method deleted successfully",
 	})
 }
 

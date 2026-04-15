@@ -9,9 +9,11 @@ import (
 	"github.com/OmarrGhorab/courses-attendance-service/internal/domain/events"
 	lessonDomain "github.com/OmarrGhorab/courses-attendance-service/internal/domain/lesson"
 	"github.com/OmarrGhorab/courses-attendance-service/internal/infrastructure/clock"
+	"github.com/OmarrGhorab/courses-attendance-service/internal/infrastructure/cloudinary"
 	"github.com/OmarrGhorab/courses-attendance-service/internal/infrastructure/notificationevents"
 	"github.com/OmarrGhorab/courses-attendance-service/internal/infrastructure/persistence/postgres"
 	"github.com/google/uuid"
+	"os"
 )
 
 var (
@@ -28,9 +30,10 @@ type Service struct {
 	lessonRepo      *postgres.LessonRepository
 	courseRepo      *postgres.CourseRepository
 	enrollmentRepo  *postgres.EnrollmentRepository
-	progressService *progressApp.Service
-	events          *notificationevents.EventDispatcher
-	clock           clock.Clock
+	progressService  *progressApp.Service
+	events           *notificationevents.EventDispatcher
+	cloudinaryClient *cloudinary.Client
+	clock            clock.Clock
 }
 
 
@@ -40,15 +43,17 @@ func NewService(
 	enrollmentRepo *postgres.EnrollmentRepository,
 	progressService *progressApp.Service,
 	events *notificationevents.EventDispatcher,
+	cloudinaryClient *cloudinary.Client,
 	clk clock.Clock,
 ) *Service {
 	return &Service{
-		lessonRepo:      lessonRepo,
-		courseRepo:      courseRepo,
-		enrollmentRepo:  enrollmentRepo,
-		progressService: progressService,
-		events:          events,
-		clock:           clk,
+		lessonRepo:       lessonRepo,
+		courseRepo:       courseRepo,
+		enrollmentRepo:   enrollmentRepo,
+		progressService:  progressService,
+		events:           events,
+		cloudinaryClient: cloudinaryClient,
+		clock:            clk,
 	}
 }
 
@@ -58,6 +63,7 @@ type CreateLessonInput struct {
 	CourseID        uuid.UUID
 	Title           string
 	Description     string
+	ThumbnailURL    string
 	ScheduledAt     time.Time
 	DurationMinutes int
 	DeliveryType    lessonDomain.DeliveryType
@@ -107,6 +113,7 @@ func (s *Service) CreateLesson(ctx context.Context, teacherID uuid.UUID, input C
 		CourseID:        input.CourseID,
 		Title:           input.Title,
 		Description:     input.Description,
+		ThumbnailURL:    input.ThumbnailURL,
 		LessonNumber:    lessonNumber,
 		ScheduledAt:     input.ScheduledAt.UTC(),
 		DurationMinutes: input.DurationMinutes,
@@ -363,4 +370,63 @@ func (s *Service) recomputeAllStudentsProgress(courseID uuid.UUID) {
 func (s *Service) UpdateLesson(ctx context.Context, lesson *lessonDomain.Lesson) error {
 	lesson.UpdatedAt = s.clock.Now()
 	return s.lessonRepo.Update(ctx, lesson)
+}
+
+// ProcessLessonVideoAsync uploads a video to Cloudinary in the background
+func (s *Service) ProcessLessonVideoAsync(ctx context.Context, lessonID, teacherID uuid.UUID, tempFilePath string, filename string) {
+	// 1. Clean up temp file when done
+	defer os.Remove(tempFilePath)
+
+	// 2. Fetch lesson
+	lesson, err := s.lessonRepo.GetByID(ctx, lessonID)
+	if err != nil || lesson == nil {
+		return
+	}
+
+	// 3. Open the temp file
+	file, err := os.Open(tempFilePath)
+	if err != nil {
+		s.events.EmitLessonVideoFailed(ctx, events.LessonVideoFailedPayload{
+			LessonID:    lessonID,
+			LessonTitle: lesson.Title,
+			TeacherID:   teacherID,
+			Error:       "Failed to open source video file",
+		})
+		return
+	}
+	defer file.Close()
+
+	// 4. Upload to Cloudinary
+	// Since we need multipart.File interface, we might need a workaround or update client
+	// Actually, os.File implements io.Reader, but Cloudinary client takes multipart.File
+	// We'll assume the client is updated or we use a helper
+	result, err := s.cloudinaryClient.UploadVideo(ctx, file, filename)
+	if err != nil {
+		s.events.EmitLessonVideoFailed(ctx, events.LessonVideoFailedPayload{
+			LessonID:    lessonID,
+			LessonTitle: lesson.Title,
+			TeacherID:   teacherID,
+			Error:       err.Error(),
+		})
+		return
+	}
+
+	// 5. Update lesson
+	lesson.VideoURL = result.StreamingURL
+	lesson.VideoPublicID = result.PublicID
+	if result.Duration != nil {
+		lesson.Duration = result.Duration
+	}
+	lesson.UpdatedAt = s.clock.Now()
+	s.lessonRepo.Update(ctx, lesson)
+
+	// 6. Emit Success Event
+	s.events.EmitLessonVideoReady(ctx, events.LessonVideoReadyPayload{
+		LessonID:     lessonID,
+		LessonTitle:  lesson.Title,
+		TeacherID:    teacherID,
+		VideoURL:     result.URL,
+		StreamingURL: result.StreamingURL,
+		Duration:     0, // TODO: set from result
+	})
 }

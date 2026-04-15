@@ -39,6 +39,8 @@ type Course struct {
 	SubjectID   uuid.UUID `gorm:"type:uuid;not null"`
 	TeacherID   uuid.UUID `gorm:"type:uuid;not null"`
 	CourseImage string    `gorm:"type:text"`
+	PreviewVideoURL      string    `gorm:"type:text"`
+	PreviewVideoPublicID string    `gorm:"type:text"`
 
 	// Delivery and location
 	DeliveryType    DeliveryType `gorm:"type:delivery_type;not null;default:'OFFLINE'"`
@@ -69,6 +71,9 @@ type Course struct {
 	// Timestamps
 	CreatedAt time.Time `gorm:"not null;default:now()"`
 	UpdatedAt time.Time `gorm:"not null;default:now()"`
+
+	// Virtual fields (calculated)
+	EnrollmentCount int `gorm:"-"`
 
 	// Relations
 	Subject    *Subject          `gorm:"foreignKey:SubjectID"`

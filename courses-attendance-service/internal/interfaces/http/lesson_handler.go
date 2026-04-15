@@ -1,7 +1,13 @@
 package http
 
 import (
+	"context"
 	"errors"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"time"
 
 	attendanceApp "github.com/OmarrGhorab/courses-attendance-service/internal/application/attendance"
 	lessonApp "github.com/OmarrGhorab/courses-attendance-service/internal/application/lesson"
@@ -89,6 +95,7 @@ func (h *LessonHandler) CreateLesson(c *fiber.Ctx) error {
 		CourseID:        courseID,
 		Title:           req.Title,
 		Description:     req.Description,
+		ThumbnailURL:    req.ThumbnailURL,
 		ScheduledAt:     req.ScheduledAt,
 		DurationMinutes: req.DurationMinutes,
 		DeliveryType:    lessonDomain.DeliveryType(req.DeliveryType),
@@ -108,22 +115,31 @@ func (h *LessonHandler) CreateLesson(c *fiber.Ctx) error {
 		return handleLessonServiceError(c, err)
 	}
 
-	// NEW: Check if a video file is attached in the creation request
+	// NEW: Check if a video file is attached in the creation request (Asynchronous Processing)
 	if req.DeliveryType == "ONLINE" {
 		fileHeader, err := c.FormFile("video")
 		if err == nil && fileHeader != nil {
-			// A video was provided during creation
-			file, err := fileHeader.Open()
+			// 1. Create a persistent temporary file to store the video for background processing
+			tempDir := os.TempDir()
+			tempFileName := fmt.Sprintf("upload_%s_%d%s", lesson.ID.String(), time.Now().Unix(), filepath.Ext(fileHeader.Filename))
+			tempPath := filepath.Join(tempDir, tempFileName)
+
+			// 2. Open source file
+			src, err := fileHeader.Open()
 			if err == nil {
-				defer file.Close()
-				// Upload to Cloudinary
-				result, err := h.cloudinaryClient.UploadVideo(c.Context(), file, fileHeader.Filename)
+				defer src.Close()
+				
+				// 3. Create destination temp file
+				dst, err := os.Create(tempPath)
 				if err == nil {
-					// Update lesson with Cloudinary data (HLS Manifest URL, PublicID, and Dynamic Duration)
-					lesson.VideoURL = result.StreamingURL
-					lesson.VideoPublicID = result.PublicID
-					lesson.Duration = result.Duration
-					_ = h.lessonService.UpdateLesson(c.Context(), lesson)
+					defer dst.Close()
+					
+					// 4. Copy data to temp file
+					if _, err = io.Copy(dst, src); err == nil {
+						// 5. Start background processing
+						// We pass a background context because the request context will be canceled
+						go h.lessonService.ProcessLessonVideoAsync(context.Background(), lesson.ID, teacherID, tempPath, fileHeader.Filename)
+					}
 				}
 			}
 		}

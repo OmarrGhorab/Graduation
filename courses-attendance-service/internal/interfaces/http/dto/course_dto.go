@@ -28,6 +28,8 @@ type CreateCourseRequest struct {
 	BillingType             string   `json:"billingType" validate:"omitempty,oneof=ONE_TIME MONTHLY"`
 	FreeTrialLessons        int      `json:"freeTrialLessons"` // Number of free lessons for trial
 	AttendanceWeight        float64  `json:"attendanceWeight" validate:"omitempty,min=0,max=1"`
+	PreviewVideoURL         string   `json:"previewVideoUrl"`
+	PreviewVideoPublicID    string   `json:"previewVideoPublicId"`
 }
 
 type UpdateCourseRequest struct {
@@ -43,6 +45,8 @@ type UpdateCourseRequest struct {
 	BillingType             *string  `json:"billingType" validate:"omitempty,oneof=ONE_TIME MONTHLY"`
 	FreeTrialLessons        *int     `json:"freeTrialLessons"` // Number of free lessons for trial
 	Status                  *string  `json:"status" validate:"omitempty,oneof=ACTIVE PAUSED ARCHIVED"`
+	PreviewVideoURL         *string  `json:"previewVideoUrl"`
+	PreviewVideoPublicID    *string  `json:"previewVideoPublicId"`
 }
 
 type CourseResponse struct {
@@ -66,6 +70,12 @@ type CourseResponse struct {
 	BillingType             string    `json:"billingType"`
 	Status                  string    `json:"status"`
 	AttendanceWeight        float64   `json:"attendanceWeight"`
+	EnrollmentCount         int       `json:"enrollmentCount"`
+	TeacherAuthority        int       `json:"teacherAuthority,omitempty"`
+	TeacherName             string    `json:"teacherName,omitempty"`
+	TeacherProfileImg       string    `json:"teacherProfileImg,omitempty"`
+	PreviewVideoURL         string    `json:"previewVideoUrl,omitempty"`
+	PreviewVideoPublicID    string    `json:"previewVideoPublicId,omitempty"`
 	CreatedAt               time.Time `json:"createdAt"`
 	UpdatedAt               time.Time `json:"updatedAt"`
 }
@@ -91,6 +101,10 @@ func ToCourseResponse(c *course.Course) CourseResponse {
 		BillingType:             string(c.BillingType),
 		Status:                  string(c.Status),
 		AttendanceWeight:        c.AttendanceWeight,
+		EnrollmentCount:         c.EnrollmentCount, // Real count from the entity
+		TeacherProfileImg:       "", // Will be populated by handler
+		PreviewVideoURL:         c.PreviewVideoURL,
+		PreviewVideoPublicID:    c.PreviewVideoPublicID,
 		CreatedAt:               c.CreatedAt,
 		UpdatedAt:               c.UpdatedAt,
 	}
@@ -190,6 +204,7 @@ type CreateLessonRequest struct {
 	CourseID        string    `json:"courseId" validate:"required,uuid"`
 	Title           string    `json:"title" validate:"required,min=3,max=255"`
 	Description     string    `json:"description"`
+	ThumbnailURL    string    `json:"thumbnailUrl"`
 	ScheduledAt     time.Time `json:"scheduledAt" validate:"required"`
 	DurationMinutes int       `json:"durationMinutes"`
 	DeliveryType    string    `json:"deliveryType" validate:"required,oneof=ONLINE OFFLINE"`
@@ -217,6 +232,7 @@ type LessonResponse struct {
 	CourseID        uuid.UUID  `json:"courseId"`
 	Title           string     `json:"title"`
 	Description     string     `json:"description"`
+	ThumbnailURL    string     `json:"thumbnailUrl"`
 	LessonNumber    int        `json:"lessonNumber"`
 	ScheduledAt     time.Time  `json:"scheduledAt"`
 	StartsAt        *time.Time `json:"startsAt,omitempty"`
@@ -241,6 +257,7 @@ func ToLessonResponse(l *lessonDomain.Lesson) LessonResponse {
 		CourseID:        l.CourseID,
 		Title:           l.Title,
 		Description:     l.Description,
+		ThumbnailURL:    l.ThumbnailURL,
 		LessonNumber:    l.LessonNumber,
 		ScheduledAt:     l.ScheduledAt,
 		StartsAt:        l.StartsAt,

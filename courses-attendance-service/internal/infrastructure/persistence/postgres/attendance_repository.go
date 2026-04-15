@@ -108,6 +108,18 @@ func (r *AttendanceRecordRepository) GetByLessonAndStudent(ctx context.Context, 
 	return &rec, err
 }
 
+func (r *AttendanceRecordRepository) GetByLessonAndDevice(ctx context.Context, lessonID uuid.UUID, deviceID string) (*attendance.AttendanceRecord, error) {
+	if deviceID == "" {
+		return nil, nil
+	}
+	var rec attendance.AttendanceRecord
+	err := r.db.WithContext(ctx).First(&rec, "lesson_id = ? AND device_id = ?", lessonID, deviceID).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	return &rec, err
+}
+
 func (r *AttendanceRecordRepository) GetByLessonID(ctx context.Context, lessonID uuid.UUID) ([]attendance.AttendanceRecord, error) {
 	var records []attendance.AttendanceRecord
 	err := r.db.WithContext(ctx).Where("lesson_id = ?", lessonID).Find(&records).Error

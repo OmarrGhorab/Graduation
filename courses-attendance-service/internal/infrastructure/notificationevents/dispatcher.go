@@ -73,3 +73,18 @@ func (d *EventDispatcher) EmitAbsenceReviewed(ctx context.Context, payload event
 func (d *EventDispatcher) EmitProgressUpdated(ctx context.Context, payload events.ProgressUpdatedPayload) {
 	d.Dispatch(ctx, events.TypeProgressUpdated, payload.StudentID.String(), uuid.UUID{}, payload)
 }
+
+// Helper for Attendance Fraud Detection
+func (d *EventDispatcher) EmitAttendanceFraudDetected(ctx context.Context, payload events.AttendanceFraudDetectedPayload) {
+	d.Dispatch(ctx, events.TypeAttendanceFraudDetected, payload.LessonID.String(), payload.StudentID, payload)
+}
+
+// Helper for Lesson Video Ready
+func (d *EventDispatcher) EmitLessonVideoReady(ctx context.Context, payload events.LessonVideoReadyPayload) {
+	d.Dispatch(ctx, events.TypeLessonVideoReady, payload.LessonID.String(), payload.TeacherID, payload)
+}
+
+// Helper for Lesson Video Failed
+func (d *EventDispatcher) EmitLessonVideoFailed(ctx context.Context, payload events.LessonVideoFailedPayload) {
+	d.Dispatch(ctx, events.TypeLessonVideoFailed, payload.LessonID.String(), payload.TeacherID, payload)
+}

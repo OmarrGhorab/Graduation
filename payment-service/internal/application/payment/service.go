@@ -67,9 +67,13 @@ type PurchaseHistoryItem struct {
 }
 
 type PurchaseHistoryCourseItem struct {
-	CourseID   uuid.UUID `json:"courseId"`
-	Title      string    `json:"title"`
-	PriceCents int64     `json:"priceCents"`
+	CourseID          uuid.UUID `json:"courseId"`
+	Title             string    `json:"title"`
+	CourseImage       string    `json:"courseImage"`
+	TeacherName       string    `json:"teacherName"`
+	TeacherProfileImg string    `json:"teacherProfileImg"`
+	SubjectName       string    `json:"subjectName"`
+	PriceCents        int64     `json:"priceCents"`
 }
 
 func (s *Service) GetUserPurchaseHistory(ctx context.Context, userID uuid.UUID) ([]PurchaseHistoryItem, error) {
@@ -101,16 +105,22 @@ func (s *Service) GetUserPurchaseHistory(ctx context.Context, userID uuid.UUID) 
 		// Fetch course details for each item
 		for _, orderItem := range order.Items {
 			course, err := s.coursesClient.GetCourseByID(ctx, orderItem.CourseID.String())
-			courseTitle := "Unknown Course"
-			if err == nil {
-				courseTitle = course.Title
+			
+			hItem := PurchaseHistoryCourseItem{
+				CourseID:   orderItem.CourseID,
+				Title:      "Unknown Course",
+				PriceCents: orderItem.PriceCents,
 			}
 
-			item.Items = append(item.Items, PurchaseHistoryCourseItem{
-				CourseID:   orderItem.CourseID,
-				Title:      courseTitle,
-				PriceCents: orderItem.PriceCents,
-			})
+			if err == nil && course != nil {
+				hItem.Title = course.Title
+				hItem.CourseImage = course.CourseImage
+				hItem.TeacherName = course.TeacherName
+				hItem.TeacherProfileImg = course.TeacherProfileImg
+				hItem.SubjectName = course.SubjectName
+			}
+
+			item.Items = append(item.Items, hItem)
 		}
 
 		history = append(history, item)
@@ -217,7 +227,7 @@ func (s *Service) CreatePayment(ctx context.Context, opts CreatePaymentOptions) 
 	var paymentURL string
 
 	// 5. Handle One-Click or Regular flow
-	if opts.PaymentMethod == "CARD" && opts.PaymentMethodID != uuid.Nil {
+	if (opts.PaymentMethod == "CARD" || opts.PaymentMethod == "TOKEN") && opts.PaymentMethodID != uuid.Nil {
 		pm, err := s.paymentMethodRepo.GetByID(ctx, opts.PaymentMethodID)
 		if err != nil {
 			return "", uuid.Nil, fmt.Errorf("payment method not found: %w", err)
@@ -518,6 +528,10 @@ func (s *Service) GetUserPaymentMethods(ctx context.Context, userID uuid.UUID) (
 	return s.paymentMethodRepo.GetUserPaymentMethods(ctx, userID)
 }
 
+func (s *Service) DeletePaymentMethod(ctx context.Context, userID, paymentMethodID uuid.UUID) error {
+	return s.paymentMethodRepo.Delete(ctx, userID, paymentMethodID)
+}
+
 func (s *Service) completeSuccessfulPayment(ctx context.Context, order *payment.PaymentOrder, amountCents int64) error {
 	periodKey := time.Now().Format("2006-01")
 
@@ -532,9 +546,6 @@ func (s *Service) completeSuccessfulPayment(ctx context.Context, order *payment.
 			if item.BillingType == "MONTHLY" {
 				s.ensureSubscription(ctx, order.UserID, item)
 			}
-		}
-		if err := s.cartRepo.ClearCart(ctx, order.UserID); err != nil {
-			log.Printf("WARNING: Failed to clear cart for user %s: %v", order.UserID, err)
 		}
 
 	case payment.OrderTypeSubscriptionRenewal:
@@ -553,7 +564,6 @@ func (s *Service) completeSuccessfulPayment(ctx context.Context, order *payment.
 			}
 		}
 
-
 	default: // OrderTypeSingleCourse
 		for _, item := range order.Items {
 			if err := s.coursesClient.ActivateEnrollment(ctx, order.UserID.String(), item.CourseID.String(), periodKey); err != nil {
@@ -566,8 +576,12 @@ func (s *Service) completeSuccessfulPayment(ctx context.Context, order *payment.
 		}
 	}
 
+	// 2. Clear Cart for the user
+	if err := s.cartRepo.ClearCart(ctx, order.UserID); err != nil {
+		log.Printf("WARNING: Failed to clear cart for user %s: %v", order.UserID, err)
+	}
 
-	// 2. Emit Kafka Event
+	// 3. Emit Kafka Event
 	event := map[string]interface{}{
 		"event_type": "payment.completed",
 		"user_id":    order.UserID.String(),

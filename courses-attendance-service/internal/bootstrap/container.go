@@ -47,14 +47,14 @@ type Container struct {
 	WatchTimeRepo         *postgres.WatchTimeRepository
 
 	// Infrastructure
-	Redis           *redis.Client
-	AuthClient      *authclient.Client
-	QRGenerator     *qr.Generator
-	KafkaProducer   *kafka.Producer
-	EventDispatcher *notificationevents.EventDispatcher
+	Redis            *redis.Client
+	AuthClient       *authclient.Client
+	QRGenerator      *qr.Generator
+	KafkaProducer    *kafka.Producer
+	EventDispatcher  *notificationevents.EventDispatcher
 	CloudinaryClient *cloudinary.Client
 	AIClient         *aiclient.Client
-	Clock           clock.Clock
+	Clock            clock.Clock
 
 	// Services
 	CourseService     *courseApp.Service
@@ -156,6 +156,8 @@ func (c *Container) initServices() {
 		c.TeacherRatingRepo,
 		c.ProgressSnapshotRepo,
 		c.AuthClient,
+		c.AIClient,
+		c.CloudinaryClient,
 		c.Clock,
 	)
 
@@ -175,9 +177,9 @@ func (c *Container) initServices() {
 		c.EnrollmentRepo,
 		c.ProgressService,
 		c.EventDispatcher,
+		c.CloudinaryClient,
 		c.Clock,
 	)
-
 
 	c.AttendanceService = attendanceApp.NewService(
 		c.LessonRepo,
@@ -188,6 +190,7 @@ func (c *Container) initServices() {
 		c.AttendanceRecordRepo,
 		c.Redis,
 		c.AuthClient,
+		c.AIClient,
 		c.QRGenerator,
 		c.ProgressService,
 		c.EventDispatcher,
@@ -218,8 +221,12 @@ func (c *Container) initServices() {
 		c.LessonRepo,
 		c.CourseRepo,
 		c.EnrollmentRepo,
+		c.AttendanceRecordRepo,
 		c.Clock,
 		c.AIClient,
+		c.AuthClient,
+		c.Config.AI.PaymentServiceURL,
+		c.Config.Auth.InternalSecret,
 	)
 }
 
@@ -246,7 +253,7 @@ func (c *Container) registerRoutes() {
 	courseHandler.RegisterRoutes(apiV1)
 
 	// Internal routes
-	internalHandler := http.NewInternalHandler(c.CourseService, c.WatchTimeService, c.Config.Auth.InternalSecret)
+	internalHandler := http.NewInternalHandler(c.CourseService, c.WatchTimeService, c.AuthClient, c.Config.Auth.InternalSecret)
 	internalHandler.RegisterRoutes(apiV1)
 
 

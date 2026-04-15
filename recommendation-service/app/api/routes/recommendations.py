@@ -24,27 +24,38 @@ async def get_my_recommendations(user = Depends(get_current_user)):
         raise HTTPException(status_code=500, detail="Could not generate recommendations")
 
 @router.post("/refresh")
-async def refresh_recommendations(user = Depends(get_current_user)):
+async def refresh_recommendations(background_tasks: BackgroundTasks, user = Depends(get_current_user)):
     """
-    Invalidates the cache and forces a fresh recommendation generation.
+    Invalidates the cache and triggers a fresh recommendation generation in the background.
     """
-    # In a real app, you might trigger this via BackgroundTasks
-    # For now, we'll just allow the next GET to be a miss if we manually delete the key
-    from app.services.recommendation_engine import redis_conn
-    cache_key = f"recommendation:v1:{user['user_id']}"
-    await redis_conn.delete(cache_key)
+    from app.services.recommendation_engine import clear_cache, get_personalized_recommendations
+    user_id = user["user_id"]
     
-    return {"success": True, "message": "Recommendations cache cleared"}
+    # 1. Clear current cache
+    await clear_cache(user_id)
+    
+    # 2. Trigger fresh generation in background
+    background_tasks.add_task(get_personalized_recommendations, user_id)
+    
+    logger.info(f"Public background refresh requested for user {user_id}")
+    return {"success": True, "message": "Recommendations cache cleared and refresh started in background"}
 
 @router.delete("/cache/{user_id}")
-async def invalidate_cache(user_id: str):
+async def invalidate_cache(user_id: str, background_tasks: BackgroundTasks):
     """
     Called by other services when a user's data changes.
-    Invalidating the cache forces the next visit to be a fresh AI calculation.
+    Invalidating the cache AND pre-triggering the next AI calculation in the background.
     """
-    from app.services.recommendation_engine import recommendation_engine
-    await recommendation_engine.clear_cache(user_id)
-    return {"success": True, "message": f"Cache invalidated for user {user_id}"}
+    from app.services.recommendation_engine import clear_cache, get_personalized_recommendations
+    
+    # 1. Clear current cache
+    await clear_cache(user_id)
+    
+    # 2. Trigger fresh generation in background
+    background_tasks.add_task(get_personalized_recommendations, user_id)
+    
+    logger.info(f"Background refresh triggered for user {user_id}")
+    return {"success": True, "message": f"Cache invalidated and background refresh started for user {user_id}"}
 
 @router.post("/test")
 async def chat_test(data: Dict):
@@ -63,11 +74,18 @@ async def chat_test(data: Dict):
 @router.get("/trending")
 async def get_trending_courses():
     """
-    Fallback endpoint for non-personalized trending courses.
+    Returns globally trending courses based on popularity and authority.
     """
-    # This could call a simplified version of the engine or just hardcoded logic
-    return {
-        "success": True,
-        "data": [],
-        "note": "Non-personalized trending logic to be implemented"
-    }
+    from app.services.recommendation_engine import get_trending_recommendations
+    try:
+        trending = await get_trending_recommendations()
+        return {
+            "success": True,
+            "data": trending
+        }
+    except Exception as e:
+        logger.error(f"Failed to get trending courses: {str(e)}")
+        return {
+            "success": False,
+            "message": "Error fetching trending courses"
+        }

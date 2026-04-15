@@ -320,6 +320,11 @@ func handleAttendanceError(c *fiber.Ctx, err error) error {
 			"success": false,
 			"error":   "Attendance already recorded",
 		})
+	case errors.Is(err, attendanceApp.ErrSharedDeviceViolation):
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+			"success": false,
+			"error":   "Shared device detected. You cannot scan for multiple students using the same device.",
+		})
 	default:
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"success": false,

@@ -16,13 +16,15 @@ type CartHandler struct {
 	cartService    *cartApp.Service
 	paymentService *payment.Service
 	authClient     *authclient.Client
+	internalSecret string
 }
 
-func NewCartHandler(cartSvc *cartApp.Service, paymentSvc *payment.Service, auth *authclient.Client) *CartHandler {
+func NewCartHandler(cartSvc *cartApp.Service, paymentSvc *payment.Service, auth *authclient.Client, secret string) *CartHandler {
 	return &CartHandler{
 		cartService:    cartSvc,
 		paymentService: paymentSvc,
 		authClient:     auth,
+		internalSecret: secret,
 	}
 }
 
@@ -34,6 +36,9 @@ func (h *CartHandler) RegisterRoutes(router fiber.Router) {
 	cart.Get("/", h.GetCart)
 	cart.Delete("/clear", h.ClearCart)
 	cart.Post("/checkout", h.CheckoutCart)
+
+	internal := router.Group("/internal", middleware.InternalOnly(h.internalSecret))
+	internal.Get("/cart/:userId", h.InternalGetCart)
 }
 
 func (h *CartHandler) AddToCart(c *fiber.Ctx) error {
@@ -110,13 +115,24 @@ func (h *CartHandler) GetCart(c *fiber.Ctx) error {
 
 	var items []dto.CartItemResponse
 	for _, item := range cart.Items {
-		items = append(items, dto.CartItemResponse{
+		course, err := h.cartService.GetCourseInfo(c.Context(), item.CourseID.String())
+
+		resp := dto.CartItemResponse{
 			ID:          item.ID.String(),
 			CourseID:    item.CourseID.String(),
 			BillingType: string(item.BillingType),
 			PriceCents:  item.PriceCents,
 			Currency:    item.Currency,
-		})
+		}
+
+		if err == nil && course != nil {
+			resp.Title = course.Title
+			resp.CourseImage = course.CourseImage
+			resp.TeacherName = course.TeacherName
+			resp.TeacherProfileImg = course.TeacherProfileImg
+		}
+
+		items = append(items, resp)
 	}
 
 	return c.JSON(fiber.Map{
@@ -204,4 +220,42 @@ func (h *CartHandler) defaultIfEmpty(val, def string) string {
 		return def
 	}
 	return val
+}
+
+func (h *CartHandler) InternalGetCart(c *fiber.Ctx) error {
+	userIDStr := c.Params("userId")
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"success": false,
+			"error":   "Invalid user ID",
+		})
+	}
+
+	cart, err := h.cartService.GetCart(c.Context(), userID)
+	if err != nil {
+		// Return empty list if no cart
+		return c.JSON(fiber.Map{
+			"success": true,
+			"data":    []string{},
+		})
+	}
+
+	subjectMap := make(map[string]bool)
+	var subjects []string
+
+	for _, item := range cart.Items {
+		course, err := h.cartService.GetCourseInfo(c.Context(), item.CourseID.String())
+		if err == nil && course.SubjectName != "" {
+			if !subjectMap[course.SubjectName] {
+				subjectMap[course.SubjectName] = true
+				subjects = append(subjects, course.SubjectName)
+			}
+		}
+	}
+
+	return c.JSON(fiber.Map{
+		"success": true,
+		"data":    subjects,
+	})
 }

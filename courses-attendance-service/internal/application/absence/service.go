@@ -123,12 +123,15 @@ func (s *Service) CreateRequest(ctx context.Context, input CreateRequestInput) (
 		return nil, err
 	}
 
-	// Emit event
 	s.events.EmitAbsenceRequested(ctx, events.AbsenceRequestedPayload{
-		RequestID: req.ID,
-		LessonID:  req.LessonID,
-		StudentID: req.StudentID,
-		Reason:    req.ReasonText,
+		RequestID:   req.ID,
+		LessonID:    req.LessonID,
+		LessonTitle: lesson.Title,
+		CourseID:    lesson.CourseID,
+		CourseTitle: "", // Resovled by notification service if needed
+		StudentID:   req.StudentID,
+		TeacherID:   uuid.Nil, // Resolved by notification service if needed
+		Reason:      req.ReasonText,
 	})
 
 	return req, nil

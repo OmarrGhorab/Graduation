@@ -57,3 +57,17 @@ func Authenticate(authClient *authclient.Client) fiber.Handler {
 		return c.Next()
 	}
 }
+
+// InternalOnly ensures the request has a valid internal service secret
+func InternalOnly(secret string) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		providedSecret := c.Get("x-internal-service-secret")
+		if providedSecret == "" || providedSecret != secret {
+			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+				"success": false,
+				"error":   "Forbidden: Internal use only",
+			})
+		}
+		return c.Next()
+	}
+}

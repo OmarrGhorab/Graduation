@@ -128,3 +128,7 @@ func (s *Service) GetCartTotal(ctx context.Context, userID uuid.UUID) (int64, st
 
 	return total, currency, nil
 }
+
+func (s *Service) GetCourseInfo(ctx context.Context, courseID string) (*coursesclient.CourseInfo, error) {
+	return s.coursesClient.GetCourseByID(ctx, courseID)
+}

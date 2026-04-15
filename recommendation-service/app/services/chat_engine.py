@@ -162,6 +162,33 @@ class ChatEngine:
 
         return await asyncio.to_thread(_db_work)
 
+    async def update_session(self, user_id: str, chat_id: str, title: str) -> bool:
+        """Updates a chat session title."""
+
+        def _db_work():
+            db = SessionLocal()
+            try:
+                session = (
+                    db.query(ChatSession)
+                    .filter(
+                        ChatSession.id == chat_id,
+                        ChatSession.user_id == user_id,
+                        ChatSession.is_active == True,
+                    )
+                    .first()
+                )
+                if not session:
+                    return False
+
+                session.title = title
+                session.updated_at = datetime.utcnow()
+                db.commit()
+                return True
+            finally:
+                db.close()
+
+        return await asyncio.to_thread(_db_work)
+
     async def get_chat_history(
         self, user_id: str, chat_id: str, page: int = 1, limit: int = 50
     ) -> Optional[dict]:
@@ -204,7 +231,9 @@ class ChatEngine:
                         {
                             "id": str(m.id),
                             "role": m.role,
-                            "content": m.content,
+                            "content": m.content.split("] ", 1)[-1] if m.role == "user" and m.content.startswith("[User provided") else m.content,
+                            "mediaUrl": m.media_url,
+                            "mediaType": m.media_type,
                             "createdAt": m.created_at.isoformat(),
                         }
                         for m in messages

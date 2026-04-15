@@ -3,11 +3,14 @@ package course
 import (
 	"context"
 	"errors"
+	"mime/multipart"
 
 	courseDomain "github.com/OmarrGhorab/courses-attendance-service/internal/domain/course"
 	"github.com/OmarrGhorab/courses-attendance-service/internal/domain/events"
 	"github.com/OmarrGhorab/courses-attendance-service/internal/infrastructure/clock"
+	"github.com/OmarrGhorab/courses-attendance-service/internal/infrastructure/aiclient"
 	"github.com/OmarrGhorab/courses-attendance-service/internal/infrastructure/authclient"
+	"github.com/OmarrGhorab/courses-attendance-service/internal/infrastructure/cloudinary"
 	"github.com/OmarrGhorab/courses-attendance-service/internal/infrastructure/notificationevents"
 	"github.com/OmarrGhorab/courses-attendance-service/internal/infrastructure/persistence/postgres"
 	"github.com/google/uuid"
@@ -20,6 +23,7 @@ var (
 	ErrAlreadyEnrolled    = errors.New("student already enrolled in this course")
 	ErrAssistantExists    = errors.New("assistant already added to this course")
 	ErrEnrollmentNotFound = errors.New("enrollment not found")
+	ErrInvalidFile        = errors.New("invalid file provided")
 )
 
 // Service handles course-related business logic
@@ -31,8 +35,10 @@ type Service struct {
 	events          *notificationevents.EventDispatcher
 	clock           clock.Clock
 	teacherRatingRepo *postgres.TeacherRatingRepository
-	progressRepo    *postgres.ProgressSnapshotRepository
-	authClient      *authclient.Client
+	progressRepo      *postgres.ProgressSnapshotRepository
+	authClient        *authclient.Client
+	aiClient          *aiclient.Client
+	cloudinaryClient  *cloudinary.Client
 }
 
 // ChildAnalytics represents a summary of a child's progress for a parent
@@ -88,6 +94,8 @@ func NewService(
 	teacherRatingRepo *postgres.TeacherRatingRepository,
 	progressRepo *postgres.ProgressSnapshotRepository,
 	authClient *authclient.Client,
+	aiClient *aiclient.Client,
+	cloudinaryClient *cloudinary.Client,
 	clk clock.Clock,
 ) *Service {
 	return &Service{
@@ -99,6 +107,8 @@ func NewService(
 		teacherRatingRepo: teacherRatingRepo,
 		progressRepo:      progressRepo,
 		authClient:        authClient,
+		aiClient:          aiClient,
+		cloudinaryClient:  cloudinaryClient,
 		clock:             clk,
 	}
 }
@@ -123,6 +133,8 @@ type CreateCourseInput struct {
 	BillingType             courseDomain.BillingType
 	FreeTrialLessons        int
 	AttendanceWeight        float64
+	PreviewVideoURL         string
+	PreviewVideoPublicID    string
 }
 
 // CreateCourse creates a new course
@@ -174,6 +186,8 @@ func (s *Service) CreateCourse(ctx context.Context, input CreateCourseInput) (*c
 		FreeTrialLessons:        input.FreeTrialLessons,
 		Status:                  courseDomain.CourseStatusActive,
 		AttendanceWeight:        input.AttendanceWeight,
+		PreviewVideoURL:         input.PreviewVideoURL,
+		PreviewVideoPublicID:    input.PreviewVideoPublicID,
 		CreatedAt:               s.clock.Now(),
 		UpdatedAt:               s.clock.Now(),
 	}
@@ -194,15 +208,35 @@ func (s *Service) GetCourse(ctx context.Context, id uuid.UUID) (*courseDomain.Co
 	if course == nil {
 		return nil, ErrCourseNotFound
 	}
+	
+	count, _ := s.enrollmentRepo.CountByCourseID(ctx, id)
+	course.EnrollmentCount = int(count)
+	
 	return course, nil
 }
 
 // ListCourses returns courses, optionally filtered by subject
 func (s *Service) ListCourses(ctx context.Context, subjectID *uuid.UUID) ([]courseDomain.Course, error) {
+	var courses []courseDomain.Course
+	var err error
+	
 	if subjectID != nil {
-		return s.courseRepo.GetBySubjectID(ctx, *subjectID)
+		courses, err = s.courseRepo.GetBySubjectID(ctx, *subjectID)
+	} else {
+		courses, err = s.courseRepo.GetAll(ctx)
 	}
-	return s.courseRepo.GetAll(ctx)
+	
+	if err != nil {
+		return nil, err
+	}
+	
+	// Populate counts for all courses
+	for i := range courses {
+		count, _ := s.enrollmentRepo.CountByCourseID(ctx, courses[i].ID)
+		courses[i].EnrollmentCount = int(count)
+	}
+	
+	return courses, nil
 }
 
 // UpdateCourseInput represents input for updating a course
@@ -218,6 +252,8 @@ type UpdateCourseInput struct {
 	FreeTrialLessons        *int
 	BillingType             *courseDomain.BillingType
 	Status                  *courseDomain.CourseStatus
+	PreviewVideoURL         *string
+	PreviewVideoPublicID    *string
 }
 
 // UpdateCourse updates a course (teacher only)
@@ -266,6 +302,12 @@ func (s *Service) UpdateCourse(ctx context.Context, courseID uuid.UUID, teacherI
 	}
 	if input.Status != nil {
 		course.Status = *input.Status
+	}
+	if input.PreviewVideoURL != nil {
+		course.PreviewVideoURL = *input.PreviewVideoURL
+	}
+	if input.PreviewVideoPublicID != nil {
+		course.PreviewVideoPublicID = *input.PreviewVideoPublicID
 	}
 	course.UpdatedAt = s.clock.Now()
 
@@ -319,6 +361,11 @@ func (s *Service) EnrollStudent(ctx context.Context, courseID, studentID uuid.UU
 			"student_id":  studentID.String(),
 		},
 	})
+
+	// Pre-trigger recommendation refresh in background
+	if s.aiClient != nil {
+		go s.aiClient.InvalidateRecommendationCache(context.Background(), studentID.String())
+	}
 
 	return enrollment, nil
 }
@@ -735,4 +782,34 @@ func (s *Service) GetParentAnalytics(ctx context.Context, parentID uuid.UUID) ([
 	}
 
 	return result, nil
+}
+
+func (s *Service) GetTeacherAuthority(ctx context.Context, teacherID uuid.UUID) (int, error) {
+	count, err := s.enrollmentRepo.CountByTeacherID(ctx, teacherID)
+	return int(count), err
+}
+
+// UploadCourseImage uploads a course image to Cloudinary and returns the URL
+func (s *Service) UploadCourseImage(ctx context.Context, teacherID uuid.UUID, file multipart.File, filename string) (string, error) {
+	result, err := s.cloudinaryClient.UploadImage(ctx, file, filename)
+	if err != nil {
+		return "", err
+	}
+
+	return result.URL, nil
+}
+
+// UploadCourseVideo uploads a course preview video to Cloudinary and returns the URL and PublicID
+func (s *Service) UploadCourseVideo(ctx context.Context, teacherID uuid.UUID, file multipart.File, filename string) (string, string, error) {
+	result, err := s.cloudinaryClient.UploadVideo(ctx, file, filename)
+	if err != nil {
+		return "", "", err
+	}
+
+	url := result.StreamingURL
+	if url == "" {
+		url = result.URL
+	}
+
+	return url, result.PublicID, nil
 }

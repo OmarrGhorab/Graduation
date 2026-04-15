@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, File, UploadFile, 
 from starlette.responses import StreamingResponse
 
 from app.api.dependencies import get_current_user
-from app.schemas.chat import CreateChatRequest, SendMessageRequest
+from app.schemas.chat import CreateChatRequest, SendMessageRequest, UpdateChatRequest
 from app.services.chat_engine import chat_engine
 import logging
 
@@ -56,6 +56,19 @@ async def delete_chat(chat_id: str, user=Depends(get_current_user)):
     if not deleted:
         raise HTTPException(status_code=404, detail="Chat session not found")
     return {"success": True, "message": "Chat session deleted"}
+
+
+@router.patch("/{chat_id}")
+async def update_chat(
+    chat_id: str,
+    body: UpdateChatRequest,
+    user=Depends(get_current_user),
+):
+    """Update a chat session title."""
+    updated = await chat_engine.update_session(user["user_id"], chat_id, body.title)
+    if not updated:
+        raise HTTPException(status_code=404, detail="Chat session not found")
+    return {"success": True, "message": "Chat title updated"}
 
 
 # ------------------------------------------------------------------ #

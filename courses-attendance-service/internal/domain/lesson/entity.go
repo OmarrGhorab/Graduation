@@ -32,6 +32,7 @@ type Lesson struct {
 	// Lesson info
 	Title        string `gorm:"type:varchar(255);not null"`
 	Description  string `gorm:"type:text"`
+	ThumbnailURL string `gorm:"type:text"`
 	LessonNumber int    `gorm:"not null"`
 
 	// Scheduling (all UTC)

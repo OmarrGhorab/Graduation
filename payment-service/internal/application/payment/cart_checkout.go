@@ -123,7 +123,7 @@ func (s *Service) CheckoutCart(ctx context.Context, opts CheckoutCartOptions) (s
 	var paymentURL string
 	
 	// Handle One-Click or Regular flow
-	if opts.PaymentMethod == "CARD" && opts.PaymentMethodID != uuid.Nil {
+	if (opts.PaymentMethod == "CARD" || opts.PaymentMethod == "TOKEN") && opts.PaymentMethodID != uuid.Nil {
 		pm, err := s.paymentMethodRepo.GetByID(ctx, opts.PaymentMethodID)
 		if err != nil {
 			return "", uuid.Nil, fmt.Errorf("payment method not found: %w", err)
@@ -144,7 +144,9 @@ func (s *Service) CheckoutCart(ctx context.Context, opts CheckoutCartOptions) (s
 
 		// Update order status if immediately known
 		if bool(resp.Success) {
-			s.repo.UpdateOrderStatus(ctx, order.ID, payment.OrderStatusPaid, nil)
+			if err := s.repo.UpdateOrderStatus(ctx, order.ID, payment.OrderStatusPaid, nil); err == nil {
+				s.completeSuccessfulPayment(ctx, order, totalAmount)
+			}
 		} else if !bool(resp.Pending) {
 			s.repo.UpdateOrderStatus(ctx, order.ID, payment.OrderStatusFailed, nil)
 		}

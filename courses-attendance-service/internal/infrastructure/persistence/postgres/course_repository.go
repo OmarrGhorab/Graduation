@@ -140,6 +140,23 @@ func (r *EnrollmentRepository) Update(ctx context.Context, e *course.Enrollment)
 	return r.db.WithContext(ctx).Save(e).Error
 }
 
+func (r *EnrollmentRepository) CountByCourseID(ctx context.Context, courseID uuid.UUID) (int64, error) {
+	var count int64
+	err := r.db.WithContext(ctx).Model(&course.Enrollment{}).Where("course_id = ? AND is_active = true", courseID).Count(&count).Error
+	return count, err
+}
+
+func (r *EnrollmentRepository) CountByTeacherID(ctx context.Context, teacherID uuid.UUID) (int64, error) {
+	var count int64
+	// Total UNIQUE students across all courses of this teacher
+	err := r.db.WithContext(ctx).
+		Model(&course.Enrollment{}).
+		Joins("JOIN courses ON courses.id = enrollments.course_id").
+		Where("courses.teacher_id = ? AND enrollments.is_active = true", teacherID).
+		Count(&count).Error
+	return count, err
+}
+
 func (r *EnrollmentRepository) CreatePeriod(ctx context.Context, p *course.EnrollmentPeriod) error {
 	return r.db.WithContext(ctx).Create(p).Error
 }

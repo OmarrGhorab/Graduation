@@ -26,13 +26,17 @@ func NewClient(baseURL, internalSecret string) *Client {
 }
 
 type CourseInfo struct {
-	ID          string  `json:"id"`
-	Title       string  `json:"title"`
-	Price       float64 `json:"price"`
-	Currency    string  `json:"currency"`
-	IsPaid      bool    `json:"isPaid"`
-	TeacherID   string  `json:"teacherId"`
-	BillingType string  `json:"billingType"`
+	ID                string  `json:"id"`
+	Title             string  `json:"title"`
+	SubjectName       string  `json:"subjectName"`
+	Price             float64 `json:"price"`
+	Currency          string  `json:"currency"`
+	IsPaid            bool    `json:"isPaid"`
+	TeacherID         string  `json:"teacherId"`
+	TeacherName       string  `json:"teacherName"`
+	TeacherProfileImg string  `json:"teacherProfileImg"`
+	CourseImage       string  `json:"courseImage"`
+	BillingType       string  `json:"billingType"`
 }
 
 func (c *Client) GetCourseByID(ctx context.Context, courseID string) (*CourseInfo, error) {

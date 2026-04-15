@@ -10,11 +10,15 @@ type RemoveFromCartRequest struct {
 }
 
 type CartItemResponse struct {
-	ID          string `json:"id"`
-	CourseID    string `json:"courseId"`
-	BillingType string `json:"billingType"`
-	PriceCents  int64  `json:"priceCents"`
-	Currency    string `json:"currency"`
+	ID                string `json:"id"`
+	CourseID          string `json:"courseId"`
+	Title             string `json:"title"`
+	CourseImage       string `json:"courseImage"`
+	TeacherName       string `json:"teacherName"`
+	TeacherProfileImg string `json:"teacherProfileImg"`
+	BillingType       string `json:"billingType"`
+	PriceCents        int64  `json:"priceCents"`
+	Currency          string `json:"currency"`
 }
 
 type CartResponse struct {
@@ -25,7 +29,7 @@ type CartResponse struct {
 }
 
 type CheckoutCartRequest struct {
-	PaymentMethod string `json:"paymentMethod" validate:"required,oneof=CARD WALLET"`
+	PaymentMethod string `json:"paymentMethod" validate:"required,oneof=CARD WALLET TOKEN"`
 	PhoneNumber   string `json:"phoneNumber" validate:"required"`
 	FirstName     string `json:"firstName" validate:"required"`
 	LastName      string `json:"lastName" validate:"required"`

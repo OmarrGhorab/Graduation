@@ -200,8 +200,9 @@ type UserInfo struct {
 	Name       string `json:"name"`
 	Email      string `json:"email"`
 	Role       string `json:"role"`
-	ProfileImg string `json:"profileImg"`
-	Username   string `json:"username"`
+	ProfileImg string   `json:"profileImg"`
+	Username   string   `json:"username"`
+	Interests  []string `json:"interests"`
 }
 
 // ChildInfo represents information about a child linked to a parent
