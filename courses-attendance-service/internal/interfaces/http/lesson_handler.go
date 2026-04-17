@@ -167,7 +167,10 @@ func (h *LessonHandler) GetLesson(c *fiber.Ctx) error {
 		})
 	}
 
-	lesson, err := h.lessonService.GetLesson(c.Context(), lessonID)
+	userID, _ := getUserIDFromContext(c)
+	userRole := c.Locals("userRole").(string)
+
+	lesson, err := h.lessonService.GetLesson(c.Context(), lessonID, userID, userRole)
 	if err != nil {
 		return handleLessonServiceError(c, err)
 	}
@@ -453,7 +456,10 @@ func (h *LessonHandler) UpdateLessonMaterials(c *fiber.Ctx) error {
 	}
 
 	// Get lesson
-	lesson, err := h.lessonService.GetLesson(c.Context(), lessonID)
+	userID, _ := getUserIDFromContext(c)
+	userRole := c.Locals("userRole").(string)
+
+	lesson, err := h.lessonService.GetLesson(c.Context(), lessonID, userID, userRole)
 	if err != nil {
 		return handleLessonServiceError(c, err)
 	}
@@ -515,7 +521,10 @@ func (h *LessonHandler) UploadVideo(c *fiber.Ctx) error {
 	}
 
 	// Get lesson
-	lesson, err := h.lessonService.GetLesson(c.Context(), lessonID)
+	userID, _ := getUserIDFromContext(c)
+	userRole := c.Locals("userRole").(string)
+
+	lesson, err := h.lessonService.GetLesson(c.Context(), lessonID, userID, userRole)
 	if err != nil {
 		return handleLessonServiceError(c, err)
 	}
@@ -612,7 +621,10 @@ func (h *LessonHandler) UploadDocument(c *fiber.Ctx) error {
 	}
 
 	// Get lesson
-	lesson, err := h.lessonService.GetLesson(c.Context(), lessonID)
+	userID, _ := getUserIDFromContext(c)
+	userRole := c.Locals("userRole").(string)
+
+	lesson, err := h.lessonService.GetLesson(c.Context(), lessonID, userID, userRole)
 	if err != nil {
 		return handleLessonServiceError(c, err)
 	}
@@ -699,7 +711,10 @@ func (h *LessonHandler) DeleteVideo(c *fiber.Ctx) error {
 	}
 
 	// Get lesson
-	lesson, err := h.lessonService.GetLesson(c.Context(), lessonID)
+	userID, _ := getUserIDFromContext(c)
+	userRole := c.Locals("userRole").(string)
+
+	lesson, err := h.lessonService.GetLesson(c.Context(), lessonID, userID, userRole)
 	if err != nil {
 		return handleLessonServiceError(c, err)
 	}

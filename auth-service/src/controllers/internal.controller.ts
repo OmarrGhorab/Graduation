@@ -316,3 +316,51 @@ export const getParentsInternal = async (
     next(err);
   }
 };
+
+/**
+ * Internal endpoint to search users by name, username or email
+ */
+export const searchUsersInternal = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const { query, role } = req.query;
+
+    if (!query) {
+       return res.status(200).json({ success: true, data: [] });
+    }
+
+    const users = await prisma.user.findMany({
+      where: {
+        AND: [
+          role ? { role: role as any } : {},
+          {
+            OR: [
+              { name: { contains: query as string, mode: 'insensitive' } },
+              { username: { contains: query as string, mode: 'insensitive' } },
+              { email: { contains: query as string, mode: 'insensitive' } },
+            ]
+          }
+        ]
+      },
+      select: {
+        id: true,
+        name: true,
+        username: true,
+        email: true,
+        profileImg: true,
+        role: true,
+      },
+      take: 20
+    });
+
+    res.status(200).json({
+      success: true,
+      data: users
+    });
+  } catch (err) {
+    next(err);
+  }
+};

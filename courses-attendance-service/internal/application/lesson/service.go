@@ -146,8 +146,8 @@ func (s *Service) CreateLesson(ctx context.Context, teacherID uuid.UUID, input C
 	return lesson, nil
 }
 
-// GetLesson retrieves a lesson by ID
-func (s *Service) GetLesson(ctx context.Context, id uuid.UUID) (*lessonDomain.Lesson, error) {
+// GetLesson retrieves a lesson by ID, with data redaction for non-enrolled students
+func (s *Service) GetLesson(ctx context.Context, id uuid.UUID, userID uuid.UUID, userRole string) (*lessonDomain.Lesson, error) {
 	lesson, err := s.lessonRepo.GetByID(ctx, id)
 	if err != nil {
 		return nil, err
@@ -155,63 +155,118 @@ func (s *Service) GetLesson(ctx context.Context, id uuid.UUID) (*lessonDomain.Le
 	if lesson == nil {
 		return nil, ErrLessonNotFound
 	}
+
+	// Higher roles see everything
+	if userRole == "TEACHER" || userRole == "INSTRUCTOR" || userRole == "ADMIN" {
+		return lesson, nil
+	}
+
+	// Check access
+	hasAccess := false
+	if lesson.IsFree {
+		hasAccess = true
+	} else {
+		// Check enrollment
+		enrollment, err := s.enrollmentRepo.GetByCourseAndUser(ctx, lesson.CourseID, userID)
+		if err == nil && enrollment != nil {
+			// Check if monthly
+			course, err := s.courseRepo.GetByID(ctx, lesson.CourseID)
+			if err == nil && course != nil {
+				if course.BillingType != "MONTHLY" {
+					hasAccess = true
+				} else {
+					paidPeriods, err := s.enrollmentRepo.GetPeriods(ctx, enrollment.ID)
+					if err == nil {
+						periodKey := lesson.ScheduledAt.Format("2006-01")
+						for _, p := range paidPeriods {
+							if p.PeriodKey == periodKey {
+								hasAccess = true
+								break
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// If no access, redact sensitive data
+	if !hasAccess {
+		lesson.VideoURL = ""
+		lesson.VideoPublicID = ""
+		lesson.MaterialsURL = ""
+		lesson.LocationLat = nil
+		lesson.LocationLng = nil
+		lesson.GeofenceRadiusM = nil
+	}
+
 	return lesson, nil
 }
 
-// GetCourseLessons retrieves all lessons for a course, filtered by payment periods for students
+// GetCourseLessons retrieves all lessons for a course, with data redaction for non-enrolled students
 func (s *Service) GetCourseLessons(ctx context.Context, courseID uuid.UUID, userID uuid.UUID, userRole string) ([]lessonDomain.Lesson, error) {
 	lessons, err := s.lessonRepo.GetByCourseID(ctx, courseID)
 	if err != nil {
 		return nil, err
 	}
 
-	// Teachers and Instructors see everything
+	// Higher roles see everything
 	if userRole == "TEACHER" || userRole == "INSTRUCTOR" || userRole == "ADMIN" {
 		return lessons, nil
 	}
 
+	// Check enrollment
+	enrollment, err := s.enrollmentRepo.GetByCourseAndUser(ctx, courseID, userID)
+	isEnrolled := err == nil && enrollment != nil
+
 	// Check if this course has monthly billing
 	course, err := s.courseRepo.GetByID(ctx, courseID)
 	if err != nil || course == nil {
-		return lessons, nil // Fallback to all if course info missing
+		return lessons, nil 
 	}
 
-	if course.BillingType != "MONTHLY" {
-		return lessons, nil // One-time courses allow access to all content
-	}
-
-	// For students in monthly courses, filter content by paid periods
-	enrollment, err := s.enrollmentRepo.GetByCourseAndUser(ctx, courseID, userID)
-	if err != nil || enrollment == nil {
-		return []lessonDomain.Lesson{}, nil
-	}
-
-	paidPeriods, err := s.enrollmentRepo.GetPeriods(ctx, enrollment.ID)
-	if err != nil {
-		return nil, err
-	}
-
+	// Pre-fetch paid periods if enrolled and monthly
 	paidMap := make(map[string]bool)
-	for _, p := range paidPeriods {
-		paidMap[p.PeriodKey] = true
+	if isEnrolled && course.BillingType == "MONTHLY" {
+		paidPeriods, err := s.enrollmentRepo.GetPeriods(ctx, enrollment.ID)
+		if err == nil {
+			for _, p := range paidPeriods {
+				paidMap[p.PeriodKey] = true
+			}
+		}
 	}
 
-	var filtered []lessonDomain.Lesson
+	var processed []lessonDomain.Lesson
 	for _, l := range lessons {
-		// Free lessons are always visible
+		hasAccess := false
+		
 		if l.IsFree {
-			filtered = append(filtered, l)
-			continue
+			hasAccess = true
+		} else if isEnrolled {
+			if course.BillingType != "MONTHLY" {
+				hasAccess = true
+			} else {
+				periodKey := l.ScheduledAt.Format("2006-01")
+				if paidMap[periodKey] {
+					hasAccess = true
+				}
+			}
 		}
 
-		// Check if the lesson's month is paid
-		periodKey := l.ScheduledAt.Format("2006-01")
-		if paidMap[periodKey] {
-			filtered = append(filtered, l)
+		// If no access, redact sensitive data but keep the lesson in the list
+		if !hasAccess {
+			l.VideoURL = ""
+			l.VideoPublicID = ""
+			l.MaterialsURL = ""
+			l.LocationLat = nil
+			l.LocationLng = nil
+			l.GeofenceRadiusM = nil
 		}
+		
+		processed = append(processed, l)
 	}
 
-	return filtered, nil
+	return processed, nil
 }
 
 // StartLesson starts a lesson (sets status to LIVE)

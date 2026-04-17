@@ -281,3 +281,34 @@ func (c *Client) GetChildren(ctx context.Context, parentID string) ([]ChildInfo,
 
 	return result.Data, nil
 }
+// SearchUsers searches for users by name, username or email
+func (c *Client) SearchUsers(ctx context.Context, query string, role string) ([]UserInfo, error) {
+	url := fmt.Sprintf("%s/api/v1/internal/users/search?query=%s&role=%s", c.baseURL, query, role)
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	httpReq.Header.Set("x-internal-service-secret", c.internalSecret)
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, ErrAuthServiceUnavailable
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, ErrInvalidResponse
+	}
+
+	var result struct {
+		Success bool       `json:"success"`
+		Data    []UserInfo `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, ErrInvalidResponse
+	}
+
+	return result.Data, nil
+}

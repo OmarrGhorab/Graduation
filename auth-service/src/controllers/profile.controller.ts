@@ -630,3 +630,46 @@ export const getPreferences = async (req: Request, res: Response, next: NextFunc
     next(err);
   }
 };
+
+/**
+ * Public search for teachers
+ * Used by frontend to search for teacher profiles
+ */
+export const searchTeachersPublic = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { query } = req.query;
+
+    if (!query || typeof query !== "string") {
+      return res.status(200).json({ success: true, data: [] });
+    }
+
+    const teachers = await prisma.user.findMany({
+      where: {
+        AND: [
+          { role: "TEACHER" },
+          {
+            OR: [
+              { name: { contains: query, mode: "insensitive" } },
+              { username: { contains: query, mode: "insensitive" } },
+            ],
+          },
+        ],
+      },
+      select: {
+        id: true,
+        name: true,
+        username: true,
+        profileImg: true,
+        bio: true,
+      },
+      take: 20,
+    });
+
+    res.status(200).json({
+      success: true,
+      data: teachers,
+    });
+  } catch (err) {
+    next(err);
+  }
+};

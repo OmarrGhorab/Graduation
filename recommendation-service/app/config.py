@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     
     # Cache settings
     RECOMMENDATION_CACHE_TTL: int = 21600  # 6 hours in seconds
+    TRENDING_CACHE_TTL: int = 3600        # 1 hour in seconds
 
     # Chatbot Config
     CHATBOT_MAX_CONTEXT_MESSAGES: int = 20    # messages sent to AI per request

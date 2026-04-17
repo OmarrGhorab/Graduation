@@ -44,15 +44,17 @@ type Client struct {
 	hmacSecret          string
 	httpClient          *http.Client
 	baseURL             string
+	redirectURL         string
 }
 
-func NewClient(apiKey, cardID, walletID, iframeID, hmacSecret string) *Client {
+func NewClient(apiKey, cardID, walletID, iframeID, hmacSecret, redirectURL string) *Client {
 	return &Client{
 		apiKey:              apiKey,
 		cardIntegrationID:   cardID,
 		walletIntegrationID: walletID,
 		iframeID:            iframeID,
 		hmacSecret:          hmacSecret,
+		redirectURL:         redirectURL,
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
@@ -150,6 +152,7 @@ func (c *Client) CreatePaymentKey(ctx context.Context, authToken string, orderID
 		"integration_id":       integrationID,
 		"lock_order_when_paid": "false",
 		"tokenization":         tokenization,
+		"redirection_url":      c.redirectURL,
 	})
 
 	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewBuffer(reqBody))

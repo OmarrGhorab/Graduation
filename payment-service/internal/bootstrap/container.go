@@ -119,6 +119,7 @@ func (c *Container) initInfrastructure() {
 		c.Config.Paymob.WalletIntegrationID,
 		c.Config.Paymob.IframeID,
 		c.Config.Paymob.HMACSecret,
+		c.Config.Paymob.RedirectURL,
 	)
 	c.KafkaProducer = kafka.NewProducer(c.Config.Kafka.Brokers)
 	c.EmailService = notification.NewEmailService(

@@ -64,6 +64,66 @@ func (r *CourseRepository) GetAll(ctx context.Context) ([]course.Course, error) 
 	return courses, err
 }
 
+func (r *CourseRepository) ListCoursesWithFilters(ctx context.Context, filters map[string]interface{}, limit, offset int) ([]course.Course, int64, error) {
+	var courses []course.Course
+	var total int64
+
+	query := r.db.WithContext(ctx).Model(&course.Course{}).Preload("Subject")
+
+	// Apply filters
+	if subjectID, ok := filters["subject_id"].(uuid.UUID); ok {
+		query = query.Where("subject_id = ?", subjectID)
+	}
+	if subjectName, ok := filters["subject_name"].(string); ok && subjectName != "" {
+		query = query.Joins("JOIN subjects ON subjects.id = courses.subject_id").
+			Where("subjects.name ILIKE ?", "%"+subjectName+"%")
+	}
+	if teacherIDs, ok := filters["teacher_ids"].([]uuid.UUID); ok && len(teacherIDs) > 0 {
+		query = query.Where("teacher_id IN ?", teacherIDs)
+	} else if teacherID, ok := filters["teacher_id"].(uuid.UUID); ok {
+		query = query.Where("teacher_id = ?", teacherID)
+	}
+	if deliveryType, ok := filters["delivery_type"].(string); ok && deliveryType != "" {
+		query = query.Where("delivery_type = ?", deliveryType)
+	}
+	if isPaid, ok := filters["is_paid"].(bool); ok {
+		query = query.Where("is_paid = ?", isPaid)
+	}
+	if billingType, ok := filters["billing_type"].(string); ok && billingType != "" {
+		query = query.Where("billing_type = ?", billingType)
+	}
+	if status, ok := filters["status"].(string); ok && status != "" {
+		query = query.Where("status = ?", status)
+	}
+	if search, ok := filters["search"].(string); ok && search != "" {
+		searchTerm := "%" + search + "%"
+		query = query.Where("title ILIKE ? OR description ILIKE ?", searchTerm, searchTerm)
+	}
+	if minPrice, ok := filters["min_price"].(float64); ok {
+		query = query.Where("price >= ?", minPrice)
+	}
+	if maxPrice, ok := filters["max_price"].(float64); ok {
+		query = query.Where("price <= ?", maxPrice)
+	}
+
+	// Count total before pagination
+	if err := query.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	// Apply pagination and sorting
+	query = query.Order("created_at DESC")
+	if limit > 0 {
+		query = query.Limit(limit)
+	}
+	if offset > 0 {
+		query = query.Offset(offset)
+	}
+
+	err := query.Find(&courses).Error
+	return courses, total, err
+}
+
 // SubjectRepository implements subject data access
 type SubjectRepository struct {
 	db *Database

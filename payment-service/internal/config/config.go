@@ -57,6 +57,7 @@ type PaymobConfig struct {
 	WalletIntegrationID string
 	IframeID            string
 	HMACSecret          string
+	RedirectURL         string
 }
 
 type CoursesConfig struct {
@@ -106,6 +107,7 @@ func Load() (*Config, error) {
 			WalletIntegrationID: getEnv("PAYMOB_WALLET_INTEGRATION_ID", ""),
 			IframeID:            getEnv("PAYMOB_IFRAME_ID", ""),
 			HMACSecret:          getEnv("PAYMOB_HMAC_SECRET", ""),
+			RedirectURL:         getEnv("PAYMOB_REDIRECT_URL", ""),
 		},
 		Courses: CoursesConfig{
 			ServiceURL: getEnv("COURSES_SERVICE_URL", "http://localhost:8085"),

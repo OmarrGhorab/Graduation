@@ -19,6 +19,67 @@ const (
 // CompletionThreshold is the percentage of video watched to count as "completed"
 const CompletionThreshold = 90.0
 
+// PreviewWatchEvent represents a single heartbeat for preview/trailer videos (before purchase)
+type PreviewWatchEvent struct {
+	ID             uuid.UUID  `gorm:"type:uuid;primary_key;default:gen_random_uuid()"`
+	CourseID       uuid.UUID  `gorm:"type:uuid;not null"` // Course being previewed
+	UserID         uuid.UUID  `gorm:"type:uuid;not null"`
+	WatchedSeconds int        `gorm:"not null;default:0"`
+	LastPosition   int        `gorm:"not null;default:0"`
+	Completed      bool       `gorm:"not null;default:false"`
+	DeviceType     DeviceType `gorm:"type:varchar(20);not null;default:'DESKTOP'"`
+	CreatedAt      time.Time  `gorm:"not null;default:now()"`
+}
+
+func (PreviewWatchEvent) TableName() string {
+	return "preview_watch_events"
+}
+
+// UserPreviewProgress represents aggregated preview watch progress for a user on a specific course
+type UserPreviewProgress struct {
+	ID             uuid.UUID `gorm:"type:uuid;primary_key;default:gen_random_uuid()"`
+	CourseID       uuid.UUID `gorm:"type:uuid;not null"`
+	UserID         uuid.UUID `gorm:"type:uuid;not null"`
+	TotalWatchTime int       `gorm:"not null;default:0"`
+	MaxPosition    int       `gorm:"not null;default:0"`
+	WatchCount     int       `gorm:"not null;default:0"`
+	CompletionPct  float64   `gorm:"type:decimal(5,2);not null;default:0.00"`
+	IsCompleted    bool      `gorm:"not null;default:false"`
+	FirstWatchedAt time.Time `gorm:"type:timestamptz;not null;default:now()"`
+	LastWatchedAt  time.Time `gorm:"type:timestamptz;not null;default:now()"`
+	CreatedAt      time.Time `gorm:"not null;default:now()"`
+	UpdatedAt      time.Time `gorm:"not null;default:now()"`
+}
+
+func (UserPreviewProgress) TableName() string {
+	return "user_preview_progress"
+}
+
+// UpdateFromEvent merges a new preview watch event into this aggregated progress record.
+func (p *UserPreviewProgress) UpdateFromEvent(event *PreviewWatchEvent, videoDurationSec int, now time.Time) {
+	p.TotalWatchTime += event.WatchedSeconds
+	p.WatchCount++
+	p.LastWatchedAt = now
+	p.UpdatedAt = now
+
+	// Track the furthest point reached
+	if event.LastPosition > p.MaxPosition {
+		p.MaxPosition = event.LastPosition
+	}
+
+	// Calculate completion percentage
+	if videoDurationSec > 0 {
+		pct := (float64(p.MaxPosition) / float64(videoDurationSec)) * 100
+		p.CompletionPct = math.Min(pct, 100.0)
+	}
+
+	// Mark completed if threshold reached or client signals completion
+	if event.Completed || p.CompletionPct >= CompletionThreshold {
+		p.IsCompleted = true
+		p.CompletionPct = 100.0
+	}
+}
+
 // LessonWatchEvent represents a single heartbeat/ping from the video player
 type LessonWatchEvent struct {
 	ID             uuid.UUID  `gorm:"type:uuid;primary_key;default:gen_random_uuid()"`

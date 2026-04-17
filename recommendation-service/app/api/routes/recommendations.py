@@ -8,6 +8,7 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 @router.get("/")
+@router.get("")
 async def get_my_recommendations(user = Depends(get_current_user)):
     """
     Returns a list of AI-powered course recommendations for the authenticated user.
@@ -72,6 +73,7 @@ async def chat_test(data: Dict):
     }
 
 @router.get("/trending")
+@router.get("/trending/")
 async def get_trending_courses():
     """
     Returns globally trending courses based on popularity and authority.

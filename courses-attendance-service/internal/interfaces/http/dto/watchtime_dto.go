@@ -18,6 +18,15 @@ type WatchHeartbeatRequest struct {
 	DeviceType     string `json:"deviceType" validate:"omitempty,oneof=MOBILE DESKTOP TABLET"`
 }
 
+// PreviewHeartbeatRequest is sent by the client for preview/trailer videos (before purchase)
+type PreviewHeartbeatRequest struct {
+	CourseID       string `json:"courseId" validate:"required,uuid"`
+	WatchedSeconds int    `json:"watchedSeconds" validate:"required,min=1,max=300"`
+	LastPosition   int    `json:"lastPosition" validate:"required,min=0"`
+	Completed      bool   `json:"completed"`
+	DeviceType     string `json:"deviceType" validate:"omitempty,oneof=MOBILE DESKTOP TABLET"`
+}
+
 // --- Responses ---
 
 // LessonProgressResponse represents a student's watch progress on a single lesson
@@ -113,7 +122,9 @@ type RecommendationProfileResponse struct {
 	TotalCompleted     int                         `json:"totalCompleted"`
 	OverallEngagement  float64                     `json:"overallEngagement"`
 	SubjectPreferences []SubjectPreferenceResponse `json:"subjectPreferences"`
-	CourseAnalytics    []CourseAnalyticsResponse    `json:"courseAnalytics"`
+	PreviewInterests   []PreviewInterestResponse   `json:"previewInterests"`   // NEW: Preview video interests
+	CourseAnalytics    []CourseAnalyticsResponse   `json:"courseAnalytics"`
+	PreviewProgress    []PreviewProgressResponse   `json:"previewProgress"`    // NEW: All preview progress
 	WatchPatterns      WatchPatternsResponse       `json:"watchPatterns"`
 }
 
@@ -123,4 +134,39 @@ type WatchPatternsResponse struct {
 	PreferredDeviceType string  `json:"preferredDeviceType"`   // most used device
 	CompletionTendency  string  `json:"completionTendency"`    // HIGH (>70%), MEDIUM (40-70%), LOW (<40%)
 	AvgCompletionPct    float64 `json:"avgCompletionPct"`
+}
+
+// PreviewProgressResponse represents a user's watch progress on a course preview
+type PreviewProgressResponse struct {
+	CourseID       uuid.UUID `json:"courseId"`
+	TotalWatchTime int       `json:"totalWatchTime"`   // seconds
+	MaxPosition    int       `json:"maxPosition"`      // seconds
+	WatchCount     int       `json:"watchCount"`
+	CompletionPct  float64   `json:"completionPct"`    // 0-100
+	IsCompleted    bool      `json:"isCompleted"`
+	FirstWatchedAt time.Time `json:"firstWatchedAt"`
+	LastWatchedAt  time.Time `json:"lastWatchedAt"`
+}
+
+// ToPreviewProgressResponse converts domain entity to response DTO
+func ToPreviewProgressResponse(p *watchtime.UserPreviewProgress) PreviewProgressResponse {
+	return PreviewProgressResponse{
+		CourseID:       p.CourseID,
+		TotalWatchTime: p.TotalWatchTime,
+		MaxPosition:    p.MaxPosition,
+		WatchCount:     p.WatchCount,
+		CompletionPct:  p.CompletionPct,
+		IsCompleted:    p.IsCompleted,
+		FirstWatchedAt: p.FirstWatchedAt,
+		LastWatchedAt:  p.LastWatchedAt,
+	}
+}
+
+// PreviewInterestResponse represents a user's interest in a subject based on preview views
+type PreviewInterestResponse struct {
+	SubjectID        uuid.UUID `json:"subjectId"`
+	SubjectName      string    `json:"subjectName"`
+	TotalWatchTime   int       `json:"totalWatchTime"`
+	CoursesViewed    int       `json:"coursesViewed"`
+	AvgCompletionPct float64   `json:"avgCompletionPct"`
 }

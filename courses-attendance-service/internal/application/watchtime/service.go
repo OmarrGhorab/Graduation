@@ -35,6 +35,15 @@ type RecordWatchInput struct {
 	DeviceType     watchtime.DeviceType
 }
 
+// RecordPreviewInput represents the input for recording a preview watch event
+type RecordPreviewInput struct {
+	CourseID       uuid.UUID
+	WatchedSeconds int
+	LastPosition   int
+	Completed      bool
+	DeviceType     watchtime.DeviceType
+}
+
 // Service handles watch time and analytics business logic
 type Service struct {
 	watchRepo      *postgres.WatchTimeRepository
@@ -146,8 +155,18 @@ func (s *Service) RecordWatchEvent(ctx context.Context, userID uuid.UUID, input 
 	}
 
 	// 5. Async recompute course analytics (Only on important events to save resources)
-	// Trigger recompute if: 1. Lesson completed, 2. Large watch block (60s+), 3. Every 5 heartbeats
-	shouldRecompute := input.Completed || input.WatchedSeconds >= 60 || (progress.WatchCount%5 == 0)
+	// Trigger recompute if: 
+	// 1. Lesson completed
+	// 2. Large watch block (60s+) 
+	// 3. Every 2 heartbeats (for short videos)
+	// 4. First watch
+	// 5. Short video (duration < 30s) - recompute every heartbeat
+	isShortVideo := videoDuration > 0 && videoDuration < 30
+	shouldRecompute := input.Completed || 
+		input.WatchedSeconds >= 60 || 
+		(progress.WatchCount%2 == 0) || 
+		progress.WatchCount == 1 ||
+		isShortVideo
 	if shouldRecompute {
 		go s.recomputeCourseAnalytics(lesson.CourseID, userID)
 	}
@@ -280,6 +299,8 @@ func (s *Service) GetCourseLeaderboard(ctx context.Context, courseID uuid.UUID, 
 type RecommendationProfile struct {
 	AllAnalytics       []watchtime.UserCourseAnalytics
 	SubjectPreferences []postgres.SubjectWatchStat
+	PreviewInterests   []postgres.PreviewInterestStat // NEW: Preview video interests
+	AllPreviewProgress []watchtime.UserPreviewProgress // NEW: All preview progress
 	AvgSessionDuration int
 	PreferredDevice    string
 	CompletionTendency string
@@ -363,6 +384,18 @@ func (s *Service) GetRecommendationProfile(ctx context.Context, userID uuid.UUID
 		return nil, fmt.Errorf("failed to get subject preferences: %w", err)
 	}
 
+	// Get preview interests (courses user watched but didn't purchase)
+	previewInterests, err := s.watchRepo.GetPreviewInterestsBySubject(ctx, userID, 10)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get preview interests: %w", err)
+	}
+
+	// Get all preview progress
+	allPreviewProgress, err := s.watchRepo.GetAllPreviewProgressForUser(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get preview progress: %w", err)
+	}
+
 	// Calculate watch patterns
 	totalWatchTime := 0
 	totalCompleted := 0
@@ -406,6 +439,8 @@ func (s *Service) GetRecommendationProfile(ctx context.Context, userID uuid.UUID
 	return &RecommendationProfile{
 		AllAnalytics:       analytics,
 		SubjectPreferences: subjects,
+		PreviewInterests:   previewInterests,
+		AllPreviewProgress: allPreviewProgress,
 		AvgSessionDuration: avgSession,
 		PreferredDevice:    "MOBILE",
 		CompletionTendency: tendency,
@@ -437,4 +472,129 @@ func (s *Service) GetWeeklyReportData(ctx context.Context, userID uuid.UUID) (*R
 	profile.AvgCompletionPct = float64(completedCount)
 
 	return profile, nil
+}
+
+// ManualRecomputeCourseAnalytics manually triggers course analytics recomputation (for testing/debugging)
+func (s *Service) ManualRecomputeCourseAnalytics(ctx context.Context, courseID, userID uuid.UUID) error {
+	// Get all lesson progress for this user in this course
+	progresses, err := s.watchRepo.GetUserLessonProgressByCourse(ctx, userID, courseID)
+	if err != nil {
+		return fmt.Errorf("failed to get lesson progress: %w", err)
+	}
+
+	// Get total lessons in course
+	course, err := s.courseRepo.GetByID(ctx, courseID)
+	if err != nil {
+		return fmt.Errorf("failed to get course: %w", err)
+	}
+	if course == nil {
+		return ErrCourseNotFound
+	}
+
+	now := s.clock.Now()
+
+	// Get or create analytics
+	analytics, err := s.watchRepo.GetUserCourseAnalytics(ctx, userID, courseID)
+	if err != nil {
+		return fmt.Errorf("failed to get course analytics: %w", err)
+	}
+
+	if analytics == nil {
+		analytics = &watchtime.UserCourseAnalytics{
+			ID:        uuid.New(),
+			CourseID:  courseID,
+			UserID:    userID,
+			CreatedAt: now,
+		}
+	}
+
+	analytics.Recompute(progresses, course.TotalLessons, now)
+
+	if err := s.watchRepo.UpsertUserCourseAnalytics(ctx, analytics); err != nil {
+		return fmt.Errorf("failed to upsert course analytics: %w", err)
+	}
+
+	return nil
+}
+
+// RecordPreviewWatchEvent records a heartbeat for preview/trailer videos (no enrollment required)
+func (s *Service) RecordPreviewWatchEvent(ctx context.Context, userID uuid.UUID, input RecordPreviewInput) (*watchtime.UserPreviewProgress, error) {
+	// 1. Validate course exists
+	course, err := s.courseRepo.GetByID(ctx, input.CourseID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get course: %w", err)
+	}
+	if course == nil {
+		return nil, ErrCourseNotFound
+	}
+
+	// 2. Check if user is already enrolled (if enrolled, they should use regular heartbeat)
+	enrollment, _ := s.enrollmentRepo.GetByCourseAndUser(ctx, input.CourseID, userID)
+	if enrollment != nil {
+		return nil, errors.New("user is already enrolled, use regular watch heartbeat instead")
+	}
+
+	now := s.clock.Now()
+
+	// 3. Insert raw preview watch event
+	event := &watchtime.PreviewWatchEvent{
+		ID:             uuid.New(),
+		CourseID:       input.CourseID,
+		UserID:         userID,
+		WatchedSeconds: input.WatchedSeconds,
+		LastPosition:   input.LastPosition,
+		Completed:      input.Completed,
+		DeviceType:     input.DeviceType,
+		CreatedAt:      now,
+	}
+
+	if err := s.watchRepo.CreatePreviewWatchEvent(ctx, event); err != nil {
+		return nil, fmt.Errorf("failed to create preview watch event: %w", err)
+	}
+
+	// 4. Update aggregated preview progress
+	progress, err := s.watchRepo.GetUserPreviewProgress(ctx, userID, input.CourseID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get preview progress: %w", err)
+	}
+
+	if progress == nil {
+		// First time watching this preview
+		progress = &watchtime.UserPreviewProgress{
+			ID:             uuid.New(),
+			CourseID:       input.CourseID,
+			UserID:         userID,
+			FirstWatchedAt: now,
+			CreatedAt:      now,
+		}
+	}
+
+	// Get preview video duration from course (in seconds)
+	// Since Course doesn't have PreviewDuration field, we'll use a default
+	// In production, you might want to add this field to the Course model
+	// or extract duration from video metadata
+	previewDuration := 30 // Default 30 seconds for preview videos
+	// TODO: Add PreviewDuration field to Course model or extract from video metadata
+
+	progress.UpdateFromEvent(event, previewDuration, now)
+
+	if err := s.watchRepo.UpsertUserPreviewProgress(ctx, progress); err != nil {
+		return nil, fmt.Errorf("failed to upsert preview progress: %w", err)
+	}
+
+	// 5. If preview completed, invalidate AI cache to update recommendations
+	if input.Completed {
+		go s.invalidateAICache(userID.String())
+	}
+
+	return progress, nil
+}
+
+// GetPreviewProgress returns a user's watch progress on a course preview
+func (s *Service) GetPreviewProgress(ctx context.Context, userID, courseID uuid.UUID) (*watchtime.UserPreviewProgress, error) {
+	progress, err := s.watchRepo.GetUserPreviewProgress(ctx, userID, courseID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get preview progress: %w", err)
+	}
+	return progress, nil
 }

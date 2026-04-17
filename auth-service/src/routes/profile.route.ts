@@ -7,12 +7,16 @@ import {
   checkUsernameAvailability,
   updatePreferences,
   getPreferences,
+  searchTeachersPublic,
 } from '../controllers/profile.controller';
 
 const router = express.Router();
 
 // Get user profile
 router.get('/', authenticate, getProfile);
+
+// Search teachers (Public endpoint for frontend)
+router.get('/teachers', authenticate, searchTeachersPublic);
 
 // Update profile (name, username, password)
 router.put('/', authenticate, updateProfile);

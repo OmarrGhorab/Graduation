@@ -31,11 +31,14 @@ func (h *WatchTimeHandler) RegisterRoutes(router fiber.Router) {
 
 	watch := router.Group("/watch", auth)
 	watch.Post("/heartbeat", h.RecordHeartbeat)
+	watch.Post("/preview/heartbeat", h.RecordPreviewHeartbeat) // NEW: Preview tracking
+	watch.Get("/preview/:courseId/progress", h.GetPreviewProgress) // NEW: Get preview progress
 	watch.Get("/lesson/:lessonId/progress", h.GetLessonProgress)
 	watch.Get("/course/:courseId/progress", h.GetCourseProgress)
 	watch.Get("/dashboard", h.GetDashboard)
 	watch.Get("/course/:courseId/leaderboard", teacherOnly, h.GetLeaderboard)
 	watch.Get("/recommendations/profile", h.GetRecommendationProfile)
+	watch.Post("/course/:courseId/recompute", h.RecomputeCourseAnalytics) // Manual trigger for testing
 }
 
 // RecordHeartbeat godoc
@@ -328,6 +331,24 @@ func (h *WatchTimeHandler) GetRecommendationProfile(c *fiber.Ctx) error {
 		}
 	}
 
+	// Build preview interests
+	previewInterests := make([]dto.PreviewInterestResponse, len(profile.PreviewInterests))
+	for i, pi := range profile.PreviewInterests {
+		previewInterests[i] = dto.PreviewInterestResponse{
+			SubjectID:        pi.SubjectID,
+			SubjectName:      pi.SubjectName,
+			TotalWatchTime:   pi.TotalWatchTime,
+			CoursesViewed:    pi.CoursesViewed,
+			AvgCompletionPct: pi.AvgCompletionPct,
+		}
+	}
+
+	// Build preview progress
+	previewProgress := make([]dto.PreviewProgressResponse, len(profile.AllPreviewProgress))
+	for i := range profile.AllPreviewProgress {
+		previewProgress[i] = dto.ToPreviewProgressResponse(&profile.AllPreviewProgress[i])
+	}
+
 	// Build course analytics
 	courseAnalytics := make([]dto.CourseAnalyticsResponse, len(profile.AllAnalytics))
 	totalWatchTime := 0
@@ -354,7 +375,9 @@ func (h *WatchTimeHandler) GetRecommendationProfile(c *fiber.Ctx) error {
 			TotalCompleted:     totalCompleted,
 			OverallEngagement:  avgEngagement,
 			SubjectPreferences: subjectPrefs,
+			PreviewInterests:   previewInterests,
 			CourseAnalytics:    courseAnalytics,
+			PreviewProgress:    previewProgress,
 			WatchPatterns: dto.WatchPatternsResponse{
 				AvgSessionDuration:  profile.AvgSessionDuration,
 				PreferredDeviceType: profile.PreferredDevice,
@@ -362,6 +385,162 @@ func (h *WatchTimeHandler) GetRecommendationProfile(c *fiber.Ctx) error {
 				AvgCompletionPct:    profile.AvgCompletionPct,
 			},
 		},
+	})
+}
+
+// RecomputeCourseAnalytics godoc
+// @Summary Manually trigger course analytics recomputation (for testing/debugging)
+// @Tags watch
+// @Produce json
+// @Param courseId path string true "Course ID"
+// @Success 200 {object} map[string]interface{}
+// @Router /api/v1/watch/course/{courseId}/recompute [post]
+func (h *WatchTimeHandler) RecomputeCourseAnalytics(c *fiber.Ctx) error {
+	userID, err := getUserIDFromContext(c)
+	if err != nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"success": false,
+			"error":   "Unauthorized",
+		})
+	}
+
+	courseID, err := uuid.Parse(c.Params("courseId"))
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"success": false,
+			"error":   "Invalid course ID",
+		})
+	}
+
+	// Trigger manual recompute
+	err = h.watchService.ManualRecomputeCourseAnalytics(c.Context(), courseID, userID)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"success": false,
+			"error":   err.Error(),
+		})
+	}
+
+	return c.JSON(fiber.Map{
+		"success": true,
+		"message": "Course analytics recomputed successfully",
+	})
+}
+
+// RecordPreviewHeartbeat godoc
+// @Summary Record a preview video watch heartbeat (for non-enrolled users)
+// @Description Called every ~3-5 seconds by the client while a preview video is playing.
+// @Tags watch
+// @Accept json
+// @Produce json
+// @Param body body dto.PreviewHeartbeatRequest true "Preview heartbeat data"
+// @Success 200 {object} dto.PreviewProgressResponse
+// @Router /api/v1/watch/preview/heartbeat [post]
+func (h *WatchTimeHandler) RecordPreviewHeartbeat(c *fiber.Ctx) error {
+	var req dto.PreviewHeartbeatRequest
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"success": false,
+			"error":   "Invalid request body",
+		})
+	}
+
+	if err := ValidateStruct(req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"success": false,
+			"errors":  FormatValidationErrors(err),
+		})
+	}
+
+	userID, err := getUserIDFromContext(c)
+	if err != nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"success": false,
+			"error":   "Unauthorized",
+		})
+	}
+
+	courseID, err := uuid.Parse(req.CourseID)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"success": false,
+			"error":   "Invalid course ID",
+		})
+	}
+
+	deviceType := watchtime.DeviceTypeDesktop
+	if req.DeviceType != "" {
+		deviceType = watchtime.DeviceType(req.DeviceType)
+	}
+
+	input := watchtimeApp.RecordPreviewInput{
+		CourseID:       courseID,
+		WatchedSeconds: req.WatchedSeconds,
+		LastPosition:   req.LastPosition,
+		Completed:      req.Completed,
+		DeviceType:     deviceType,
+	}
+
+	progress, err := h.watchService.RecordPreviewWatchEvent(c.Context(), userID, input)
+	if err != nil {
+		if err.Error() == "user is already enrolled, use regular watch heartbeat instead" {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"success": false,
+				"error":   err.Error(),
+			})
+		}
+		return handleWatchServiceError(c, err)
+	}
+
+	return c.JSON(fiber.Map{
+		"success": true,
+		"data":    dto.ToPreviewProgressResponse(progress),
+	})
+}
+
+// GetPreviewProgress godoc
+// @Summary Get watch progress for a course preview
+// @Tags watch
+// @Produce json
+// @Param courseId path string true "Course ID"
+// @Success 200 {object} dto.PreviewProgressResponse
+// @Router /api/v1/watch/preview/{courseId}/progress [get]
+func (h *WatchTimeHandler) GetPreviewProgress(c *fiber.Ctx) error {
+	userID, err := getUserIDFromContext(c)
+	if err != nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"success": false,
+			"error":   "Unauthorized",
+		})
+	}
+
+	courseID, err := uuid.Parse(c.Params("courseId"))
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"success": false,
+			"error":   "Invalid course ID",
+		})
+	}
+
+	progress, err := h.watchService.GetPreviewProgress(c.Context(), userID, courseID)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"success": false,
+			"error":   "Failed to get preview progress",
+		})
+	}
+
+	if progress == nil {
+		return c.JSON(fiber.Map{
+			"success": true,
+			"data":    nil,
+			"message": "No preview watch data yet for this course",
+		})
+	}
+
+	return c.JSON(fiber.Map{
+		"success": true,
+		"data":    dto.ToPreviewProgressResponse(progress),
 	})
 }
 

@@ -186,7 +186,7 @@ func (h *InternalHandler) CheckEnrollment(c *fiber.Ctx) error {
 }
 
 func (h *InternalHandler) ListAllCourses(c *fiber.Ctx) error {
-	courses, err := h.courseService.ListCourses(c.Context(), nil)
+	courses, _, err := h.courseService.ListCourses(c.Context(), nil, 0, 0)
 	if err != nil {
 		return handleServiceError(c, err)
 	}

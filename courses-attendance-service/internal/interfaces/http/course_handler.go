@@ -17,6 +17,7 @@ import (
 	"github.com/OmarrGhorab/courses-attendance-service/internal/interfaces/http/dto"
 	"github.com/OmarrGhorab/courses-attendance-service/internal/interfaces/http/middleware"
 	"github.com/gofiber/fiber/v2"
+	"strconv"
 	"github.com/google/uuid"
 )
 
@@ -304,81 +305,86 @@ func (h *CourseHandler) UploadPreviewVideo(c *fiber.Ctx) error {
 // @Success 200 {array} dto.CourseListResponse
 // @Router /api/v1/courses [get]
 func (h *CourseHandler) ListCourses(c *fiber.Ctx) error {
-	// Parse filters
-	var subjectIDPtr *uuid.UUID
-	subjectIDStr := c.Query("subjectId")
-	if subjectIDStr != "" {
-		id, err := uuid.Parse(subjectIDStr)
-		if err == nil {
-			subjectIDPtr = &id
+	// 1. Pagination Params
+	page, _ := strconv.Atoi(c.Query("page", "1"))
+	if page < 1 {
+		page = 1
+	}
+	limit, _ := strconv.Atoi(c.Query("limit", "10"))
+	if limit < 1 || limit > 100 {
+		limit = 10
+	}
+	offset := (page - 1) * limit
+
+	// 2. Build Filters
+	filters := make(map[string]interface{})
+
+	if subID := c.Query("subjectId"); subID != "" {
+		if id, err := uuid.Parse(subID); err == nil {
+			filters["subject_id"] = id
+		}
+	}
+	if teacherID := c.Query("teacherId"); teacherID != "" {
+		if id, err := uuid.Parse(teacherID); err == nil {
+			filters["teacher_id"] = id
 		}
 	}
 
-	deliveryType := c.Query("deliveryType")
-	isPaidStr := c.Query("isPaid")
-	billingType := c.Query("billingType")
-	statusFilter := c.Query("status")
-	minPriceStr := c.Query("minPrice")
-	maxPriceStr := c.Query("maxPrice")
+	// Resolve teacherName to IDs via Auth Service
+	if teacherName := c.Query("teacherName"); teacherName != "" && h.authClient != nil {
+		teachers, err := h.authClient.SearchUsers(c.Context(), teacherName, "TEACHER")
+		if err == nil && len(teachers) > 0 {
+			teacherIDs := make([]uuid.UUID, len(teachers))
+			for i, t := range teachers {
+				id, _ := uuid.Parse(t.ID)
+				teacherIDs[i] = id
+			}
+			filters["teacher_ids"] = teacherIDs
+		} else if err == nil {
+			// No teachers found with that name, return empty results early
+			return c.JSON(fiber.Map{
+				"success": true,
+				"data":    []dto.CourseListResponse{},
+				"meta": fiber.Map{
+					"total": 0,
+					"page":  page,
+					"limit": limit,
+				},
+			})
+		}
+	}
 
-	// Get courses
-	courses, err := h.courseService.ListCourses(c.Context(), subjectIDPtr)
+	filters["delivery_type"] = c.Query("deliveryType")
+	filters["billing_type"] = c.Query("billingType")
+	filters["status"] = c.Query("status")
+	filters["search"] = c.Query("search")
+	filters["subject_name"] = c.Query("subjectName")
+
+	if isPaidStr := c.Query("isPaid"); isPaidStr != "" {
+		filters["is_paid"] = isPaidStr == "true"
+	}
+
+	if minPrice, err := strconv.ParseFloat(c.Query("minPrice"), 64); err == nil {
+		filters["min_price"] = minPrice
+	}
+	if maxPrice, err := strconv.ParseFloat(c.Query("maxPrice"), 64); err == nil {
+		filters["max_price"] = maxPrice
+	}
+
+	// 3. Get paginated courses from service
+	courses, total, err := h.courseService.ListCourses(c.Context(), filters, limit, offset)
 	if err != nil {
 		return handleServiceError(c, err)
 	}
 
-	// Apply filters
-	var filteredCourses []courseDomain.Course
-	for _, crs := range courses {
-		// Delivery type filter
-		if deliveryType != "" && string(crs.DeliveryType) != deliveryType {
-			continue
-		}
-
-		// Is paid filter
-		if isPaidStr != "" {
-			isPaid := isPaidStr == "true"
-			if crs.IsPaid != isPaid {
-				continue
-			}
-		}
-
-		// Billing type filter
-		if billingType != "" && string(crs.BillingType) != billingType {
-			continue
-		}
-
-		// Status filter
-		if statusFilter != "" && string(crs.Status) != statusFilter {
-			continue
-		}
-
-		// Price range filter
-		if minPriceStr != "" {
-			// Parse minPrice (simple implementation)
-			if crs.Price < 0 { // You can add proper parsing here
-				continue
-			}
-		}
-		if maxPriceStr != "" {
-			// Parse maxPrice (simple implementation)
-			if crs.Price > 999999 { // You can add proper parsing here
-				continue
-			}
-		}
-
-		filteredCourses = append(filteredCourses, crs)
-	}
-
-	// Build enhanced responses with teacher info
+	// 4. Build enhanced responses (teacher info, ratings, etc.)
 	var responses []dto.CourseListResponse
 	
-	// Collect all teacher IDs and course IDs for batch lookups
-	teacherIDs := make([]uuid.UUID, 0, len(filteredCourses))
-	courseIDs := make([]uuid.UUID, 0, len(filteredCourses))
+	teacherIDs := make([]uuid.UUID, 0, len(courses))
+	courseIDs := make([]uuid.UUID, 0, len(courses))
 	teacherIDMap := make(map[uuid.UUID]bool)
 	
-	for _, crs := range filteredCourses {
+	for _, crs := range courses {
 		if !teacherIDMap[crs.TeacherID] {
 			teacherIDs = append(teacherIDs, crs.TeacherID)
 			teacherIDMap[crs.TeacherID] = true
@@ -386,30 +392,17 @@ func (h *CourseHandler) ListCourses(c *fiber.Ctx) error {
 		courseIDs = append(courseIDs, crs.ID)
 	}
 
-	// Batch fetch teacher ratings
+	// Batch lookups
 	var teacherRatingsMap map[uuid.UUID]float64
 	if h.ratingRepo != nil && len(teacherIDs) > 0 {
 		teacherRatingsMap, _ = h.ratingRepo.GetMultipleTeacherAvgRatings(c.Context(), teacherIDs)
 	}
-
-	// Batch fetch course ratings
 	var courseRatingsMap map[uuid.UUID]*postgres.CourseAvgRating
 	if h.courseRatingRepo != nil && len(courseIDs) > 0 {
 		courseRatingsMap, _ = h.courseRatingRepo.GetMultipleCourseAvgRatings(c.Context(), courseIDs)
 	}
 
-	// Batch fetch enrollment counts
-	enrollmentCounts := make(map[uuid.UUID]int)
-	if h.enrollmentRepo != nil {
-		for _, courseID := range courseIDs {
-			enrollments, err := h.enrollmentRepo.GetByCourseID(c.Context(), courseID)
-			if err == nil {
-				enrollmentCounts[courseID] = len(enrollments)
-			}
-		}
-	}
-
-	for _, crs := range filteredCourses {
+	for _, crs := range courses {
 		response := dto.CourseListResponse{
 			ID:                      crs.ID,
 			Title:                   crs.Title,
@@ -430,16 +423,16 @@ func (h *CourseHandler) ListCourses(c *fiber.Ctx) error {
 			BillingType:             string(crs.BillingType),
 			Status:                  string(crs.Status),
 			AttendanceWeight:        crs.AttendanceWeight,
+			EnrolledStudents:        crs.EnrollmentCount, // Populated by service
 			CreatedAt:               crs.CreatedAt,
 			UpdatedAt:               crs.UpdatedAt,
 		}
 
-		// Add subject name
 		if crs.Subject != nil {
 			response.SubjectName = crs.Subject.Name
 		}
 
-		// Fetch teacher info
+		// Fetch teacher info from Auth (ideally this would also be batched in a real system)
 		if h.authClient != nil {
 			userInfo, err := h.authClient.GetUserInfo(c.Context(), crs.TeacherID.String())
 			if err == nil && userInfo != nil {
@@ -448,40 +441,28 @@ func (h *CourseHandler) ListCourses(c *fiber.Ctx) error {
 			}
 		}
 
-		// Add teacher rating from batch lookup
 		if teacherRatingsMap != nil {
-			if rating, ok := teacherRatingsMap[crs.TeacherID]; ok {
-				response.TeacherRating = rating
-			}
+			response.TeacherRating = teacherRatingsMap[crs.TeacherID]
 		}
-
-		// Add course rating from batch lookup
 		if courseRatingsMap != nil {
 			if rating, ok := courseRatingsMap[crs.ID]; ok {
 				response.CourseRating = rating.AvgRating
 				response.TotalRatings = rating.TotalRatings
 			}
 		}
-
-		// Add enrollment count
-		if count, ok := enrollmentCounts[crs.ID]; ok {
-			response.EnrolledStudents = count
-		}
-
+		
 		responses = append(responses, response)
 	}
 
 	return c.JSON(fiber.Map{
 		"success": true,
 		"data":    responses,
-		"total":   len(responses),
-		"filters": fiber.Map{
-			"subjectId":    subjectIDStr,
-			"deliveryType": deliveryType,
-			"isPaid":       isPaidStr,
-			"billingType":  billingType,
-			"status":       statusFilter,
+		"meta": fiber.Map{
+			"total": total,
+			"page":  page,
+			"limit": limit,
 		},
+		"filters": filters,
 	})
 }
 

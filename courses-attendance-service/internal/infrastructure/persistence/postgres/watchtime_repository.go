@@ -154,3 +154,66 @@ func (r *WatchTimeRepository) GetWeeklyWatchStats(ctx context.Context, userID uu
 
 	return results.TotalTime, results.Completed, err
 }
+
+// --- Preview Watch Events (for non-enrolled users) ---
+
+// CreatePreviewWatchEvent inserts a raw preview heartbeat event
+func (r *WatchTimeRepository) CreatePreviewWatchEvent(ctx context.Context, event *watchtime.PreviewWatchEvent) error {
+	return r.db.WithContext(ctx).Create(event).Error
+}
+
+// GetUserPreviewProgress retrieves aggregated preview progress for a user on a course
+func (r *WatchTimeRepository) GetUserPreviewProgress(ctx context.Context, userID, courseID uuid.UUID) (*watchtime.UserPreviewProgress, error) {
+	var p watchtime.UserPreviewProgress
+	err := r.db.WithContext(ctx).First(&p, "user_id = ? AND course_id = ?", userID, courseID).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	return &p, err
+}
+
+// UpsertUserPreviewProgress creates or updates user preview progress
+func (r *WatchTimeRepository) UpsertUserPreviewProgress(ctx context.Context, p *watchtime.UserPreviewProgress) error {
+	return r.db.WithContext(ctx).Save(p).Error
+}
+
+// GetAllPreviewProgressForUser returns all preview progress for a user (for recommendations)
+func (r *WatchTimeRepository) GetAllPreviewProgressForUser(ctx context.Context, userID uuid.UUID) ([]watchtime.UserPreviewProgress, error) {
+	var progresses []watchtime.UserPreviewProgress
+	err := r.db.WithContext(ctx).
+		Where("user_id = ?", userID).
+		Order("last_watched_at DESC").
+		Find(&progresses).Error
+	return progresses, err
+}
+
+// PreviewInterestStat holds aggregated preview watch data per subject for recommendation
+type PreviewInterestStat struct {
+	SubjectID       uuid.UUID `gorm:"column:subject_id"`
+	SubjectName     string    `gorm:"column:subject_name"`
+	TotalWatchTime  int       `gorm:"column:total_watch_time"`
+	CoursesViewed   int       `gorm:"column:courses_viewed"`
+	AvgCompletionPct float64  `gorm:"column:avg_completion_pct"`
+}
+
+// GetPreviewInterestsBySubject returns a user's most-viewed subjects from preview videos
+func (r *WatchTimeRepository) GetPreviewInterestsBySubject(ctx context.Context, userID uuid.UUID, limit int) ([]PreviewInterestStat, error) {
+	var stats []PreviewInterestStat
+	err := r.db.WithContext(ctx).
+		Table("user_preview_progress upp").
+		Select(`
+			c.subject_id,
+			s.name as subject_name,
+			SUM(upp.total_watch_time) as total_watch_time,
+			COUNT(DISTINCT upp.course_id) as courses_viewed,
+			AVG(upp.completion_pct) as avg_completion_pct
+		`).
+		Joins("INNER JOIN courses c ON c.id = upp.course_id").
+		Joins("INNER JOIN subjects s ON s.id = c.subject_id").
+		Where("upp.user_id = ?", userID).
+		Group("c.subject_id, s.name").
+		Order("total_watch_time DESC").
+		Limit(limit).
+		Scan(&stats).Error
+	return stats, err
+}

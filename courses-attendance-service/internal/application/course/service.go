@@ -215,19 +215,11 @@ func (s *Service) GetCourse(ctx context.Context, id uuid.UUID) (*courseDomain.Co
 	return course, nil
 }
 
-// ListCourses returns courses, optionally filtered by subject
-func (s *Service) ListCourses(ctx context.Context, subjectID *uuid.UUID) ([]courseDomain.Course, error) {
-	var courses []courseDomain.Course
-	var err error
-	
-	if subjectID != nil {
-		courses, err = s.courseRepo.GetBySubjectID(ctx, *subjectID)
-	} else {
-		courses, err = s.courseRepo.GetAll(ctx)
-	}
-	
+// ListCourses returns courses with filtering and pagination
+func (s *Service) ListCourses(ctx context.Context, filters map[string]interface{}, limit, offset int) ([]courseDomain.Course, int64, error) {
+	courses, total, err := s.courseRepo.ListCoursesWithFilters(ctx, filters, limit, offset)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	
 	// Populate counts for all courses
@@ -236,7 +228,7 @@ func (s *Service) ListCourses(ctx context.Context, subjectID *uuid.UUID) ([]cour
 		courses[i].EnrollmentCount = int(count)
 	}
 	
-	return courses, nil
+	return courses, total, nil
 }
 
 // UpdateCourseInput represents input for updating a course
@@ -335,15 +327,19 @@ func (s *Service) EnrollStudent(ctx context.Context, courseID, studentID uuid.UU
 		return nil, err
 	}
 	if existing != nil {
-		return nil, ErrAlreadyEnrolled
+		// If already paid, it's a real error. If not paid, just return the existing one for idempotency.
+		if existing.IsPaid {
+			return nil, ErrAlreadyEnrolled
+		}
+		return existing, nil
 	}
 
 	enrollment := &courseDomain.Enrollment{
 		ID:         uuid.New(),
 		CourseID:   courseID,
 		UserID:     studentID,
-		IsActive:   true,
-		IsPaid:     !course.IsPaid, // Auto-mark as paid if course is free
+		IsActive:   !course.IsPaid, // Only active by default if the course is free
+		IsPaid:     !course.IsPaid,
 		EnrolledAt: s.clock.Now(),
 		UpdatedAt:  s.clock.Now(),
 	}
@@ -436,7 +432,9 @@ func (s *Service) GetStudentCourses(ctx context.Context, studentID uuid.UUID) ([
 
 	var courseIDs []uuid.UUID
 	for _, e := range enrollments {
-		courseIDs = append(courseIDs, e.CourseID)
+		if e.IsActive {
+			courseIDs = append(courseIDs, e.CourseID)
+		}
 	}
 
 	if len(courseIDs) == 0 {
@@ -538,6 +536,7 @@ func (s *Service) MarkEnrollmentPaid(ctx context.Context, courseID, studentID uu
 		}
 	} else {
 		enrollment.IsPaid = true
+		enrollment.IsActive = true // Explicitly activate upon payment
 		enrollment.PaidAt = &now
 		enrollment.UpdatedAt = now
 		if err := s.enrollmentRepo.Update(ctx, enrollment); err != nil {
@@ -665,9 +664,10 @@ func (s *Service) GetTeacherAnalytics(ctx context.Context, teacherID uuid.UUID) 
 		courseRevenue := 0.0
 		for _, e := range enrollments {
 			if e.IsPaid {
-				if c.BillingType == courseDomain.BillingTypeOneTime {
+				switch c.BillingType {
+				case courseDomain.BillingTypeOneTime:
 					courseRevenue += c.Price
-				} else if c.BillingType == courseDomain.BillingTypeMonthly {
+				case courseDomain.BillingTypeMonthly:
 					// For monthly, we need to count individual paid periods
 					periods, _ := s.enrollmentRepo.GetPeriods(ctx, e.ID)
 					courseRevenue += c.Price * float64(len(periods))

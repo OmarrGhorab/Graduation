@@ -247,6 +247,7 @@ type LessonResponse struct {
 	VideoURL        string     `json:"videoUrl,omitempty"`
 	MaterialsURL    string     `json:"materialsUrl,omitempty"`
 	Duration        *int       `json:"duration,omitempty"` // in seconds
+	IsFree          bool       `json:"isFree"`
 	CreatedAt       time.Time  `json:"createdAt"`
 	UpdatedAt       time.Time  `json:"updatedAt"`
 }
@@ -272,6 +273,7 @@ func ToLessonResponse(l *lessonDomain.Lesson) LessonResponse {
 		VideoURL:        l.VideoURL,
 		MaterialsURL:    l.MaterialsURL,
 		Duration:        l.Duration,
+		IsFree:          l.IsFree,
 		CreatedAt:       l.CreatedAt,
 		UpdatedAt:       l.UpdatedAt,
 	}

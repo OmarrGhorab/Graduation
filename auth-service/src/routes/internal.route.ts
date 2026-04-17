@@ -1,6 +1,6 @@
 import express from 'express';
 import { authenticateInternalService } from '../middleware';
-import { getUserPreferencesInternal, validateTokenInternal, getBatchUsersInternal, getUserInternal, verifyAttendanceContextInternal, getParentsInternal } from '../controllers/internal.controller';
+import { getUserPreferencesInternal, validateTokenInternal, getBatchUsersInternal, getUserInternal, verifyAttendanceContextInternal, getParentsInternal, searchUsersInternal } from '../controllers/internal.controller';
 
 const router = express.Router();
 
@@ -9,6 +9,7 @@ router.get('/users/:userId/preferences', authenticateInternalService, getUserPre
 
 // Internal endpoint to get single user details (for courses-service)
 router.get('/users/:userId', authenticateInternalService, getUserInternal);
+router.get('/users/search', authenticateInternalService, searchUsersInternal);
 
 // Internal endpoint to get batch user details (for chat-service)
 router.post('/users/batch', authenticateInternalService, getBatchUsersInternal);

@@ -122,7 +122,20 @@ async def clear_cache(user_id: str):
     logger.info(f"Cache cleared for user: {user_id}")
 
 async def get_trending_recommendations():
-    """Ranks courses globally by enrollment count and teacher authority."""
+    """Ranks courses globally by enrollment count and teacher authority with Redis caching."""
+    cache_key = "recommendations:v1:trending"
+    
+    # 1. Check Cache
+    try:
+        cached_data = await redis_conn.get(cache_key)
+        if cached_data:
+            logger.info("Cache hit for trending recommendations")
+            return json.loads(cached_data)
+    except Exception as e:
+        logger.warning(f"Redis error fetching trending cache: {str(e)}")
+
+    # 2. Cache Miss - Fetch and Calculate
+    logger.info("Cache miss for trending. Re-calculating...")
     all_courses = await course_client.get_all_courses()
     if not all_courses:
         return []
@@ -164,4 +177,15 @@ async def get_trending_recommendations():
             "priority": "HIGH"
         })
     
+    # 3. Cache Results (1 hour = 3600 seconds)
+    try:
+        await redis_conn.setex(
+            cache_key,
+            settings.TRENDING_CACHE_TTL,
+            json.dumps(result)
+        )
+        logger.info("Trending recommendations cached for 1 hour")
+    except Exception as e:
+        logger.warning(f"Failed to cache trending recommendations: {str(e)}")
+
     return result
