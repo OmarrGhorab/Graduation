@@ -88,3 +88,8 @@ func (d *EventDispatcher) EmitLessonVideoReady(ctx context.Context, payload even
 func (d *EventDispatcher) EmitLessonVideoFailed(ctx context.Context, payload events.LessonVideoFailedPayload) {
 	d.Dispatch(ctx, events.TypeLessonVideoFailed, payload.LessonID.String(), payload.TeacherID, payload)
 }
+
+// Helper for Lesson Reminder
+func (d *EventDispatcher) EmitLessonReminder(ctx context.Context, payload events.LessonReminderPayload) {
+	d.Dispatch(ctx, events.TypeLessonReminder, payload.LessonID.String(), uuid.UUID{}, payload)
+}

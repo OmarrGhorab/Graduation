@@ -135,6 +135,7 @@ type CreateCourseInput struct {
 	AttendanceWeight        float64
 	PreviewVideoURL         string
 	PreviewVideoPublicID    string
+	ReminderIntervals       string
 }
 
 // CreateCourse creates a new course
@@ -164,6 +165,9 @@ func (s *Service) CreateCourse(ctx context.Context, input CreateCourseInput) (*c
 	if input.BillingType == "" {
 		input.BillingType = courseDomain.BillingTypeOneTime
 	}
+	if input.ReminderIntervals == "" {
+		input.ReminderIntervals = "15,10,5"
+	}
 
 	course := &courseDomain.Course{
 		ID:                      uuid.New(),
@@ -188,6 +192,7 @@ func (s *Service) CreateCourse(ctx context.Context, input CreateCourseInput) (*c
 		AttendanceWeight:        input.AttendanceWeight,
 		PreviewVideoURL:         input.PreviewVideoURL,
 		PreviewVideoPublicID:    input.PreviewVideoPublicID,
+		ReminderIntervals:       input.ReminderIntervals,
 		CreatedAt:               s.clock.Now(),
 		UpdatedAt:               s.clock.Now(),
 	}
@@ -246,6 +251,7 @@ type UpdateCourseInput struct {
 	Status                  *courseDomain.CourseStatus
 	PreviewVideoURL         *string
 	PreviewVideoPublicID    *string
+	ReminderIntervals       *string
 }
 
 // UpdateCourse updates a course (teacher only)
@@ -300,6 +306,9 @@ func (s *Service) UpdateCourse(ctx context.Context, courseID uuid.UUID, teacherI
 	}
 	if input.PreviewVideoPublicID != nil {
 		course.PreviewVideoPublicID = *input.PreviewVideoPublicID
+	}
+	if input.ReminderIntervals != nil {
+		course.ReminderIntervals = *input.ReminderIntervals
 	}
 	course.UpdatedAt = s.clock.Now()
 

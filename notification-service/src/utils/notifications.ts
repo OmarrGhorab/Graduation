@@ -35,6 +35,30 @@ async function getUserNotificationPreference(userId: string): Promise<boolean> {
 }
 
 /**
+ * Fetch a child's parents from auth-service
+ */
+export async function getChildParents(childId: string): Promise<any[]> {
+  try {
+    const response = await fetch(`${AUTH_SERVICE_URL}/api/v1/internal/users/${childId}/parents`, {
+      headers: {
+        "x-internal-service-secret": INTERNAL_SERVICE_SECRET,
+      },
+    });
+
+    if (!response.ok) {
+      console.warn(`[Notification] Failed to fetch parents for child ${childId}`);
+      return [];
+    }
+
+    const body = await response.json();
+    return body.data || [];
+  } catch (error) {
+    console.error(`[Notification] Error fetching parents for child ${childId}:`, error);
+    return [];
+  }
+}
+
+/**
  * Send a silent push notification to a specific device
  * Used for background data sync like location requests
  */
@@ -326,7 +350,9 @@ async function sendFcmNotification(
     const dataPayload: Record<string, string> = {
       type: data.type,
       ...Object.entries(data).reduce((acc, [key, value]) => {
-        acc[key] = typeof value === "string" ? value : JSON.stringify(value);
+        if (value !== undefined && value !== null) {
+          acc[key] = typeof value === "string" ? value : JSON.stringify(value);
+        }
         return acc;
       }, {} as Record<string, string>),
     };
@@ -435,13 +461,23 @@ async function sendFcmNotification(
       response.responses.forEach((resp, idx) => {
         if (!resp.success) {
           const token = tokenGroup[idx];
+          const errorCode = resp.error?.code || "";
+          
           if (token) {
-            invalidTokens.push(token);
-            console.error(
-              `[FCM] Failed to send notification to token ${token.substring(0, 20)}...:`,
-              resp.error?.code || "Unknown error",
-              resp.error?.message || ""
-            );
+            // Only mark as invalid if the token is actually expired or unregistered
+            // We DON'T want to delete tokens if the error was a bad payload (our code error)
+            const isTokenDead = errorCode === "messaging/registration-token-not-registered" || 
+                               errorCode === "messaging/invalid-registration-token";
+
+            if (isTokenDead) {
+              invalidTokens.push(token);
+              console.log(`[FCM] Marking token as invalid: ${token.substring(0, 20)}... (Error: ${errorCode})`);
+            } else {
+              console.error(
+                `[FCM] Delivery failed to token ${token.substring(0, 20)}... (Non-token error: ${errorCode}):`,
+                resp.error?.message || ""
+              );
+            }
           }
         }
       });
@@ -502,6 +538,12 @@ function getNotificationTitle(type: string, data?: Record<string, any>): string 
     "LESSON_STARTED": "Lesson Started 🚀",
     "LESSON_CANCELED": "Lesson Canceled ⚠️",
     "LESSON_RESCHEDULED": "Lesson Rescheduled 📅",
+    "LESSON_REMINDER": "Upcoming Lesson 🔔",
+    "CHILD_LESSON_STARTED": "Child's Lesson Started 🚀",
+    "CHILD_LESSON_ENDED": "Child's Lesson Ended ✅",
+    "CHILD_ATTENDANCE_RECORDED": "Child Arrived at Lesson 📍",
+    "SUBSCRIPTION_RENEWAL_SOON": "Subscription Renewal Soon 💳",
+    "SUBSCRIPTION_PAYMENT_FAILED": "Payment Failed ❌",
   };
 
   return titles[type] || "New Notification";
@@ -556,10 +598,22 @@ function getNotificationBody(
       return `A student has enrolled in your course: ${data.course_name || "Course"}`;
     case "LESSON_STARTED":
       return `The lesson "${data.lesson_title || "Lesson"}" has started! Get ready.`;
+    case "CHILD_LESSON_STARTED":
+      return `Your child ${data.child_name || "has"} started their lesson: "${data.lesson_title || "Lesson"}"`;
     case "LESSON_CANCELED":
       return `The lesson scheduled for "${data.scheduled_at || "scheduled time"}" has been canceled.`;
+    case "CHILD_LESSON_ENDED":
+      return `Your child ${data.child_name || "has"} finished their lesson: "${data.lesson_title || "Lesson"}"`;
+    case "CHILD_ATTENDANCE_RECORDED":
+      return `Your child ${data.child_name || "has"} is now marked as ${data.status || "PRESENT"} for "${data.lesson_title || "Lesson"}"`;
     case "LESSON_RESCHEDULED":
       return `The lesson has been moved to ${data.new_scheduled_at || "a new time"}.`;
+    case "LESSON_REMINDER":
+      return `Lesson "${data.lesson_title || "Lesson"}" starts in ${data.minutes_before || "a few"} minutes!`;
+    case "SUBSCRIPTION_RENEWAL_SOON":
+      return `Your subscription for "${data.course_name || "Course"}" is renewing in ${data.days_left || 3} days (${data.amount} ${data.currency}).`;
+    case "SUBSCRIPTION_PAYMENT_FAILED":
+      return `We couldn't process your payment for "${data.course_name || "Course"}". Please check your payment method.`;
     default:
       return "You have a new notification";
   }

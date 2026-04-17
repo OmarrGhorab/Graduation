@@ -34,6 +34,9 @@ type CourseListResponse struct {
 	BillingType             string       `json:"billingType"`
 	Status                  string       `json:"status"`
 	AttendanceWeight        float64      `json:"attendanceWeight"`
+	PreviewVideoURL         string       `json:"previewVideoUrl,omitempty"`
+	PreviewVideoPublicID    string       `json:"previewVideoPublicId,omitempty"`
+	ReminderIntervals       string       `json:"reminderIntervals"`
 	CreatedAt               time.Time    `json:"createdAt"`
 	UpdatedAt               time.Time    `json:"updatedAt"`
 }

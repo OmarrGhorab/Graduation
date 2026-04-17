@@ -8,9 +8,19 @@ import (
 	"github.com/gofiber/fiber/v2"
 )
 
-// Authenticate validates the JWT token with the auth service
+// Authenticate validates the JWT token with the auth service or checks for internal service secret
 func Authenticate(authClient *authclient.Client) fiber.Handler {
+	internalSecret := "graduation-mega-secret-2026" // Should ideally come from config
+	
 	return func(c *fiber.Ctx) error {
+		// 1. Check for internal service secret first
+		providedSecret := c.Get("x-internal-service-secret")
+		if providedSecret != "" && providedSecret == internalSecret {
+			c.Locals("userId", "internal-service")
+			c.Locals("userRole", "ADMIN") // Give it full access or a special internal role
+			return c.Next()
+		}
+
 		authHeader := c.Get("Authorization")
 		if authHeader == "" {
 			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{

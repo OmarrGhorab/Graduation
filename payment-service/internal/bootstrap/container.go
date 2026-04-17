@@ -166,6 +166,7 @@ func (c *Container) initJobs() {
 		c.SubscriptionRepo,
 		c.PaymentMethodRepo,
 		c.EmailService,
+		c.KafkaProducer,
 	)
 }
 
@@ -190,7 +191,6 @@ func (c *Container) registerRoutes() {
 
 func (c *Container) startBackgroundJobs() {
 	// Start subscription billing job (runs daily at 2 AM)
-	// For testing, you can change this to a shorter interval like 1*time.Hour
 	go c.BillingJob.StartScheduler(c.jobCtx, 24*time.Hour)
 	log.Println("Subscription billing job scheduler started")
 }

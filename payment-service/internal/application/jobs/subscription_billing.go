@@ -9,6 +9,7 @@ import (
 	"github.com/OmarrGhorab/payment-service/internal/application/payment"
 	subscriptionApp "github.com/OmarrGhorab/payment-service/internal/application/subscription"
 	subscriptionDomain "github.com/OmarrGhorab/payment-service/internal/domain/subscription"
+	"github.com/OmarrGhorab/payment-service/internal/infrastructure/messaging/kafka"
 	"github.com/OmarrGhorab/payment-service/internal/infrastructure/notification"
 	"github.com/OmarrGhorab/payment-service/internal/infrastructure/paymob"
 	"github.com/OmarrGhorab/payment-service/internal/infrastructure/persistence/postgres"
@@ -21,6 +22,7 @@ type SubscriptionBillingJob struct {
 	subscriptionRepo    *postgres.SubscriptionRepository
 	paymentMethodRepo   *postgres.PaymentMethodRepository
 	emailService        *notification.EmailService
+	kafkaProducer       *kafka.Producer
 }
 
 func NewSubscriptionBillingJob(
@@ -29,6 +31,7 @@ func NewSubscriptionBillingJob(
 	subRepo *postgres.SubscriptionRepository,
 	pmRepo *postgres.PaymentMethodRepository,
 	emailSvc *notification.EmailService,
+	kafkaProducer *kafka.Producer,
 ) *SubscriptionBillingJob {
 	return &SubscriptionBillingJob{
 		subscriptionService: subSvc,
@@ -36,6 +39,7 @@ func NewSubscriptionBillingJob(
 		subscriptionRepo:    subRepo,
 		paymentMethodRepo:   pmRepo,
 		emailService:        emailSvc,
+		kafkaProducer:       kafkaProducer,
 	}
 }
 
@@ -49,22 +53,72 @@ func (j *SubscriptionBillingJob) Run(ctx context.Context) error {
 		return err
 	}
 
-	if len(dueSubscriptions) == 0 {
+	if len(dueSubscriptions) > 0 {
+		log.Printf("Found %d subscriptions due for billing", len(dueSubscriptions))
+		for _, subID := range dueSubscriptions {
+			if err := j.processSubscription(ctx, subID); err != nil {
+				log.Printf("Error processing subscription %s: %v", subID, err)
+				continue
+			}
+		}
+	} else {
 		log.Println("No subscriptions due for billing")
-		return nil
 	}
 
-	log.Printf("Found %d subscriptions due for billing", len(dueSubscriptions))
-
-	for _, subID := range dueSubscriptions {
-		if err := j.processSubscription(ctx, subID); err != nil {
-			log.Printf("Error processing subscription %s: %v", subID, err)
-			continue
+	// 2. Process pending reminders
+	reminderIDs, err := j.subscriptionService.ProcessRenewalReminders(ctx)
+	if err == nil && len(reminderIDs) > 0 {
+		log.Printf("Found %d subscriptions needing renewal reminders", len(reminderIDs))
+		for _, subID := range reminderIDs {
+			if err := j.processReminder(ctx, subID); err != nil {
+				log.Printf("Error sending reminder for sub %s: %v", subID, err)
+			}
 		}
 	}
 
 	log.Println("Subscription billing job completed")
 	return nil
+}
+
+func (j *SubscriptionBillingJob) processReminder(ctx context.Context, subscriptionID uuid.UUID) error {
+	sub, err := j.subscriptionRepo.GetByID(ctx, subscriptionID)
+	if err != nil {
+		return err
+	}
+
+	// 1. Send Email Reminder
+	amount := fmt.Sprintf("%.2f", float64(sub.PriceCents)/100)
+	emailData := notification.SubscriptionRenewalEmail{
+		UserName:        "Student", // Should get from auth
+		CourseName:      "Course Name", // Should get from course service
+		Amount:          amount,
+		Currency:        sub.Currency,
+		NextBillingDate: sub.NextBillingDate.Format("January 2, 2006"),
+		SubscriptionID:  sub.ID.String(),
+	}
+
+	userEmail := "student@example.com" // TODO: Get from auth
+	if err := j.emailService.SendSubscriptionRenewalNotification(ctx, userEmail, emailData); err != nil {
+		log.Printf("Failed to email reminder for sub %s: %v", sub.ID, err)
+	}
+
+	// 2. Emit Kafka Event for In-App Notification
+	notificationEvent := map[string]interface{}{
+		"event_type":      "subscription.renewal_soon",
+		"user_id":         sub.UserID.String(),
+		"subscription_id": sub.ID.String(),
+		"course_id":       sub.CourseID.String(),
+		"amount":          amount,
+		"currency":        sub.Currency,
+		"next_billing":    sub.NextBillingDate.Format("2006-01-02"),
+		"days_left":       3,
+	}
+	if err := j.kafkaProducer.Publish(ctx, "notifications.v1", sub.UserID.String(), notificationEvent); err != nil {
+		log.Printf("Failed to publish renewal notification event: %v", err)
+	}
+
+	// 3. Update record to mark reminder as sent
+	return j.subscriptionRepo.UpdateReminderSent(ctx, sub.ID)
 }
 
 func (j *SubscriptionBillingJob) processSubscription(ctx context.Context, subscriptionID uuid.UUID) error {

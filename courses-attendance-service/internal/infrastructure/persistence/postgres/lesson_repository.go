@@ -19,6 +19,11 @@ func NewLessonRepository(db *Database) *LessonRepository {
 	return &LessonRepository{db: db}
 }
 
+type LessonWithIntervals struct {
+	lesson.Lesson
+	ReminderIntervals string
+}
+
 func (r *LessonRepository) Create(ctx context.Context, l *lesson.Lesson) error {
 	return r.db.WithContext(ctx).Create(l).Error
 }
@@ -81,4 +86,14 @@ func (r *LessonRepository) GetByCoursesAndTimeRange(ctx context.Context, courseI
 		Order("scheduled_at ASC").
 		Find(&lessons).Error
 	return lessons, err
+}
+
+func (r *LessonRepository) GetLessonsWithCourseIntervals(ctx context.Context, start, end time.Time) ([]LessonWithIntervals, error) {
+	var results []LessonWithIntervals
+	err := r.db.WithContext(ctx).Table("lessons").
+		Select("lessons.*, courses.reminder_intervals").
+		Joins("JOIN courses ON courses.id = lessons.course_id").
+		Where("lessons.status = ? AND lessons.scheduled_at BETWEEN ? AND ?", lesson.LessonStatusScheduled, start, end).
+		Scan(&results).Error
+	return results, err
 }

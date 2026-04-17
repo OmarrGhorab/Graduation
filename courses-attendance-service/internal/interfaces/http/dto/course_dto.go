@@ -30,6 +30,7 @@ type CreateCourseRequest struct {
 	AttendanceWeight        float64  `json:"attendanceWeight" validate:"omitempty,min=0,max=1"`
 	PreviewVideoURL         string   `json:"previewVideoUrl"`
 	PreviewVideoPublicID    string   `json:"previewVideoPublicId"`
+	ReminderIntervals       string   `json:"reminderIntervals"` // Comma-separated minutes (e.g. "15,10,5")
 }
 
 type UpdateCourseRequest struct {
@@ -47,6 +48,7 @@ type UpdateCourseRequest struct {
 	Status                  *string  `json:"status" validate:"omitempty,oneof=ACTIVE PAUSED ARCHIVED"`
 	PreviewVideoURL         *string  `json:"previewVideoUrl"`
 	PreviewVideoPublicID    *string  `json:"previewVideoPublicId"`
+	ReminderIntervals       *string  `json:"reminderIntervals"`
 }
 
 type CourseResponse struct {
@@ -76,6 +78,7 @@ type CourseResponse struct {
 	TeacherProfileImg       string    `json:"teacherProfileImg,omitempty"`
 	PreviewVideoURL         string    `json:"previewVideoUrl,omitempty"`
 	PreviewVideoPublicID    string    `json:"previewVideoPublicId,omitempty"`
+	ReminderIntervals       string    `json:"reminderIntervals"`
 	CreatedAt               time.Time `json:"createdAt"`
 	UpdatedAt               time.Time `json:"updatedAt"`
 }
@@ -105,6 +108,7 @@ func ToCourseResponse(c *course.Course) CourseResponse {
 		TeacherProfileImg:       "", // Will be populated by handler
 		PreviewVideoURL:         c.PreviewVideoURL,
 		PreviewVideoPublicID:    c.PreviewVideoPublicID,
+		ReminderIntervals:       c.ReminderIntervals,
 		CreatedAt:               c.CreatedAt,
 		UpdatedAt:               c.UpdatedAt,
 	}

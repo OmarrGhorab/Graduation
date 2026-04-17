@@ -62,6 +62,9 @@ type Lesson struct {
 	LocationLng     *float64 `gorm:"type:double precision"`
 	GeofenceRadiusM *int     `gorm:"type:integer"`
 
+	// Reminders
+	RemindersSent string `gorm:"type:text;not null;default:''"` // Comma-separated minutes already notified
+
 	// Timestamps
 	CreatedAt time.Time `gorm:"not null;default:now()"`
 	UpdatedAt time.Time `gorm:"not null;default:now()"`

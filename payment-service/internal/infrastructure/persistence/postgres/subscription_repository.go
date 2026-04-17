@@ -58,6 +58,16 @@ func (r *SubscriptionRepository) GetDueSubscriptions(ctx context.Context, before
 	return subs, err
 }
 
+func (r *SubscriptionRepository) GetUpcomingRenewals(ctx context.Context, reminderDate time.Time) ([]subscription.Subscription, error) {
+	var subs []subscription.Subscription
+	// Find subscriptions that expire in the next few days that haven't been reminded yet
+	err := r.db.WithContext(ctx).
+		Where("status = ? AND next_billing_date <= ? AND (last_renewal_reminder_at IS NULL OR last_renewal_reminder_at < last_billing_date OR (last_billing_date IS NULL AND last_renewal_reminder_at < started_at))", 
+			subscription.StatusActive, reminderDate).
+		Find(&subs).Error
+	return subs, err
+}
+
 func (r *SubscriptionRepository) UpdateStatus(ctx context.Context, id uuid.UUID, status subscription.SubscriptionStatus) error {
 	updates := map[string]interface{}{
 		"status":     status,
@@ -83,4 +93,11 @@ func (r *SubscriptionRepository) UpdateBillingDate(ctx context.Context, id uuid.
 			"next_billing_date": nextBilling,
 			"updated_at":        time.Now(),
 		}).Error
+}
+
+func (r *SubscriptionRepository) UpdateReminderSent(ctx context.Context, id uuid.UUID) error {
+	return r.db.WithContext(ctx).
+		Model(&subscription.Subscription{}).
+		Where("id = ?", id).
+		Update("last_renewal_reminder_at", time.Now()).Error
 }

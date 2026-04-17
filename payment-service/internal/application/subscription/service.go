@@ -125,6 +125,25 @@ func (s *Service) ProcessDueSubscriptions(ctx context.Context) ([]uuid.UUID, err
 	return processedIDs, nil
 }
 
+func (s *Service) ProcessRenewalReminders(ctx context.Context) ([]uuid.UUID, error) {
+	// Look for subscriptions renewing in the next 3 days
+	reminderDate := time.Now().AddDate(0, 0, 3)
+	subs, err := s.repo.GetUpcomingRenewals(ctx, reminderDate)
+	if err != nil {
+		return nil, err
+	}
+
+	var notifyIDs []uuid.UUID
+	for _, sub := range subs {
+		// Verify enrollment still active
+		isEnrolled, _, err := s.coursesClient.CheckEnrollment(ctx, sub.UserID.String(), sub.CourseID.String())
+		if err == nil && isEnrolled {
+			notifyIDs = append(notifyIDs, sub.ID)
+		}
+	}
+	return notifyIDs, nil
+}
+
 func (s *Service) UpdateBillingDate(ctx context.Context, subscriptionID uuid.UUID, success bool) error {
 	sub, err := s.repo.GetByID(ctx, subscriptionID)
 	if err != nil {

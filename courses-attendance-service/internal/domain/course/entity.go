@@ -68,6 +68,9 @@ type Course struct {
 	// Progress settings
 	AttendanceWeight float64 `gorm:"type:decimal(3,2);not null;default:0.30"`
 
+	// Reminders
+	ReminderIntervals string `gorm:"type:varchar(255);not null;default:'15,10,5'"`
+
 	// Timestamps
 	CreatedAt time.Time `gorm:"not null;default:now()"`
 	UpdatedAt time.Time `gorm:"not null;default:now()"`

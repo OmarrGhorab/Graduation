@@ -11,7 +11,9 @@ export const TOPICS = [
     'courses.absence.requested.v1',
     'courses.absence.reviewed.v1',
     'courses.progress.updated.v1',
-    'courses.notification.requested.v1'
+    'courses.notification.requested.v1',
+    'courses.lesson.reminder.v1',
+    'notifications.v1'
 ];
 
 export interface EventEnvelope<T = any> {
@@ -43,7 +45,25 @@ export const initConsumer = async () => {
             if (!message.value) return;
 
             try {
-                const envelope: EventEnvelope = JSON.parse(message.value.toString());
+                const rawData = JSON.parse(message.value.toString());
+                
+                // If the message doesn't have an event_type, we can't route it
+                const eventType = rawData.event_type || rawData.eventType;
+                if (!eventType) {
+                    console.warn(`[Kafka] Received message without event_type on topic ${topic}`);
+                    return;
+                }
+
+                // Construct a normalized envelope if it's missing fields
+                const envelope: EventEnvelope = {
+                    event_id: rawData.event_id || rawData.eventId || 'raw-' + Date.now(),
+                    event_type: eventType,
+                    occurred_at: rawData.occurred_at || rawData.occurredAt || new Date().toISOString(),
+                    aggregate_id: rawData.aggregate_id || rawData.aggregateId || '',
+                    actor_user_id: rawData.actor_user_id || rawData.actorUserId || '',
+                    payload: rawData.payload || rawData // Use the whole object as payload if no 'payload' field
+                };
+
                 console.log(`[Kafka] Received event: ${envelope.event_type} on topic: ${topic}`);
 
                 const handler = handlers[envelope.event_type];

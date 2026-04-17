@@ -21,6 +21,7 @@ const (
 	TypeAttendanceFraudDetected = "courses.attendance.fraud_detected.v1"
 	TypeLessonVideoReady    = "courses.lesson.video_ready.v1"
 	TypeLessonVideoFailed   = "courses.lesson.video_failed.v1"
+	TypeLessonReminder      = "courses.lesson.reminder.v1"
 )
 
 // EventEnvelope represents the standard structure for all Kafka events
@@ -130,4 +131,12 @@ type LessonVideoFailedPayload struct {
 	LessonTitle string    `json:"lesson_title"`
 	TeacherID   uuid.UUID `json:"teacher_id"`
 	Error       string    `json:"error"`
+}
+
+type LessonReminderPayload struct {
+	LessonID      uuid.UUID `json:"lesson_id"`
+	CourseID      uuid.UUID `json:"course_id"`
+	LessonTitle   string    `json:"lesson_title"`
+	MinutesBefore int       `json:"minutes_before"`
+	ScheduledAt   time.Time `json:"scheduled_at"`
 }

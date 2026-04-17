@@ -9,6 +9,7 @@ import { initConsumer, stopConsumer } from "./libs/kafka-consumer";
 import { setupGenericHandler } from "./handlers/generic.handler";
 import { setupLessonHandlers } from "./handlers/lesson.handler";
 import { setupAttendanceHandlers } from "./handlers/attendance.handler";
+import { setupSubscriptionHandlers } from "./handlers/subscription.handler";
 
 dotenv.config();
 
@@ -82,6 +83,7 @@ const server = app.listen(PORT, async () => {
         setupGenericHandler();
         setupLessonHandlers();
         setupAttendanceHandlers();
+        setupSubscriptionHandlers();
         await initConsumer();
         console.log('[Kafka] Consumer started successfully');
     } catch (error) {

@@ -72,8 +72,8 @@ func (h *CourseHandler) RegisterRoutes(router fiber.Router) {
 
 	courses := router.Group("/courses", auth)
 
-	// Teacher/Instructor only routes
-	teacherOnly := middleware.RequireRole("TEACHER", "INSTRUCTOR")
+	// Teacher/Instructor only routes (now includes ADMIN for internal services)
+	teacherOnly := middleware.RequireRole("TEACHER", "INSTRUCTOR", "ADMIN")
 	courses.Post("/", teacherOnly, h.CreateCourse)
 	courses.Post("/upload-image", teacherOnly, h.UploadCourseImage)
 	courses.Post("/upload-video", teacherOnly, h.UploadPreviewVideo)
@@ -160,6 +160,7 @@ func (h *CourseHandler) CreateCourse(c *fiber.Ctx) error {
 		AttendanceWeight:        req.AttendanceWeight,
 		PreviewVideoURL:         req.PreviewVideoURL,
 		PreviewVideoPublicID:    req.PreviewVideoPublicID,
+		ReminderIntervals:       req.ReminderIntervals,
 	}
 
 	course, err := h.courseService.CreateCourse(c.Context(), input)
@@ -424,6 +425,9 @@ func (h *CourseHandler) ListCourses(c *fiber.Ctx) error {
 			Status:                  string(crs.Status),
 			AttendanceWeight:        crs.AttendanceWeight,
 			EnrolledStudents:        crs.EnrollmentCount, // Populated by service
+			PreviewVideoURL:         crs.PreviewVideoURL,
+			PreviewVideoPublicID:    crs.PreviewVideoPublicID,
+			ReminderIntervals:       crs.ReminderIntervals,
 			CreatedAt:               crs.CreatedAt,
 			UpdatedAt:               crs.UpdatedAt,
 		}
@@ -618,6 +622,9 @@ func (h *CourseHandler) UpdateCourse(c *fiber.Ctx) error {
 	if req.BillingType != nil {
 		billingType := courseDomain.BillingType(*req.BillingType)
 		input.BillingType = &billingType
+	}
+	if req.ReminderIntervals != nil {
+		input.ReminderIntervals = req.ReminderIntervals
 	}
 	if req.Status != nil {
 		status := courseDomain.CourseStatus(*req.Status)

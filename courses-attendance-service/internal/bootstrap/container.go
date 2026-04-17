@@ -1,8 +1,10 @@
 package bootstrap
 
 import (
+	"context"
 	"fmt"
 	"log"
+	"time"
 
 	absenceApp "github.com/OmarrGhorab/courses-attendance-service/internal/application/absence"
 	attendanceApp "github.com/OmarrGhorab/courses-attendance-service/internal/application/attendance"
@@ -11,6 +13,7 @@ import (
 	lessonApp "github.com/OmarrGhorab/courses-attendance-service/internal/application/lesson"
 	progressApp "github.com/OmarrGhorab/courses-attendance-service/internal/application/progress"
 	watchtimeApp "github.com/OmarrGhorab/courses-attendance-service/internal/application/watchtime"
+	"github.com/OmarrGhorab/courses-attendance-service/internal/application/jobs"
 	"github.com/OmarrGhorab/courses-attendance-service/internal/config"
 	"github.com/OmarrGhorab/courses-attendance-service/internal/infrastructure/aiclient"
 	"github.com/OmarrGhorab/courses-attendance-service/internal/infrastructure/authclient"
@@ -64,6 +67,9 @@ type Container struct {
 	ProgressService   *progressApp.Service
 	CalendarService   *calendarApp.Service
 	WatchTimeService  *watchtimeApp.Service
+
+	// Jobs
+	LessonRemindersJob *jobs.LessonRemindersJob
 }
 
 // New creates a new dependency injection container.
@@ -228,6 +234,13 @@ func (c *Container) initServices() {
 		c.Config.AI.PaymentServiceURL,
 		c.Config.Auth.InternalSecret,
 	)
+
+	// Initialize Jobs
+	c.LessonRemindersJob = jobs.NewLessonRemindersJob(
+		c.LessonRepo,
+		c.EventDispatcher,
+		c.Clock,
+	)
 }
 
 func (c *Container) registerRoutes() {
@@ -290,6 +303,10 @@ func (c *Container) registerRoutes() {
 func (c *Container) Start() error {
 	addr := fmt.Sprintf(":%s", c.Config.Server.Port)
 	log.Printf("Starting server on %s", addr)
+
+	// Start background jobs
+	go c.LessonRemindersJob.StartScheduler(context.Background(), 1*time.Minute)
+
 	return c.App.Listen(addr)
 }
 

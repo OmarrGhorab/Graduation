@@ -31,8 +31,9 @@ type Subscription struct {
 	BillingCycle    BillingCycle       `gorm:"type:varchar(20);not null;default:'MONTHLY'"`
 	PaymentMethodID *uuid.UUID         `gorm:"type:uuid"`
 	NextBillingDate time.Time          `gorm:"not null"`
-	LastBillingDate *time.Time         `gorm:""`
-	StartedAt       time.Time          `gorm:"not null;default:now()"`
+	LastBillingDate       *time.Time         `gorm:""`
+	LastRenewalReminderAt *time.Time         `gorm:""`
+	StartedAt             time.Time          `gorm:"not null;default:now()"`
 	CancelledAt     *time.Time         `gorm:""`
 	CreatedAt       time.Time          `gorm:"not null;default:now()"`
 	UpdatedAt       time.Time          `gorm:"not null;default:now()"`
