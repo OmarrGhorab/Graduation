@@ -211,6 +211,7 @@ func (c *Container) initServices() {
 		c.AbsenceRequestRepo,
 		c.AttendanceRecordRepo,
 		c.LessonRepo,
+		c.CourseRepo,
 		c.AuthClient,
 		c.EventDispatcher,
 		c.Clock,

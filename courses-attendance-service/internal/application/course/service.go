@@ -85,6 +85,21 @@ type CourseBreakdown struct {
 	Status         string    `json:"status"`
 }
 
+// ChatContexts represents all relevant relationships for chat discovery
+type ChatContexts struct {
+	Teachers   []uuid.UUID `json:"teachers"`
+	Students   []uuid.UUID `json:"students"`
+	Assistants []uuid.UUID `json:"assistants"`
+	Groups     []GroupInfo `json:"groups"`
+}
+
+// GroupInfo represents a course-based group
+type GroupInfo struct {
+	ID    uuid.UUID `json:"id"`
+	Name  string    `json:"name"`
+	Image string    `json:"image"`
+}
+
 func NewService(
 	courseRepo *postgres.CourseRepository,
 	subjectRepo *postgres.SubjectRepository,
@@ -120,6 +135,7 @@ type CreateCourseInput struct {
 	SubjectID               uuid.UUID
 	TeacherID               uuid.UUID
 	CourseImage             string
+	GroupImage              string
 	DeliveryType            courseDomain.DeliveryType
 	LocationName            string
 	LocationLat             *float64
@@ -176,6 +192,7 @@ func (s *Service) CreateCourse(ctx context.Context, input CreateCourseInput) (*c
 		SubjectID:               input.SubjectID,
 		TeacherID:               input.TeacherID,
 		CourseImage:             input.CourseImage,
+		GroupImage:              input.GroupImage,
 		DeliveryType:            input.DeliveryType,
 		LocationName:            input.LocationName,
 		LocationLat:             input.LocationLat,
@@ -240,6 +257,8 @@ func (s *Service) ListCourses(ctx context.Context, filters map[string]interface{
 type UpdateCourseInput struct {
 	Title                   *string
 	Description             *string
+	CourseImage             *string
+	GroupImage              *string
 	LocationName            *string
 	LocationLat             *float64
 	LocationLng             *float64
@@ -273,6 +292,12 @@ func (s *Service) UpdateCourse(ctx context.Context, courseID uuid.UUID, teacherI
 	}
 	if input.Description != nil {
 		course.Description = *input.Description
+	}
+	if input.CourseImage != nil {
+		course.CourseImage = *input.CourseImage
+	}
+	if input.GroupImage != nil {
+		course.GroupImage = *input.GroupImage
 	}
 	if input.LocationName != nil {
 		course.LocationName = *input.LocationName
@@ -791,6 +816,140 @@ func (s *Service) GetParentAnalytics(ctx context.Context, parentID uuid.UUID) ([
 	}
 
 	return result, nil
+}
+
+// GetChatContexts returns all academic relationships for a user
+func (s *Service) GetChatContexts(ctx context.Context, userID uuid.UUID, role string) (*ChatContexts, error) {
+	contexts := &ChatContexts{
+		Teachers:   []uuid.UUID{},
+		Students:   []uuid.UUID{},
+		Assistants: []uuid.UUID{},
+		Groups:     []GroupInfo{},
+	}
+
+	switch role {
+	case "STUDENT":
+		// Get enrolled courses
+		courses, err := s.GetStudentCourses(ctx, userID)
+		if err != nil {
+			return nil, err
+		}
+
+		teacherSet := make(map[uuid.UUID]bool)
+		assistantSet := make(map[uuid.UUID]bool)
+
+		for _, c := range courses {
+			teacherSet[c.TeacherID] = true
+			
+			// Priority: GroupImage -> CourseImage
+			img := c.GroupImage
+			if img == "" {
+				img = c.CourseImage
+			}
+			contexts.Groups = append(contexts.Groups, GroupInfo{
+				ID:    c.ID,
+				Name:  c.Title,
+				Image: img,
+			})
+
+			// Get assistants for this course
+			assistants, _ := s.GetCourseAssistants(ctx, c.ID)
+			for _, a := range assistants {
+				assistantSet[a.AssistantID] = true
+			}
+		}
+
+		for tID := range teacherSet {
+			contexts.Teachers = append(contexts.Teachers, tID)
+		}
+		for aID := range assistantSet {
+			contexts.Assistants = append(contexts.Assistants, aID)
+		}
+
+	case "TEACHER", "INSTRUCTOR":
+		// Get taught courses
+		courses, err := s.GetTeacherCourses(ctx, userID)
+		if err != nil {
+			return nil, err
+		}
+
+		studentSet := make(map[uuid.UUID]bool)
+		assistantSet := make(map[uuid.UUID]bool)
+
+		for _, c := range courses {
+			// Priority: GroupImage -> CourseImage
+			img := c.GroupImage
+			if img == "" {
+				img = c.CourseImage
+			}
+			contexts.Groups = append(contexts.Groups, GroupInfo{
+				ID:    c.ID, 
+				Name:  c.Title,
+				Image: img,
+			})
+
+			// Get students
+			enrollments, _ := s.GetCourseEnrollments(ctx, c.ID)
+			for _, e := range enrollments {
+				studentSet[e.UserID] = true
+			}
+
+			// Get assistants
+			assistants, _ := s.GetCourseAssistants(ctx, c.ID)
+			for _, a := range assistants {
+				assistantSet[a.AssistantID] = true
+			}
+		}
+
+		for sID := range studentSet {
+			contexts.Students = append(contexts.Students, sID)
+		}
+		for aID := range assistantSet {
+			contexts.Assistants = append(contexts.Assistants, aID)
+		}
+
+	case "ASSISTANT":
+		// Get all courses where this user is an assistant
+		assistedCourseIDs, err := s.assistantRepo.GetCoursesByAssistantID(ctx, userID)
+		if err != nil {
+			return nil, err
+		}
+
+		if len(assistedCourseIDs) > 0 {
+			courses, _ := s.courseRepo.GetByIDs(ctx, assistedCourseIDs)
+			studentSet := make(map[uuid.UUID]bool)
+			teacherSet := make(map[uuid.UUID]bool)
+
+			for _, c := range courses {
+				// Priority: GroupImage -> CourseImage
+				img := c.GroupImage
+				if img == "" {
+					img = c.CourseImage
+				}
+				contexts.Groups = append(contexts.Groups, GroupInfo{
+					ID:    c.ID, 
+					Name:  c.Title,
+					Image: img,
+				})
+				teacherSet[c.TeacherID] = true
+
+				// Get students
+				enrollments, _ := s.GetCourseEnrollments(ctx, c.ID)
+				for _, e := range enrollments {
+					studentSet[e.UserID] = true
+				}
+			}
+
+			for sID := range studentSet {
+				contexts.Students = append(contexts.Students, sID)
+			}
+			for tID := range teacherSet {
+				contexts.Teachers = append(contexts.Teachers, tID)
+			}
+		}
+	}
+
+	return contexts, nil
 }
 
 func (s *Service) GetTeacherAuthority(ctx context.Context, teacherID uuid.UUID) (int, error) {

@@ -145,6 +145,7 @@ func (h *CourseHandler) CreateCourse(c *fiber.Ctx) error {
 		SubjectID:               subjectID,
 		TeacherID:               teacherID,
 		CourseImage:             req.CourseImage,
+		GroupImage:              req.GroupImage,
 		DeliveryType:            courseDomain.DeliveryType(req.DeliveryType),
 		LocationName:            req.LocationName,
 		LocationLat:             req.LocationLat,
@@ -611,6 +612,8 @@ func (h *CourseHandler) UpdateCourse(c *fiber.Ctx) error {
 	input := courseApp.UpdateCourseInput{
 		Title:                   req.Title,
 		Description:             req.Description,
+		CourseImage:             req.CourseImage,
+		GroupImage:              req.GroupImage,
 		LocationName:            req.LocationName,
 		LocationLat:             req.LocationLat,
 		LocationLng:             req.LocationLng,

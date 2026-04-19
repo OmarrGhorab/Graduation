@@ -22,6 +22,10 @@ type MessageCreatedEvent struct {
 	MediaURLs      []string  `json:"media_urls,omitempty"`
 	CreatedAt      time.Time `json:"created_at"`
 
+	// Enriched Sender Info (New)
+	SenderName  string `json:"sender_name,omitempty"`
+	SenderImage string `json:"sender_image,omitempty"`
+
 	// Routing Info (CRITICAL for Gateway)
 	RecipientIDs          []string       `json:"recipient_ids"`
 	RecipientUnreadCounts map[string]int `json:"recipient_unread_counts,omitempty"`
@@ -33,6 +37,7 @@ type TypingEvent struct {
 	ConversationID string   `json:"conversation_id"`
 	UserID         string   `json:"user_id"`
 	UserName       string   `json:"user_name,omitempty"`
+	UserImage      string   `json:"user_image,omitempty"`
 	IsTyping       bool     `json:"is_typing"`
 	RecipientIDs   []string `json:"recipient_ids"`
 }

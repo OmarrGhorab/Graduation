@@ -30,7 +30,7 @@ func main() {
 	// 4. Layers
 	repo := repository.NewRepository(db)
 	mediaSvc := service.NewMediaService(cfg)
-	userSvc := service.NewUserService(cfg.AuthServiceURL, cfg.InternalServiceSecret)
+	userSvc := service.NewUserService(cfg.AuthServiceURL, cfg.CoursesServiceURL, cfg.InternalServiceSecret)
 	presenceSvc := service.NewPresenceService(cfg.WSGatewayURL)
 	notificationSvc := service.NewNotificationService(cfg.NotificationServiceURL, cfg.InternalServiceSecret)
 	svc := service.NewService(repo, producer, mediaSvc, userSvc, presenceSvc, notificationSvc)

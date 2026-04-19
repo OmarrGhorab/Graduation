@@ -15,6 +15,7 @@ type CreateCourseRequest struct {
 	Description             string   `json:"description"`
 	SubjectID               string   `json:"subjectId" validate:"required,uuid"`
 	CourseImage             string   `json:"courseImage"`
+	GroupImage              string   `json:"groupImage"`
 	DeliveryType            string   `json:"deliveryType" validate:"required,oneof=ONLINE OFFLINE"`
 	LocationName            string   `json:"locationName"`
 	LocationLat             *float64 `json:"locationLat"`
@@ -37,6 +38,7 @@ type UpdateCourseRequest struct {
 	Title                   *string  `json:"title" validate:"omitempty,min=3,max=255"`
 	Description             *string  `json:"description"`
 	CourseImage             *string  `json:"courseImage"`
+	GroupImage              *string  `json:"groupImage"`
 	LocationName            *string  `json:"locationName"`
 	LocationLat             *float64 `json:"locationLat"`
 	LocationLng             *float64 `json:"locationLng"`
@@ -59,6 +61,7 @@ type CourseResponse struct {
 	SubjectName             string    `json:"subjectName,omitempty"`
 	TeacherID               uuid.UUID `json:"teacherId"`
 	CourseImage             string    `json:"courseImage,omitempty"`
+	GroupImage              string    `json:"groupImage,omitempty"`
 	DeliveryType            string    `json:"deliveryType"`
 	LocationName            string    `json:"locationName,omitempty"`
 	LocationLat             *float64  `json:"locationLat,omitempty"`
@@ -91,6 +94,7 @@ func ToCourseResponse(c *course.Course) CourseResponse {
 		SubjectID:               c.SubjectID,
 		TeacherID:               c.TeacherID,
 		CourseImage:             c.CourseImage,
+		GroupImage:              c.GroupImage,
 		DeliveryType:            string(c.DeliveryType),
 		LocationName:            c.LocationName,
 		LocationLat:             c.LocationLat,

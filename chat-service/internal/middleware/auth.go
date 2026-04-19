@@ -57,6 +57,14 @@ func (m *AuthMiddleware) Protected() fiber.Handler {
 		}
 
 		c.Locals("user_id", userID)
+		
+		// Extract Role
+		if role, ok := claims["role"].(string); ok {
+			c.Locals("user_role", role)
+		} else {
+			c.Locals("user_role", "STUDENT") // Fallback
+		}
+
 		return c.Next()
 	}
 }

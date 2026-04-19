@@ -534,6 +534,84 @@ func (s *Service) ScanAttendance(ctx context.Context, input ScanInput) (*ScanRes
 	}, nil
 }
 
+// ManualOverrideInput represents the input for manual attendance override
+type ManualOverrideInput struct {
+	LessonID    uuid.UUID
+	StudentID   uuid.UUID
+	OverriddenBy uuid.UUID
+	Status      attendanceDomain.AttendanceStatus
+	Reason      string
+}
+
+// ManualOverride allows a teacher to manually set/update a student's attendance status
+func (s *Service) ManualOverride(ctx context.Context, input ManualOverrideInput) error {
+	now := s.clock.Now()
+
+	// 1. Verify lesson exists
+	lesson, err := s.lessonRepo.GetByID(ctx, input.LessonID)
+	if err != nil {
+		return err
+	}
+	if lesson == nil {
+		return ErrLessonNotFound
+	}
+
+	// 2. Verify course/teacher authority (optional, but handled by handler middleware mostly)
+	course, err := s.courseRepo.GetByID(ctx, lesson.CourseID)
+	if err != nil {
+		return err
+	}
+
+	// 3. Find existing record or create new one
+	record, err := s.recordRepo.GetByLessonAndStudent(ctx, input.LessonID, input.StudentID)
+	if err != nil {
+		return err
+	}
+
+	var newRecord *attendanceDomain.AttendanceRecord
+	if record != nil {
+		record.Status = input.Status
+		record.IsManualOverride = true
+		record.OverrideBy = &input.OverriddenBy
+		record.OverrideReason = input.Reason
+		record.UpdatedAt = now
+		newRecord = record
+	} else {
+		newRecord = &attendanceDomain.AttendanceRecord{
+			ID:               uuid.New(),
+			LessonID:         input.LessonID,
+			StudentID:        input.StudentID,
+			Status:           input.Status,
+			IsManualOverride: true,
+			OverrideBy:       &input.OverriddenBy,
+			OverrideReason:   input.Reason,
+			CreatedAt:        now,
+			UpdatedAt:        now,
+		}
+	}
+
+	if err := s.recordRepo.Upsert(ctx, newRecord); err != nil {
+		return err
+	}
+
+	// 4. Trigger progress recomputation
+	go s.progressService.RecomputeProgress(context.Background(), lesson.CourseID, input.StudentID)
+
+	// 5. Emit event
+	s.events.EmitAttendanceRecorded(ctx, input.StudentID, events.AttendanceRecordedPayload{
+		LessonID:    input.LessonID,
+		LessonTitle: lesson.Title,
+		CourseID:    lesson.CourseID,
+		CourseTitle: course.Title,
+		StudentID:   input.StudentID,
+		TeacherID:   course.TeacherID,
+		Status:      string(input.Status),
+		ScannedAt:   now,
+	})
+
+	return nil
+}
+
 func (s *Service) determineAttendanceStatus(scanTime time.Time, lesson *lessonDomain.Lesson, course *courseDomain.Course) attendanceDomain.AttendanceStatus {
 	if lesson.StartsAt == nil {
 		return attendanceDomain.AttendanceStatusPresent
@@ -603,9 +681,10 @@ func (s *Service) GetStudentCourseAnalytics(ctx context.Context, studentID, cour
 	recordMap := make(map[uuid.UUID]*attendanceDomain.AttendanceRecord)
 	for i := range records {
 		recordMap[records[i].LessonID] = &records[i]
-		if records[i].Status == attendanceDomain.AttendanceStatusPresent {
+		switch records[i].Status {
+		case attendanceDomain.AttendanceStatusPresent:
 			presentCount++
-		} else if records[i].Status == attendanceDomain.AttendanceStatusLate {
+		case attendanceDomain.AttendanceStatusLate:
 			lateCount++
 		}
 	}
@@ -754,11 +833,12 @@ func (s *Service) calculateRank(ctx context.Context, courseID, studentID uuid.UU
 		presentCount := 0
 		lateCount := 0
 		for _, r := range records {
-			if r.Status == attendanceDomain.AttendanceStatusPresent {
-				presentCount++
-			} else if r.Status == attendanceDomain.AttendanceStatusLate {
-				lateCount++
-			}
+		switch r.Status {
+		case attendanceDomain.AttendanceStatusPresent:
+			presentCount++
+		case attendanceDomain.AttendanceStatusLate:
+			lateCount++
+		}
 		}
 		
 		rate := 0.0

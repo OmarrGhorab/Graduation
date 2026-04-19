@@ -36,6 +36,7 @@ func (h *InternalHandler) RegisterRoutes(router fiber.Router) {
 	internal.Get("/courses", h.ListAllCourses)
 	internal.Get("/analytics/user/:userId", h.GetUserAnalytics)
 	internal.Get("/reports/student/:userId/weekly", h.GetWeeklyReport)
+	internal.Get("/users/:userId/chat-contexts", h.GetChatContexts)
 }
 
 func (h *InternalHandler) InternalEnroll(c *fiber.Ctx) error {
@@ -265,6 +266,34 @@ func (h *InternalHandler) GetWeeklyReport(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{
 		"success": true,
 		"data":    reportData,
+	})
+}
+
+func (h *InternalHandler) GetChatContexts(c *fiber.Ctx) error {
+	userId, err := uuid.Parse(c.Params("userId"))
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"success": false,
+			"error":   "Invalid user ID",
+		})
+	}
+
+	role := c.Query("role")
+	if role == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"success": false,
+			"error":   "role query parameter is required",
+		})
+	}
+
+	contexts, err := h.courseService.GetChatContexts(c.Context(), userId, role)
+	if err != nil {
+		return handleServiceError(c, err)
+	}
+
+	return c.JSON(fiber.Map{
+		"success": true,
+		"data":    contexts,
 	})
 }
 

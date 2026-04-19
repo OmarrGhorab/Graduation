@@ -39,6 +39,7 @@ type Course struct {
 	SubjectID   uuid.UUID `gorm:"type:uuid;not null"`
 	TeacherID   uuid.UUID `gorm:"type:uuid;not null"`
 	CourseImage string    `gorm:"type:text"`
+	GroupImage  string    `gorm:"type:text"`
 	PreviewVideoURL      string    `gorm:"type:text"`
 	PreviewVideoPublicID string    `gorm:"type:text"`
 

@@ -318,6 +318,49 @@ export const getParentsInternal = async (
 };
 
 /**
+ * Internal endpoint to get all children linked to a parent
+ */
+export const getChildrenInternal = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const { userId } = req.params;
+
+    if (!userId) {
+      return res.status(400).json({ 
+        success: false, 
+        error: "userId is required" 
+      });
+    }
+
+    const links = await prisma.parentChildLink.findMany({
+      where: { parentId: userId },
+      include: {
+        child: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            username: true,
+            profileImg: true,
+            role: true
+          }
+        }
+      }
+    });
+
+    res.status(200).json({
+      success: true,
+      data: links.map(l => l.child)
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
  * Internal endpoint to search users by name, username or email
  */
 export const searchUsersInternal = async (

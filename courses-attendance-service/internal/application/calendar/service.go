@@ -40,8 +40,17 @@ func NewService(
 	}
 }
 
+// CalendarFilter represents the filter criteria for calendar events
+type CalendarFilter struct {
+	Start       time.Time
+	End         time.Time
+	SubjectID   *uuid.UUID
+	SubjectName string
+	Statuses    []string // e.g., ["SCHEDULED", "COMPLETED"]
+}
+
 // GetStudentCalendar returns all upcoming lessons for a student
-func (s *Service) GetStudentCalendar(ctx context.Context, studentID uuid.UUID, start, end time.Time) ([]CalendarEvent, error) {
+func (s *Service) GetStudentCalendar(ctx context.Context, studentID uuid.UUID, filter CalendarFilter) ([]CalendarEvent, error) {
 	// 1. Get student enrollments
 	enrollments, err := s.enrollmentRepo.GetByUserID(ctx, studentID)
 	if err != nil {
@@ -53,25 +62,39 @@ func (s *Service) GetStudentCalendar(ctx context.Context, studentID uuid.UUID, s
 	}
 
 	courseIDs := make([]uuid.UUID, len(enrollments))
-	courseMap := make(map[uuid.UUID]string)
 	for i, e := range enrollments {
 		courseIDs[i] = e.CourseID
 	}
 
-	// 2. Get courses for titles
-	courses, err := s.courseRepo.GetByIDs(ctx, courseIDs)
+	// 2. Get filtered lessons
+	lessons, err := s.lessonRepo.GetFilteredLessons(ctx, courseIDs, filter.SubjectID, filter.SubjectName, filter.Statuses, filter.Start, filter.End)
 	if err != nil {
 		return nil, err
-	}
-	for _, c := range courses {
-		courseMap[c.ID] = c.Title
 	}
 
-	// 3. Get lessons for these courses in time range
-	// We need a repository method for this
-	lessons, err := s.lessonRepo.GetByCoursesAndTimeRange(ctx, courseIDs, start, end)
+	if len(lessons) == 0 {
+		return []CalendarEvent{}, nil
+	}
+
+	// 3. Get courses info for the required lessons
+	neededCourseIDs := make(map[uuid.UUID]bool)
+	for _, l := range lessons {
+		neededCourseIDs[l.CourseID] = true
+	}
+	
+	uniqueCourseIDs := make([]uuid.UUID, 0, len(neededCourseIDs))
+	for cid := range neededCourseIDs {
+		uniqueCourseIDs = append(uniqueCourseIDs, cid)
+	}
+
+	courses, err := s.courseRepo.GetByIDs(ctx, uniqueCourseIDs)
 	if err != nil {
 		return nil, err
+	}
+
+	courseMap := make(map[uuid.UUID]string)
+	for _, c := range courses {
+		courseMap[c.ID] = c.Title
 	}
 
 	events := make([]CalendarEvent, len(lessons))
@@ -95,7 +118,7 @@ func (s *Service) GetStudentCalendar(ctx context.Context, studentID uuid.UUID, s
 }
 
 // GetTeacherCalendar returns all scheduled lessons for a teacher
-func (s *Service) GetTeacherCalendar(ctx context.Context, teacherID uuid.UUID, start, end time.Time) ([]CalendarEvent, error) {
+func (s *Service) GetTeacherCalendar(ctx context.Context, teacherID uuid.UUID, filter CalendarFilter) ([]CalendarEvent, error) {
 	// 1. Get teacher courses
 	courses, err := s.courseRepo.GetByTeacherID(ctx, teacherID)
 	if err != nil {
@@ -113,8 +136,8 @@ func (s *Service) GetTeacherCalendar(ctx context.Context, teacherID uuid.UUID, s
 		courseMap[c.ID] = c.Title
 	}
 
-	// 2. Get lessons
-	lessons, err := s.lessonRepo.GetByCoursesAndTimeRange(ctx, courseIDs, start, end)
+	// 2. Get filtered lessons
+	lessons, err := s.lessonRepo.GetFilteredLessons(ctx, courseIDs, filter.SubjectID, filter.SubjectName, filter.Statuses, filter.Start, filter.End)
 	if err != nil {
 		return nil, err
 	}

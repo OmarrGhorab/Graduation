@@ -273,6 +273,20 @@ func (r *CourseAssistantRepository) Delete(ctx context.Context, courseID, assist
 	return r.db.WithContext(ctx).Delete(&course.CourseAssistant{}, "course_id = ? AND assistant_id = ?", courseID, assistantID).Error
 }
 
+func (r *CourseAssistantRepository) GetCoursesByAssistantID(ctx context.Context, assistantID uuid.UUID) ([]uuid.UUID, error) {
+	var assistants []course.CourseAssistant
+	err := r.db.WithContext(ctx).Model(&course.CourseAssistant{}).Where("assistant_id = ?", assistantID).Find(&assistants).Error
+	if err != nil {
+		return nil, err
+	}
+
+	courseIDs := make([]uuid.UUID, len(assistants))
+	for i, a := range assistants {
+		courseIDs[i] = a.CourseID
+	}
+	return courseIDs, nil
+}
+
 // TeacherRatingRepository implements teacher rating data access
 type TeacherRatingRepository struct {
 	db *Database

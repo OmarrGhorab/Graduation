@@ -29,6 +29,7 @@ type Service struct {
 	absenceRepo *postgres.AbsenceRequestRepository
 	recordRepo  *postgres.AttendanceRecordRepository
 	lessonRepo  *postgres.LessonRepository
+	courseRepo  *postgres.CourseRepository
 	authClient  *authclient.Client
 	events      *notificationevents.EventDispatcher
 	clock       clock.Clock
@@ -38,6 +39,7 @@ func NewService(
 	absenceRepo *postgres.AbsenceRequestRepository,
 	recordRepo *postgres.AttendanceRecordRepository,
 	lessonRepo *postgres.LessonRepository,
+	courseRepo *postgres.CourseRepository,
 	authClient *authclient.Client,
 	events *notificationevents.EventDispatcher,
 	clk clock.Clock,
@@ -46,6 +48,7 @@ func NewService(
 		absenceRepo: absenceRepo,
 		recordRepo:  recordRepo,
 		lessonRepo:  lessonRepo,
+		courseRepo:  courseRepo,
 		authClient:  authClient,
 		events:      events,
 		clock:       clk,
@@ -159,12 +162,31 @@ func (s *Service) RespondToRequest(ctx context.Context, input RespondRequestInpu
 		return nil, ErrInvalidStatus
 	}
 
-	// Verify the responder is a linked parent
+	// Verify responder authority: either a linked parent or the lesson's teacher
+	isAuthorized := false
+
+	// 1. Check if parent
 	link, err := s.authClient.VerifyParentLink(ctx, input.RespondedBy.String(), req.StudentID.String())
-	if err != nil {
-		return nil, err
+	if err == nil && link.Valid {
+		isAuthorized = true
 	}
-	if !link.Valid {
+
+	// 2. If not parent, check if teacher/owner of the lesson
+	if !isAuthorized {
+		lesson, err := s.lessonRepo.GetByID(ctx, req.LessonID)
+		if err == nil && lesson != nil {
+			course, err := s.courseRepo.GetByID(ctx, lesson.CourseID)
+			if err == nil && course != nil {
+				// Check if this user is the teacher or an authorized assistant
+				if course.TeacherID == input.RespondedBy {
+					isAuthorized = true
+				}
+				// TODO: Check assistants if needed
+			}
+		}
+	}
+
+	if !isAuthorized {
 		return nil, ErrUnauthorized
 	}
 

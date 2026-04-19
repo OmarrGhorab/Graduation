@@ -97,3 +97,35 @@ func (r *LessonRepository) GetLessonsWithCourseIntervals(ctx context.Context, st
 		Scan(&results).Error
 	return results, err
 }
+func (r *LessonRepository) GetFilteredLessons(ctx context.Context, courseIDs []uuid.UUID, subjectID *uuid.UUID, subjectName string, statuses []string, start, end time.Time) ([]lesson.Lesson, error) {
+	query := r.db.WithContext(ctx).Table("lessons").
+		Select("lessons.*").
+		Joins("JOIN courses ON courses.id = lessons.course_id")
+
+	if subjectName != "" {
+		query = query.Joins("JOIN subjects ON subjects.id = courses.subject_id").
+			Where("subjects.name ILIKE ?", "%"+subjectName+"%")
+	}
+
+	query = query.Where("lessons.course_id IN ? AND lessons.scheduled_at BETWEEN ? AND ?", courseIDs, start, end)
+
+	if subjectID != nil {
+		query = query.Where("courses.subject_id = ?", *subjectID)
+	}
+
+	if len(statuses) > 0 {
+		query = query.Where("lessons.status IN ?", statuses)
+	}
+
+	var lessons []lesson.Lesson
+	err := query.Order(`
+		CASE 
+			WHEN lessons.status = 'LIVE' THEN 1 
+			WHEN lessons.status = 'SCHEDULED' THEN 2 
+			WHEN lessons.status = 'COMPLETED' THEN 3 
+			ELSE 4 
+		END ASC, 
+		lessons.scheduled_at ASC
+	`).Find(&lessons).Error
+	return lessons, err
+}

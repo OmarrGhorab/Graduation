@@ -1,6 +1,6 @@
 import express from 'express';
 import { authenticateInternalService } from '../middleware';
-import { getUserPreferencesInternal, validateTokenInternal, getBatchUsersInternal, getUserInternal, verifyAttendanceContextInternal, getParentsInternal, searchUsersInternal } from '../controllers/internal.controller';
+import { getUserPreferencesInternal, validateTokenInternal, getBatchUsersInternal, getUserInternal, verifyAttendanceContextInternal, getParentsInternal, getChildrenInternal, searchUsersInternal } from '../controllers/internal.controller';
 
 const router = express.Router();
 
@@ -22,5 +22,8 @@ router.post('/attendance/verify-context', authenticateInternalService, verifyAtt
 
 // Internal endpoint to get parents of a child
 router.get('/users/:userId/parents', authenticateInternalService, getParentsInternal);
+
+// Internal endpoint to get children of a parent
+router.get('/users/:userId/children', authenticateInternalService, getChildrenInternal);
 
 export default router;

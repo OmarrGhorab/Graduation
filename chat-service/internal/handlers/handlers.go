@@ -105,7 +105,12 @@ func (h *Handler) GetUserConversations(c *fiber.Ctx) error {
 		}
 	}
 	
-	convs, err := h.svc.GetUserConversations(userID, convType, search, limit, offset)
+	role := "STUDENT"
+	if r, ok := c.Locals("user_role").(string); ok {
+		role = r
+	}
+
+	convs, err := h.svc.GetUserConversations(userID, role, convType, search, limit, offset)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 	}
@@ -373,4 +378,15 @@ func (h *Handler) MarkMessageAsRead(c *fiber.Ctx) error {
 		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 	}
 	return c.JSON(fiber.Map{"message": "Message marked as read"})
+}
+
+func (h *Handler) DiscoverContacts(c *fiber.Ctx) error {
+	userID := c.Locals("user_id").(string)
+	role := c.Locals("user_role").(string)
+
+	discovery, err := h.svc.DiscoverContacts(userID, role)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.JSON(discovery)
 }

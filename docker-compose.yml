@@ -69,6 +69,7 @@ services:
       - INTERNAL_SERVICE_SECRET=graduation-mega-secret-2026
       - NOTIFICATION_SERVICE_URL=http://host.docker.internal:6003
       - AUTH_SERVICE_URL=http://host.docker.internal:6001
+      - COURSES_SERVICE_URL=http://courses-service-1:8085
       - WS_GATEWAY_URL=http://ws-gateway-1:6005
       - CLOUDINARY_CLOUD_NAME=${CLOUDINARY_CLOUD_NAME}
       - CLOUDINARY_API_KEY=${CLOUDINARY_API_KEY}
@@ -97,6 +98,7 @@ services:
       - INTERNAL_SERVICE_SECRET=graduation-mega-secret-2026
       - NOTIFICATION_SERVICE_URL=http://host.docker.internal:6003
       - AUTH_SERVICE_URL=http://host.docker.internal:6001
+      - COURSES_SERVICE_URL=http://courses-service-1:8085
       - WS_GATEWAY_URL=http://ws-gateway-2:6015
       - CLOUDINARY_CLOUD_NAME=${CLOUDINARY_CLOUD_NAME}
       - CLOUDINARY_API_KEY=${CLOUDINARY_API_KEY}
@@ -125,6 +127,7 @@ services:
       - INTERNAL_SERVICE_SECRET=graduation-mega-secret-2026
       - NOTIFICATION_SERVICE_URL=http://host.docker.internal:6003
       - AUTH_SERVICE_URL=http://host.docker.internal:6001
+      - COURSES_SERVICE_URL=http://courses-service-1:8085
       - WS_GATEWAY_URL=http://ws-gateway-3:6025
       - CLOUDINARY_CLOUD_NAME=${CLOUDINARY_CLOUD_NAME}
       - CLOUDINARY_API_KEY=${CLOUDINARY_API_KEY}

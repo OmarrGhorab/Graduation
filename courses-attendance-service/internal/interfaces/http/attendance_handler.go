@@ -4,6 +4,7 @@ import (
 	"errors"
 
 	attendanceApp "github.com/OmarrGhorab/courses-attendance-service/internal/application/attendance"
+	attendanceDomain "github.com/OmarrGhorab/courses-attendance-service/internal/domain/attendance"
 	"github.com/OmarrGhorab/courses-attendance-service/internal/infrastructure/authclient"
 	"github.com/OmarrGhorab/courses-attendance-service/internal/interfaces/http/dto"
 	"github.com/OmarrGhorab/courses-attendance-service/internal/interfaces/http/middleware"
@@ -37,6 +38,9 @@ func (h *AttendanceHandler) RegisterRoutes(router fiber.Router) {
 	// Lesson QR management
 	router.Get("/lessons/:id/qr", auth, managementOnly, h.GetCurrentQR)
 	router.Post("/lessons/:id/qr/rotate", auth, managementOnly, h.RotateQR)
+
+	// Manual Override
+	attendance.Post("/lesson/:id/override", managementOnly, h.ManualOverride)
 }
 
 // ScanAttendance godoc
@@ -260,6 +264,67 @@ func (h *AttendanceHandler) RotateQR(c *fiber.Ctx) error {
 			ExpiresAt: token.ExpiresAt,
 		},
 		"message": "QR token rotated successfully",
+	})
+}
+
+// ManualOverride godoc
+// @Summary Manually override a student's attendance status
+// @Tags attendance
+// @Accept json
+// @Produce json
+// @Param id path string true "Lesson ID"
+// @Param body body dto.ManualOverrideRequest true "Override data"
+// @Success 200 {object} fiber.Map
+// @Router /api/v1/attendance/lesson/{id}/override [post]
+func (h *AttendanceHandler) ManualOverride(c *fiber.Ctx) error {
+	lessonID, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"success": false,
+			"error":   "Invalid lesson ID",
+		})
+	}
+
+	var req dto.ManualOverrideRequest
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"success": false,
+			"error":   "Invalid request body",
+		})
+	}
+
+	if err := ValidateStruct(req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"success": false,
+			"errors":  FormatValidationErrors(err),
+		})
+	}
+
+	teacherID, err := getUserIDFromContext(c)
+	if err != nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"success": false,
+			"error":   "Unauthorized",
+		})
+	}
+
+	studentID, _ := uuid.Parse(req.StudentID)
+
+	input := attendanceApp.ManualOverrideInput{
+		LessonID:     lessonID,
+		StudentID:    studentID,
+		OverriddenBy: teacherID,
+		Status:       attendanceDomain.AttendanceStatus(req.Status),
+		Reason:       req.Reason,
+	}
+
+	if err := h.attendanceService.ManualOverride(c.Context(), input); err != nil {
+		return handleAttendanceError(c, err)
+	}
+
+	return c.JSON(fiber.Map{
+		"success": true,
+		"message": "Attendance record overridden successfully",
 	})
 }
 
