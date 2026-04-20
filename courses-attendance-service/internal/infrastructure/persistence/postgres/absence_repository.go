@@ -70,3 +70,11 @@ func (r *AbsenceRequestRepository) GetByLessonAndStudent(ctx context.Context, le
 	}
 	return &req, err
 }
+func (r *AbsenceRequestRepository) GetByStudentIDs(ctx context.Context, studentIDs []uuid.UUID) ([]absence.AbsenceRequest, error) {
+	var requests []absence.AbsenceRequest
+	err := r.db.WithContext(ctx).
+		Where("student_id IN ?", studentIDs).
+		Order("created_at DESC").
+		Find(&requests).Error
+	return requests, err
+}

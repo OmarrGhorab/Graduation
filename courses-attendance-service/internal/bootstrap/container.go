@@ -14,6 +14,7 @@ import (
 	progressApp "github.com/OmarrGhorab/courses-attendance-service/internal/application/progress"
 	watchtimeApp "github.com/OmarrGhorab/courses-attendance-service/internal/application/watchtime"
 	"github.com/OmarrGhorab/courses-attendance-service/internal/application/jobs"
+	parentApp "github.com/OmarrGhorab/courses-attendance-service/internal/application/parent"
 	"github.com/OmarrGhorab/courses-attendance-service/internal/config"
 	"github.com/OmarrGhorab/courses-attendance-service/internal/infrastructure/aiclient"
 	"github.com/OmarrGhorab/courses-attendance-service/internal/infrastructure/authclient"
@@ -67,6 +68,7 @@ type Container struct {
 	ProgressService   *progressApp.Service
 	CalendarService   *calendarApp.Service
 	WatchTimeService  *watchtimeApp.Service
+	ParentService     *parentApp.Service
 
 	// Jobs
 	LessonRemindersJob *jobs.LessonRemindersJob
@@ -236,6 +238,15 @@ func (c *Container) initServices() {
 		c.Config.Auth.InternalSecret,
 	)
 
+	c.ParentService = parentApp.NewService(
+		c.AuthClient,
+		c.ProgressService,
+		c.AttendanceService,
+		c.EnrollmentRepo,
+		c.CourseRepo,
+		c.AttendanceRecordRepo,
+	)
+
 	// Initialize Jobs
 	c.LessonRemindersJob = jobs.NewLessonRemindersJob(
 		c.LessonRepo,
@@ -298,6 +309,10 @@ func (c *Container) registerRoutes() {
 	// Watch time tracking routes
 	watchTimeHandler := http.NewWatchTimeHandler(c.WatchTimeService, c.AuthClient)
 	watchTimeHandler.RegisterRoutes(apiV1)
+
+	// Parent routes
+	parentHandler := http.NewParentHandler(c.ParentService, c.AuthClient)
+	parentHandler.RegisterRoutes(apiV1)
 }
 
 // Start starts the HTTP server.

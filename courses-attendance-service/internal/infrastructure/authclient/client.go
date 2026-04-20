@@ -252,7 +252,7 @@ func (c *Client) GetUserInfo(ctx context.Context, userID string) (*UserInfo, err
 
 // GetChildren fetches all children linked to a parent
 func (c *Client) GetChildren(ctx context.Context, parentID string) ([]ChildInfo, error) {
-	url := fmt.Sprintf("%s/api/v1/parent-link/children?parentId=%s", c.baseURL, parentID)
+	url := fmt.Sprintf("%s/api/v1/internal/users/%s/children", c.baseURL, parentID)
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {

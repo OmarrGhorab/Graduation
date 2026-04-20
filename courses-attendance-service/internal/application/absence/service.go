@@ -249,7 +249,31 @@ func (s *Service) GetLessonRequests(ctx context.Context, lessonID uuid.UUID) ([]
 
 // GetPendingParentRequests returns all pending requests for students linked to this parent
 func (s *Service) GetPendingParentRequests(ctx context.Context, parentID uuid.UUID) ([]absenceDomain.AbsenceRequest, error) {
-	// In a real scenario, we might need a list of child IDs first
-	// For now, let's use the repository method which might need to be refined if we don't have child list
 	return s.absenceRepo.GetPendingByParent(ctx, parentID)
+}
+
+// GetParentKidsAbsences returns all absence requests (pending, approved, rejected) for all children of a parent
+func (s *Service) GetParentKidsAbsences(ctx context.Context, parentID uuid.UUID) ([]absenceDomain.AbsenceRequest, error) {
+	// 1. Get linked kids from auth service
+	children, err := s.authClient.GetChildren(ctx, parentID.String())
+	if err != nil {
+		return nil, err
+	}
+
+	if len(children) == 0 {
+		return []absenceDomain.AbsenceRequest{}, nil
+	}
+
+	// 2. Extract IDs
+	childIDs := make([]uuid.UUID, len(children))
+	for i, c := range children {
+		uid, err := uuid.Parse(c.ID)
+		if err != nil {
+			continue
+		}
+		childIDs[i] = uid
+	}
+
+	// 3. Fetch all requests for these kids
+	return s.absenceRepo.GetByStudentIDs(ctx, childIDs)
 }

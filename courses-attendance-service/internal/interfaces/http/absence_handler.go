@@ -34,6 +34,7 @@ func (h *AbsenceHandler) RegisterRoutes(router fiber.Router) {
 	absences.Get("/student/:id", h.GetStudentRequests)
 	absences.Get("/lesson/:id", managementOnly, h.GetLessonRequests)
 	absences.Get("/pending-parent", h.GetPendingParentRequests)
+	absences.Get("/parent/kids", h.GetParentKidsAbsences)
 	absences.Post("/:id/respond", h.RespondToRequest)
 }
 
@@ -234,6 +235,40 @@ func (h *AbsenceHandler) GetPendingParentRequests(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"success": false,
 			"error":   "Failed to fetch absence requests",
+		})
+	}
+
+	var responses []dto.AbsenceRequestResponse
+	for _, r := range requests {
+		responses = append(responses, dto.ToAbsenceRequestResponse(&r))
+	}
+
+	return c.JSON(fiber.Map{
+		"success": true,
+		"data":    responses,
+	})
+}
+
+// GetParentKidsAbsences godoc
+// @Summary Get all absence requests for all children linked to this parent
+// @Tags absences
+// @Produce json
+// @Success 200 {array} dto.AbsenceRequestResponse
+// @Router /api/v1/absences/parent/kids [get]
+func (h *AbsenceHandler) GetParentKidsAbsences(c *fiber.Ctx) error {
+	parentID, err := getUserIDFromContext(c)
+	if err != nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"success": false,
+			"error":   "Unauthorized",
+		})
+	}
+
+	requests, err := h.absenceService.GetParentKidsAbsences(c.Context(), parentID)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"success": false,
+			"error":   "Failed to fetch children's absence requests",
 		})
 	}
 

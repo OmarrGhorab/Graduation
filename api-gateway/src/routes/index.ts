@@ -189,6 +189,7 @@ export function setupRoutes(app: Express, config: AppConfig): { wsProxy: any } {
     "/api/v1/calendar",
     "/api/v1/internal",
     "/api/v1/watch",
+    "/api/v1/parent",
   ];
 
 

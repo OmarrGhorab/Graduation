@@ -13,6 +13,8 @@ const (
 	AbsenceReasonParentExcuse AbsenceReasonType = "PARENT_EXCUSE"
 	AbsenceReasonMedical      AbsenceReasonType = "MEDICAL"
 	AbsenceReasonEmergency    AbsenceReasonType = "EMERGENCY"
+	AbsenceReasonTechnical    AbsenceReasonType = "TECHNICAL"
+	AbsenceReasonPersonal     AbsenceReasonType = "PERSONAL"
 )
 
 // AbsenceStatus represents the approval state of an absence request

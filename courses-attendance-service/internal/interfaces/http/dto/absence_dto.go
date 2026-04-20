@@ -10,7 +10,7 @@ import (
 type CreateAbsenceRequest struct {
 	LessonID   string `json:"lessonId" validate:"required,uuid"`
 	StudentID  string `json:"studentId" validate:"required,uuid"`
-	ReasonType string `json:"reasonType" validate:"required,oneof=PARENT_EXCUSE MEDICAL EMERGENCY"`
+	ReasonType string `json:"reasonType" validate:"required,oneof=PARENT_EXCUSE MEDICAL EMERGENCY TECHNICAL PERSONAL"`
 	ReasonText string `json:"reasonText"`
 	Attachment string `json:"attachment"`
 }
