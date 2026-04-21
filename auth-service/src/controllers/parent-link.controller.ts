@@ -46,7 +46,13 @@ export const verifyParentChildLink = async (
     });
 
     res.status(200).json({
-      linked: !!link,
+      success: true,
+      data: {
+        valid: !!link,
+        parentId: parentId as string,
+        childId: childId as string,
+        relation: "Parent"
+      }
     });
   } catch (err) {
     next(err);

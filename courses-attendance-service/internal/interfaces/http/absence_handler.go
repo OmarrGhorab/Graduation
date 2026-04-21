@@ -89,7 +89,7 @@ func (h *AbsenceHandler) CreateRequest(c *fiber.Ctx) error {
 
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{
 		"success": true,
-		"data":    dto.ToAbsenceRequestResponse(absenceReq),
+		"data":    dto.ToAbsenceRequestResponse(*absenceReq),
 	})
 }
 
@@ -141,7 +141,7 @@ func (h *AbsenceHandler) RespondToRequest(c *fiber.Ctx) error {
 
 	return c.JSON(fiber.Map{
 		"success": true,
-		"data":    dto.ToAbsenceRequestResponse(absenceReq),
+		"data":    dto.ToAbsenceRequestResponse(*absenceReq),
 	})
 }
 
@@ -171,7 +171,7 @@ func (h *AbsenceHandler) GetStudentRequests(c *fiber.Ctx) error {
 
 	var responses []dto.AbsenceRequestResponse
 	for _, r := range requests {
-		responses = append(responses, dto.ToAbsenceRequestResponse(&r))
+		responses = append(responses, dto.ToAbsenceRequestResponse(r))
 	}
 
 	return c.JSON(fiber.Map{
@@ -206,7 +206,7 @@ func (h *AbsenceHandler) GetLessonRequests(c *fiber.Ctx) error {
 
 	var responses []dto.AbsenceRequestResponse
 	for _, r := range requests {
-		responses = append(responses, dto.ToAbsenceRequestResponse(&r))
+		responses = append(responses, dto.ToAbsenceRequestResponse(r))
 	}
 
 	return c.JSON(fiber.Map{
@@ -240,7 +240,7 @@ func (h *AbsenceHandler) GetPendingParentRequests(c *fiber.Ctx) error {
 
 	var responses []dto.AbsenceRequestResponse
 	for _, r := range requests {
-		responses = append(responses, dto.ToAbsenceRequestResponse(&r))
+		responses = append(responses, dto.ToAbsenceRequestResponse(r))
 	}
 
 	return c.JSON(fiber.Map{
@@ -274,7 +274,7 @@ func (h *AbsenceHandler) GetParentKidsAbsences(c *fiber.Ctx) error {
 
 	var responses []dto.AbsenceRequestResponse
 	for _, r := range requests {
-		responses = append(responses, dto.ToAbsenceRequestResponse(&r))
+		responses = append(responses, dto.ToAbsenceRequestResponse(r))
 	}
 
 	return c.JSON(fiber.Map{

@@ -427,6 +427,58 @@ func (s *Service) UpdateLesson(ctx context.Context, lesson *lessonDomain.Lesson)
 	return s.lessonRepo.Update(ctx, lesson)
 }
 
+// PatchLesson updates specific fields of a lesson
+func (s *Service) PatchLesson(ctx context.Context, teacherID uuid.UUID, lessonID uuid.UUID, updates map[string]interface{}) (*lessonDomain.Lesson, error) {
+	// 1. Get lesson
+	lesson, err := s.lessonRepo.GetByID(ctx, lessonID)
+	if err != nil {
+		return nil, err
+	}
+	if lesson == nil {
+		return nil, ErrLessonNotFound
+	}
+
+	// 2. Verify ownership
+	course, err := s.courseRepo.GetByID(ctx, lesson.CourseID)
+	if err != nil {
+		return nil, err
+	}
+	if course == nil {
+		return nil, ErrCourseNotFound
+	}
+	if course.TeacherID != teacherID {
+		return nil, ErrUnauthorized
+	}
+
+	// 3. Apply updates
+	if title, ok := updates["title"].(string); ok {
+		lesson.Title = title
+	}
+	if description, ok := updates["description"].(string); ok {
+		lesson.Description = description
+	}
+	if thumbnail, ok := updates["thumbnail_url"].(string); ok {
+		lesson.ThumbnailURL = thumbnail
+	}
+	if scheduledAt, ok := updates["scheduled_at"].(time.Time); ok {
+		lesson.ScheduledAt = scheduledAt.UTC()
+	}
+	if duration, ok := updates["duration_minutes"].(int); ok {
+		lesson.DurationMinutes = duration
+	}
+	if isFree, ok := updates["is_free"].(bool); ok {
+		lesson.IsFree = isFree
+	}
+
+	lesson.UpdatedAt = s.clock.Now()
+
+	if err := s.lessonRepo.Update(ctx, lesson); err != nil {
+		return nil, err
+	}
+
+	return lesson, nil
+}
+
 // ProcessLessonVideoAsync uploads a video to Cloudinary in the background
 func (s *Service) ProcessLessonVideoAsync(ctx context.Context, lessonID, teacherID uuid.UUID, tempFilePath string, filename string) {
 	// 1. Clean up temp file when done

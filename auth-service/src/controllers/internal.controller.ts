@@ -353,7 +353,10 @@ export const getChildrenInternal = async (
 
     res.status(200).json({
       success: true,
-      data: links.map(l => l.child)
+      data: links.map(l => ({
+        ...l.child,
+        relation: "Child"
+      }))
     });
   } catch (err) {
     next(err);

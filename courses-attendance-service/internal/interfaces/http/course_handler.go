@@ -82,6 +82,7 @@ func (h *CourseHandler) RegisterRoutes(router fiber.Router) {
 	courses.Get("/:id/assistants", teacherOnly, h.GetCourseAssistants)
 	courses.Delete("/:id/assistants/:assistantId", teacherOnly, h.RemoveAssistant)
 	courses.Get("/:id/enrollments", teacherOnly, h.GetCourseEnrollments)
+	courses.Get("/teacher", teacherOnly, h.GetMyCourses)
 	courses.Get("/teacher/analytics", teacherOnly, h.GetTeacherAnalytics)
 	courses.Get("/parent/analytics", middleware.RequireRole("PARENT"), h.GetParentAnalytics)
 
@@ -527,14 +528,66 @@ func (h *CourseHandler) GetMyCourses(c *fiber.Ctx) error {
 	}
 
 	var responses []dto.CourseResponse
+	var totalRevenue float64
 	for _, crs := range courses {
-		responses = append(responses, dto.ToCourseResponse(&crs))
+		resp := dto.ToCourseResponse(&crs)
+		
+		// If teacher, add analytics for EACH course
+		if role == "TEACHER" || role == "INSTRUCTOR" {
+			courseRevenue := float64(crs.EnrollmentCount) * crs.Price
+			totalRevenue += courseRevenue
+			
+			analytics := &dto.CourseAnalytics{
+				TotalStudents:  crs.EnrollmentCount,
+				TotalRevenue:   courseRevenue, 
+				ActiveStudents: crs.EnrollmentCount,
+			}
+			
+			if h.courseRatingRepo != nil {
+				if rating, _ := h.courseRatingRepo.GetCourseAvgRating(c.Context(), crs.ID); rating != nil {
+					analytics.AverageRating = rating.AvgRating
+					analytics.ReviewCount = rating.TotalRatings
+				}
+			}
+			
+			resp.Analytics = analytics
+		}
+		
+		responses = append(responses, resp)
 	}
 
-	return c.JSON(fiber.Map{
+	responseBody := fiber.Map{
 		"success": true,
 		"data":    responses,
-	})
+	}
+
+	// Add aggregate summary if teacher
+	if role == "TEACHER" || role == "INSTRUCTOR" {
+		summary := fiber.Map{
+			"totalRevenue":        totalRevenue,
+			"totalUniqueStudents": 0,
+			"averageRating":       0.0,
+			"totalRatings":        0,
+		}
+		
+		// Get UNIQUE students across ALL courses
+		if h.enrollmentRepo != nil {
+			uniqueStudents, _ := h.enrollmentRepo.CountByTeacherID(c.Context(), userID)
+			summary["totalUniqueStudents"] = uniqueStudents
+		}
+		
+		// Get GLOBAL average rating
+		if h.ratingRepo != nil {
+			if rating, _ := h.ratingRepo.GetTeacherAvgRating(c.Context(), userID); rating != nil {
+				summary["averageRating"] = rating.AvgRating
+				summary["totalRatings"] = rating.TotalRatings
+			}
+		}
+		
+		responseBody["summary"] = summary
+	}
+
+	return c.JSON(responseBody)
 }
 
 // GetMySubjects godoc

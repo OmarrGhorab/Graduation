@@ -3,7 +3,7 @@ package dto
 import (
 	"time"
 
-	"github.com/OmarrGhorab/courses-attendance-service/internal/domain/absence"
+	absenceApp "github.com/OmarrGhorab/courses-attendance-service/internal/application/absence"
 	"github.com/google/uuid"
 )
 
@@ -24,6 +24,7 @@ type AbsenceRequestResponse struct {
 	ID                 uuid.UUID  `json:"id"`
 	LessonID           uuid.UUID  `json:"lessonId"`
 	StudentID          uuid.UUID  `json:"studentId"`
+	StudentName        string     `json:"studentName,omitempty"`
 	ReasonType         string     `json:"reasonType"`
 	ReasonText         string     `json:"reasonText"`
 	AttachmentURL      string     `json:"attachmentUrl,omitempty"`
@@ -34,15 +35,18 @@ type AbsenceRequestResponse struct {
 	RespondedAt        *time.Time `json:"respondedAt,omitempty"`
 	ResponseNote       string     `json:"responseNote,omitempty"`
 	AttendanceRecordID *uuid.UUID `json:"attendanceRecordId,omitempty"`
+	LessonTitle        string     `json:"lessonTitle,omitempty"`
+	CourseTitle        string     `json:"courseTitle,omitempty"`
 	CreatedAt          time.Time  `json:"createdAt"`
 	UpdatedAt          time.Time  `json:"updatedAt"`
 }
 
-func ToAbsenceRequestResponse(r *absence.AbsenceRequest) AbsenceRequestResponse {
+func ToAbsenceRequestResponse(r absenceApp.EnrichedAbsenceRequest) AbsenceRequestResponse {
 	return AbsenceRequestResponse{
 		ID:                 r.ID,
 		LessonID:           r.LessonID,
 		StudentID:          r.StudentID,
+		StudentName:        r.StudentName,
 		ReasonType:         string(r.ReasonType),
 		ReasonText:         r.ReasonText,
 		AttachmentURL:      r.AttachmentURL,
@@ -53,6 +57,8 @@ func ToAbsenceRequestResponse(r *absence.AbsenceRequest) AbsenceRequestResponse 
 		RespondedAt:        r.RespondedAt,
 		ResponseNote:       r.ResponseNote,
 		AttendanceRecordID: r.AttendanceRecordID,
+		LessonTitle:        r.LessonTitle,
+		CourseTitle:        r.CourseTitle,
 		CreatedAt:          r.CreatedAt,
 		UpdatedAt:          r.UpdatedAt,
 	}

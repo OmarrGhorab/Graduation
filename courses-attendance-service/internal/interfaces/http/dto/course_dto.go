@@ -53,37 +53,47 @@ type UpdateCourseRequest struct {
 	ReminderIntervals       *string  `json:"reminderIntervals"`
 }
 
+type CourseAnalytics struct {
+	TotalRevenue    float64 `json:"totalRevenue"`
+	TotalStudents   int     `json:"totalStudents"`
+	ActiveStudents  int     `json:"activeStudents"`
+	CompletionRate  float64 `json:"completionRate"`
+	AverageRating   float64 `json:"averageRating"`
+	ReviewCount     int     `json:"reviewCount"`
+}
+
 type CourseResponse struct {
-	ID                      uuid.UUID `json:"id"`
-	Title                   string    `json:"title"`
-	Description             string    `json:"description"`
-	SubjectID               uuid.UUID `json:"subjectId"`
-	SubjectName             string    `json:"subjectName,omitempty"`
-	TeacherID               uuid.UUID `json:"teacherId"`
-	CourseImage             string    `json:"courseImage,omitempty"`
-	GroupImage              string    `json:"groupImage,omitempty"`
-	DeliveryType            string    `json:"deliveryType"`
-	LocationName            string    `json:"locationName,omitempty"`
-	LocationLat             *float64  `json:"locationLat,omitempty"`
-	LocationLng             *float64  `json:"locationLng,omitempty"`
-	GeofenceRadiusM         int       `json:"geofenceRadiusM"`
-	TotalLessons            int       `json:"totalLessons"`
-	AttendanceWindowMinutes int       `json:"attendanceWindowMinutes"`
-	Price                   float64   `json:"price"`
-	Currency                string    `json:"currency"`
-	IsPaid                  bool      `json:"isPaid"`
-	BillingType             string    `json:"billingType"`
-	Status                  string    `json:"status"`
-	AttendanceWeight        float64   `json:"attendanceWeight"`
-	EnrollmentCount         int       `json:"enrollmentCount"`
-	TeacherAuthority        int       `json:"teacherAuthority,omitempty"`
-	TeacherName             string    `json:"teacherName,omitempty"`
-	TeacherProfileImg       string    `json:"teacherProfileImg,omitempty"`
-	PreviewVideoURL         string    `json:"previewVideoUrl,omitempty"`
-	PreviewVideoPublicID    string    `json:"previewVideoPublicId,omitempty"`
-	ReminderIntervals       string    `json:"reminderIntervals"`
-	CreatedAt               time.Time `json:"createdAt"`
-	UpdatedAt               time.Time `json:"updatedAt"`
+	ID                      uuid.UUID        `json:"id"`
+	Title                   string           `json:"title"`
+	Description             string           `json:"description"`
+	SubjectID               uuid.UUID        `json:"subjectId"`
+	SubjectName             string           `json:"subjectName,omitempty"`
+	TeacherID               uuid.UUID        `json:"teacherId"`
+	CourseImage             string           `json:"courseImage,omitempty"`
+	GroupImage              string           `json:"groupImage,omitempty"`
+	DeliveryType            string           `json:"deliveryType"`
+	LocationName            string           `json:"locationName,omitempty"`
+	LocationLat             *float64         `json:"locationLat,omitempty"`
+	LocationLng             *float64         `json:"locationLng,omitempty"`
+	GeofenceRadiusM         int              `json:"geofenceRadiusM"`
+	TotalLessons            int              `json:"totalLessons"`
+	AttendanceWindowMinutes int              `json:"attendanceWindowMinutes"`
+	Price                   float64          `json:"price"`
+	Currency                string           `json:"currency"`
+	IsPaid                  bool             `json:"isPaid"`
+	BillingType             string           `json:"billingType"`
+	Status                  string           `json:"status"`
+	AttendanceWeight        float64          `json:"attendanceWeight"`
+	EnrollmentCount         int              `json:"enrollmentCount"`
+	TeacherAuthority        int              `json:"teacherAuthority,omitempty"`
+	TeacherName             string           `json:"teacherName,omitempty"`
+	TeacherProfileImg       string           `json:"teacherProfileImg,omitempty"`
+	PreviewVideoURL         string           `json:"previewVideoUrl,omitempty"`
+	PreviewVideoPublicID    string           `json:"previewVideoPublicId,omitempty"`
+	ReminderIntervals       string           `json:"reminderIntervals"`
+	Analytics               *CourseAnalytics `json:"analytics,omitempty"`
+	CreatedAt               time.Time        `json:"createdAt"`
+	UpdatedAt               time.Time        `json:"updatedAt"`
 }
 
 func ToCourseResponse(c *course.Course) CourseResponse {
@@ -294,4 +304,13 @@ type UpdateLessonMaterialsRequest struct {
 	VideoPublicID *string `json:"videoPublicId"` // Cloudinary public ID
 	MaterialsURL  *string `json:"materialsUrl"`  // Additional materials URL
 	Duration      *int    `json:"duration"`      // Video duration in seconds
+}
+
+type UpdateLessonRequest struct {
+	Title           *string    `json:"title,omitempty"`
+	Description     *string    `json:"description,omitempty"`
+	ThumbnailURL    *string    `json:"thumbnailUrl,omitempty"`
+	ScheduledAt     *time.Time `json:"scheduledAt,omitempty"`
+	DurationMinutes *int       `json:"durationMinutes,omitempty"`
+	IsFree          *bool      `json:"isFree,omitempty"`
 }

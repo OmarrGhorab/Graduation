@@ -48,6 +48,8 @@ type AttendanceRecordResponse struct {
 	ScannedAt            *time.Time `json:"scannedAt,omitempty"`
 	DistanceFromLocation *float64   `json:"distanceFromLocation,omitempty"`
 	IsManualOverride     bool       `json:"isManualOverride"`
+	LessonTitle          string     `json:"lessonTitle,omitempty"`
+	CourseTitle          string     `json:"courseTitle,omitempty"`
 	CreatedAt            time.Time  `json:"createdAt"`
 	UpdatedAt            time.Time  `json:"updatedAt"`
 }

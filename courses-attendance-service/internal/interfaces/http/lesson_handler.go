@@ -43,6 +43,7 @@ func (h *LessonHandler) RegisterRoutes(router fiber.Router) {
 
 	lessons := router.Group("/lessons", auth)
 	lessons.Post("/", teacherOnly, h.CreateLesson)
+	lessons.Patch("/:id", teacherOnly, h.UpdateLesson)
 	lessons.Get("/:id", h.GetLesson)
 	lessons.Post("/:id/start", teacherOnly, h.StartLesson)
 	lessons.Post("/:id/end", teacherOnly, h.EndLesson)
@@ -750,5 +751,71 @@ func (h *LessonHandler) DeleteVideo(c *fiber.Ctx) error {
 		"success": true,
 		"data":    dto.ToLessonResponse(lesson),
 		"message": "Video deleted successfully",
+	})
+}
+
+// UpdateLesson godoc
+// @Summary Update an existing lesson
+// @Tags lessons
+// @Accept json
+// @Produce json
+// @Param id path string true "Lesson ID"
+// @Param body body dto.UpdateLessonRequest true "Update data"
+// @Success 200 {object} dto.LessonResponse
+// @Router /api/v1/lessons/{id} [patch]
+func (h *LessonHandler) UpdateLesson(c *fiber.Ctx) error {
+	lessonID, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"success": false,
+			"error":   "Invalid lesson ID",
+		})
+	}
+
+	var req dto.UpdateLessonRequest
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"success": false,
+			"error":   "Invalid request body",
+		})
+	}
+
+	teacherID, err := getUserIDFromContext(c)
+	if err != nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"success": false,
+			"error":   "Unauthorized",
+		})
+	}
+
+	updates := make(map[string]interface{})
+	if req.Title != nil {
+		updates["title"] = *req.Title
+	}
+	if req.Description != nil {
+		updates["description"] = *req.Description
+	}
+	if req.ThumbnailURL != nil {
+		updates["thumbnail_url"] = *req.ThumbnailURL
+	}
+	if req.ScheduledAt != nil {
+		updates["scheduled_at"] = *req.ScheduledAt
+	}
+	if req.DurationMinutes != nil {
+		updates["duration_minutes"] = *req.DurationMinutes
+	}
+	if req.IsFree != nil {
+		updates["is_free"] = *req.IsFree
+	}
+
+	lesson, err := h.lessonService.PatchLesson(c.Context(), teacherID, lessonID, updates)
+	if err != nil {
+		return handleLessonServiceError(c, err)
+	}
+
+	return c.JSON(fiber.Map{
+		"success": true,
+		"data":    dto.ToLessonResponse(lesson),
+		"message": "Lesson updated successfully",
 	})
 }

@@ -7,6 +7,7 @@ import (
 	attendanceApp "github.com/OmarrGhorab/courses-attendance-service/internal/application/attendance"
 	progressApp "github.com/OmarrGhorab/courses-attendance-service/internal/application/progress"
 	attendanceDomain "github.com/OmarrGhorab/courses-attendance-service/internal/domain/attendance"
+	lessonDomain "github.com/OmarrGhorab/courses-attendance-service/internal/domain/lesson"
 	"github.com/OmarrGhorab/courses-attendance-service/internal/infrastructure/authclient"
 	"github.com/OmarrGhorab/courses-attendance-service/internal/infrastructure/persistence/postgres"
 	"github.com/google/uuid"
@@ -42,12 +43,19 @@ type CourseProgress struct {
 	TotalLessons    int       `json:"totalLessons"`
 }
 
+type ParentAttendanceRecord struct {
+	attendanceDomain.AttendanceRecord
+	LessonTitle string
+	CourseTitle string
+}
+
 type Service struct {
 	authClient        *authclient.Client
 	progressService   *progressApp.Service
 	attendanceService *attendanceApp.Service
 	enrollmentRepo    *postgres.EnrollmentRepository
 	courseRepo        *postgres.CourseRepository
+	lessonRepo        *postgres.LessonRepository
 	recordRepo        *postgres.AttendanceRecordRepository
 }
 
@@ -57,6 +65,7 @@ func NewService(
 	attendanceService *attendanceApp.Service,
 	enrollmentRepo *postgres.EnrollmentRepository,
 	courseRepo *postgres.CourseRepository,
+	lessonRepo *postgres.LessonRepository,
 	recordRepo *postgres.AttendanceRecordRepository,
 ) *Service {
 	return &Service{
@@ -65,6 +74,7 @@ func NewService(
 		attendanceService: attendanceService,
 		enrollmentRepo:    enrollmentRepo,
 		courseRepo:        courseRepo,
+		lessonRepo:        lessonRepo,
 		recordRepo:        recordRepo,
 	}
 }
@@ -125,7 +135,12 @@ func (s *Service) GetChildDetailedProgress(ctx context.Context, parentID, studen
 		cp := CourseProgress{
 			CourseID:    course.ID,
 			CourseTitle: course.Title,
-			TeacherName: "", // In a real scenario, we'd fetch teacher's name
+			TeacherName: "Unknown Teacher",
+		}
+
+		// Fetch teacher name from Auth service
+		if teacher, err := s.authClient.GetUserInfo(ctx, course.TeacherID.String()); err == nil && teacher != nil {
+			cp.TeacherName = teacher.Name
 		}
 
 		if snapshot != nil {
@@ -153,13 +168,51 @@ func (s *Service) GetChildDetailedProgress(ctx context.Context, parentID, studen
 	}, nil
 }
 
-func (s *Service) GetChildAttendanceHistory(ctx context.Context, parentID, studentID uuid.UUID) ([]attendanceDomain.AttendanceRecord, error) {
+func (s *Service) GetChildAttendanceHistory(ctx context.Context, parentID, studentID uuid.UUID) ([]ParentAttendanceRecord, error) {
 	// 1. Verify link
 	link, err := s.authClient.VerifyParentLink(ctx, parentID.String(), studentID.String())
 	if err != nil || !link.Valid {
 		return nil, ErrParentNotLinked
 	}
 
-	// 2. Fetch history
-	return s.recordRepo.GetByStudentID(ctx, studentID)
+	// 2. Fetch records
+	records, err := s.recordRepo.GetByStudentID(ctx, studentID)
+	if err != nil {
+		return nil, err
+	}
+
+	// 3. Enrich with titles
+	enriched := make([]ParentAttendanceRecord, len(records))
+	lessonCache := make(map[uuid.UUID]*lessonDomain.Lesson)
+	courseCache := make(map[uuid.UUID]string)
+
+	for i, r := range records {
+		item := ParentAttendanceRecord{AttendanceRecord: r}
+		
+		// Lookup Lesson
+		lesson, ok := lessonCache[r.LessonID]
+		if !ok {
+			lesson, _ = s.lessonRepo.GetByID(ctx, r.LessonID)
+			lessonCache[r.LessonID] = lesson
+		}
+
+		if lesson != nil {
+			item.LessonTitle = lesson.Title
+			
+			// Lookup Course
+			cTitle, ok := courseCache[lesson.CourseID]
+			if !ok {
+				course, _ := s.courseRepo.GetByID(ctx, lesson.CourseID)
+				if course != nil {
+					cTitle = course.Title
+					courseCache[lesson.CourseID] = cTitle
+				}
+			}
+			item.CourseTitle = cTitle
+		}
+		
+		enriched[i] = item
+	}
+
+	return enriched, nil
 }

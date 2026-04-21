@@ -35,6 +35,58 @@ type Service struct {
 	clock       clock.Clock
 }
 
+type EnrichedAbsenceRequest struct {
+	absenceDomain.AbsenceRequest
+	LessonTitle string
+	CourseTitle string
+	StudentName string
+}
+
+func (s *Service) enrichRequests(ctx context.Context, requests []absenceDomain.AbsenceRequest) []EnrichedAbsenceRequest {
+	enriched := make([]EnrichedAbsenceRequest, len(requests))
+	lessonCache := make(map[uuid.UUID]string)
+	courseCache := make(map[uuid.UUID]string)
+	studentCache := make(map[uuid.UUID]string)
+
+	for i, r := range requests {
+		e := EnrichedAbsenceRequest{AbsenceRequest: r}
+
+		// 1. Get Student Name
+		if name, ok := studentCache[r.StudentID]; ok {
+			e.StudentName = name
+		} else {
+			if user, err := s.authClient.GetUserInfo(ctx, r.StudentID.String()); err == nil && user != nil {
+				e.StudentName = user.Name
+				studentCache[r.StudentID] = user.Name
+			}
+		}
+
+		// 2. Get Lesson Title
+		if title, ok := lessonCache[r.LessonID]; ok {
+			e.LessonTitle = title
+		} else {
+			lesson, _ := s.lessonRepo.GetByID(ctx, r.LessonID)
+			if lesson != nil {
+				e.LessonTitle = lesson.Title
+				lessonCache[r.LessonID] = lesson.Title
+
+				// 3. Get Course Title
+				if cTitle, ok := courseCache[lesson.CourseID]; ok {
+					e.CourseTitle = cTitle
+				} else {
+					course, _ := s.courseRepo.GetByID(ctx, lesson.CourseID)
+					if course != nil {
+						e.CourseTitle = course.Title
+						courseCache[lesson.CourseID] = course.Title
+					}
+				}
+			}
+		}
+		enriched[i] = e
+	}
+	return enriched
+}
+
 func NewService(
 	absenceRepo *postgres.AbsenceRequestRepository,
 	recordRepo *postgres.AttendanceRecordRepository,
@@ -66,7 +118,7 @@ type CreateRequestInput struct {
 }
 
 // CreateRequest creates a new absence request
-func (s *Service) CreateRequest(ctx context.Context, input CreateRequestInput) (*absenceDomain.AbsenceRequest, error) {
+func (s *Service) CreateRequest(ctx context.Context, input CreateRequestInput) (*EnrichedAbsenceRequest, error) {
 	// If the requester is not the student, verify they are a linked parent
 	if input.RequestedBy != input.StudentID {
 		link, err := s.authClient.VerifyParentLink(ctx, input.RequestedBy.String(), input.StudentID.String())
@@ -137,7 +189,17 @@ func (s *Service) CreateRequest(ctx context.Context, input CreateRequestInput) (
 		Reason:      req.ReasonText,
 	})
 
-	return req, nil
+	// Enrich with titles for the response
+	course, _ := s.courseRepo.GetByID(ctx, lesson.CourseID)
+	enriched := &EnrichedAbsenceRequest{
+		AbsenceRequest: *req,
+		LessonTitle:    lesson.Title,
+	}
+	if course != nil {
+		enriched.CourseTitle = course.Title
+	}
+
+	return enriched, nil
 }
 
 // RespondRequestInput represents a response to an absence request
@@ -149,7 +211,7 @@ type RespondRequestInput struct {
 }
 
 // RespondToRequest allows a parent to approve or reject a request
-func (s *Service) RespondToRequest(ctx context.Context, input RespondRequestInput) (*absenceDomain.AbsenceRequest, error) {
+func (s *Service) RespondToRequest(ctx context.Context, input RespondRequestInput) (*EnrichedAbsenceRequest, error) {
 	req, err := s.absenceRepo.GetByID(ctx, input.RequestID)
 	if err != nil {
 		return nil, err
@@ -234,26 +296,40 @@ func (s *Service) RespondToRequest(ctx context.Context, input RespondRequestInpu
 		}
 	}
 
-	return req, nil
+	// Enrich for response
+	enriched := s.enrichRequests(ctx, []absenceDomain.AbsenceRequest{*req})
+	return &enriched[0], nil
 }
 
 // GetStudentRequests returns all absence requests for a student
-func (s *Service) GetStudentRequests(ctx context.Context, studentID uuid.UUID) ([]absenceDomain.AbsenceRequest, error) {
-	return s.absenceRepo.GetByStudentID(ctx, studentID)
+func (s *Service) GetStudentRequests(ctx context.Context, studentID uuid.UUID) ([]EnrichedAbsenceRequest, error) {
+	requests, err := s.absenceRepo.GetByStudentID(ctx, studentID)
+	if err != nil {
+		return nil, err
+	}
+	return s.enrichRequests(ctx, requests), nil
 }
 
 // GetLessonRequests returns all absence requests for a lesson
-func (s *Service) GetLessonRequests(ctx context.Context, lessonID uuid.UUID) ([]absenceDomain.AbsenceRequest, error) {
-	return s.absenceRepo.GetByLessonID(ctx, lessonID)
+func (s *Service) GetLessonRequests(ctx context.Context, lessonID uuid.UUID) ([]EnrichedAbsenceRequest, error) {
+	requests, err := s.absenceRepo.GetByLessonID(ctx, lessonID)
+	if err != nil {
+		return nil, err
+	}
+	return s.enrichRequests(ctx, requests), nil
 }
 
 // GetPendingParentRequests returns all pending requests for students linked to this parent
-func (s *Service) GetPendingParentRequests(ctx context.Context, parentID uuid.UUID) ([]absenceDomain.AbsenceRequest, error) {
-	return s.absenceRepo.GetPendingByParent(ctx, parentID)
+func (s *Service) GetPendingParentRequests(ctx context.Context, parentID uuid.UUID) ([]EnrichedAbsenceRequest, error) {
+	requests, err := s.absenceRepo.GetPendingByParent(ctx, parentID)
+	if err != nil {
+		return nil, err
+	}
+	return s.enrichRequests(ctx, requests), nil
 }
 
 // GetParentKidsAbsences returns all absence requests (pending, approved, rejected) for all children of a parent
-func (s *Service) GetParentKidsAbsences(ctx context.Context, parentID uuid.UUID) ([]absenceDomain.AbsenceRequest, error) {
+func (s *Service) GetParentKidsAbsences(ctx context.Context, parentID uuid.UUID) ([]EnrichedAbsenceRequest, error) {
 	// 1. Get linked kids from auth service
 	children, err := s.authClient.GetChildren(ctx, parentID.String())
 	if err != nil {
@@ -261,7 +337,7 @@ func (s *Service) GetParentKidsAbsences(ctx context.Context, parentID uuid.UUID)
 	}
 
 	if len(children) == 0 {
-		return []absenceDomain.AbsenceRequest{}, nil
+		return []EnrichedAbsenceRequest{}, nil
 	}
 
 	// 2. Extract IDs
@@ -275,5 +351,9 @@ func (s *Service) GetParentKidsAbsences(ctx context.Context, parentID uuid.UUID)
 	}
 
 	// 3. Fetch all requests for these kids
-	return s.absenceRepo.GetByStudentIDs(ctx, childIDs)
+	requests, err := s.absenceRepo.GetByStudentIDs(ctx, childIDs)
+	if err != nil {
+		return nil, err
+	}
+	return s.enrichRequests(ctx, requests), nil
 }

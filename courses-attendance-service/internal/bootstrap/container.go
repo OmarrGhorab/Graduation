@@ -244,6 +244,7 @@ func (c *Container) initServices() {
 		c.AttendanceService,
 		c.EnrollmentRepo,
 		c.CourseRepo,
+		c.LessonRepo,
 		c.AttendanceRecordRepo,
 	)
 

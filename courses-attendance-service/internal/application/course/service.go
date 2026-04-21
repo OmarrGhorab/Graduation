@@ -454,7 +454,17 @@ func (s *Service) GetSubjects(ctx context.Context) ([]courseDomain.Subject, erro
 
 // GetTeacherCourses returns all courses for a teacher
 func (s *Service) GetTeacherCourses(ctx context.Context, teacherID uuid.UUID) ([]courseDomain.Course, error) {
-	return s.courseRepo.GetByTeacherID(ctx, teacherID)
+	courses, err := s.courseRepo.GetByTeacherID(ctx, teacherID)
+	if err != nil {
+		return nil, err
+	}
+
+	for i := range courses {
+		count, _ := s.enrollmentRepo.CountByCourseID(ctx, courses[i].ID)
+		courses[i].EnrollmentCount = int(count)
+	}
+
+	return courses, nil
 }
 
 // GetStudentCourses returns all courses a student is enrolled in

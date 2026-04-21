@@ -208,12 +208,18 @@ func (r *EnrollmentRepository) CountByCourseID(ctx context.Context, courseID uui
 
 func (r *EnrollmentRepository) CountByTeacherID(ctx context.Context, teacherID uuid.UUID) (int64, error) {
 	var count int64
-	// Total UNIQUE students across all courses of this teacher
+	
+	// Create a subquery for the teacher's course IDs
+	subQuery := r.db.WithContext(ctx).Model(&course.Course{}).Select("id").Where("teacher_id = ?", teacherID)
+	
+	// Enrollments store the learner on user_id, not student_id.
+	// Count distinct active users across all of the teacher's courses.
 	err := r.db.WithContext(ctx).
 		Model(&course.Enrollment{}).
-		Joins("JOIN courses ON courses.id = enrollments.course_id").
-		Where("courses.teacher_id = ? AND enrollments.is_active = true", teacherID).
+		Where("is_active = true AND course_id IN (?)", subQuery).
+		Distinct("user_id").
 		Count(&count).Error
+
 	return count, err
 }
 

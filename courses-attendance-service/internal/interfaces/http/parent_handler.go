@@ -114,7 +114,9 @@ func (h *ParentHandler) GetChildAttendance(c *fiber.Ctx) error {
 
 	responses := make([]dto.AttendanceRecordResponse, len(history))
 	for i, r := range history {
-		responses[i] = dto.ToAttendanceRecordResponse(&r)
+		responses[i] = dto.ToAttendanceRecordResponse(&r.AttendanceRecord)
+		responses[i].LessonTitle = r.LessonTitle
+		responses[i].CourseTitle = r.CourseTitle
 	}
 
 	return c.JSON(fiber.Map{
