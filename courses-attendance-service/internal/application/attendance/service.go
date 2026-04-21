@@ -642,6 +642,94 @@ func (s *Service) GetLessonAttendance(ctx context.Context, lessonID uuid.UUID) (
 	return s.recordRepo.GetByLessonID(ctx, lessonID)
 }
 
+// GetLessonAnalytics returns aggregate analytics for a lesson
+func (s *Service) GetLessonAnalytics(ctx context.Context, lessonID uuid.UUID) (*LessonAnalytics, error) {
+	// 1. Get lesson
+	lesson, err := s.lessonRepo.GetByID(ctx, lessonID)
+	if err != nil {
+		return nil, err
+	}
+	if lesson == nil {
+		return nil, ErrLessonNotFound
+	}
+
+	// 2. Get enrollment count for the course
+	enrollmentCount, err := s.enrollmentRepo.CountByCourseID(ctx, lesson.CourseID)
+	if err != nil {
+		return nil, err
+	}
+
+	// 3. Get attendance records for this lesson
+	records, err := s.recordRepo.GetByLessonID(ctx, lessonID)
+	if err != nil {
+		return nil, err
+	}
+
+	// 4. Calculate counts
+	presentCount := 0
+	lateCount := 0
+	absentCount := 0
+	
+	for _, r := range records {
+		switch r.Status {
+		case attendanceDomain.AttendanceStatusPresent:
+			presentCount++
+		case attendanceDomain.AttendanceStatusLate:
+			lateCount++
+		case attendanceDomain.AttendanceStatusAbsent:
+			absentCount++
+		}
+	}
+
+	attendanceRate := 0.0
+	if enrollmentCount > 0 {
+		attendanceRate = float64(presentCount+lateCount) / float64(enrollmentCount) * 100
+	}
+
+	// 6. Get recent activity (last 10 scans)
+	var recentActivity []StudentActivity
+	limit := 10
+	if len(records) < limit {
+		limit = len(records)
+	}
+	
+	// Sort records by ScannedAt descending for recent activity
+	sortedRecords := make([]attendanceDomain.AttendanceRecord, len(records))
+	copy(sortedRecords, records)
+	for i := 0; i < len(sortedRecords)-1; i++ {
+		for j := 0; j < len(sortedRecords)-i-1; j++ {
+			var t1, t2 time.Time
+			if sortedRecords[j].ScannedAt != nil { t1 = *sortedRecords[j].ScannedAt }
+			if sortedRecords[j+1].ScannedAt != nil { t2 = *sortedRecords[j+1].ScannedAt }
+			if t1.Before(t2) {
+				sortedRecords[j], sortedRecords[j+1] = sortedRecords[j+1], sortedRecords[j]
+			}
+		}
+	}
+
+	for i := 0; i < limit; i++ {
+		r := sortedRecords[i]
+		activity := StudentActivity{
+			StudentID: r.StudentID,
+			Status:    string(r.Status),
+			ScannedAt: r.ScannedAt,
+		}
+		recentActivity = append(recentActivity, activity)
+	}
+
+	return &LessonAnalytics{
+		LessonID:       lessonID,
+		LessonTitle:    lesson.Title,
+		TotalStudents:  int(enrollmentCount),
+		PresentCount:   presentCount,
+		LateCount:      lateCount,
+		AbsentCount:    absentCount,
+		ExcusedCount:   0, // TODO: Implement excused logic if applicable
+		AttendanceRate: attendanceRate,
+		RecentActivity: recentActivity,
+	}, nil
+}
+
 // GetStudentAttendance returns all attendance records for a student
 func (s *Service) GetStudentAttendance(ctx context.Context, studentID uuid.UUID) ([]attendanceDomain.AttendanceRecord, error) {
 	return s.recordRepo.GetByStudentID(ctx, studentID)
@@ -866,6 +954,26 @@ type StudentCourseAnalytics struct {
 	TotalStudents    int
 	Points           int
 	RecentActivity   []RecentActivity
+}
+
+// LessonAnalytics represents analytics data for a specific lesson
+type LessonAnalytics struct {
+	LessonID       uuid.UUID
+	LessonTitle    string
+	TotalStudents  int
+	PresentCount   int
+	LateCount      int
+	AbsentCount    int
+	ExcusedCount   int
+	AttendanceRate float64
+	RecentActivity []StudentActivity
+}
+
+type StudentActivity struct {
+	StudentID   uuid.UUID
+	StudentName string
+	Status      string
+	ScannedAt   *time.Time
 }
 
 type DailyAttendance struct {

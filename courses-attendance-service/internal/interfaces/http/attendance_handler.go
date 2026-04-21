@@ -32,6 +32,7 @@ func (h *AttendanceHandler) RegisterRoutes(router fiber.Router) {
 	attendance := router.Group("/attendance", auth)
 	attendance.Post("/scan", h.ScanAttendance) // Everyone authenticated can scan (logic handles enrollment)
 	attendance.Get("/lesson/:id", managementOnly, h.GetLessonAttendance)
+	attendance.Get("/lesson/:id/analytics", managementOnly, h.GetLessonAnalytics)
 	attendance.Get("/student/:id", managementOnly, h.GetStudentAttendance)
 	attendance.Get("/student/:studentId/course/:courseId/analytics", managementOnly, h.GetStudentCourseAnalytics)
 
@@ -151,6 +152,69 @@ func (h *AttendanceHandler) GetLessonAttendance(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{
 		"success": true,
 		"data":    responses,
+	})
+}
+
+// GetLessonAnalytics godoc
+// @Summary Get aggregate analytics for a lesson
+// @Tags attendance
+// @Produce json
+// @Param id path string true "Lesson ID"
+// @Success 200 {object} dto.LessonAttendanceAnalyticsResponse
+// @Router /api/v1/attendance/lesson/{id}/analytics [get]
+func (h *AttendanceHandler) GetLessonAnalytics(c *fiber.Ctx) error {
+	lessonID, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"success": false,
+			"error":   "Invalid lesson ID",
+		})
+	}
+
+	analytics, err := h.attendanceService.GetLessonAnalytics(c.Context(), lessonID)
+	if err != nil {
+		if errors.Is(err, attendanceApp.ErrLessonNotFound) {
+			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+				"success": false,
+				"error":   "Lesson not found",
+			})
+		}
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"success": false,
+			"error":   "Failed to fetch lesson analytics",
+		})
+	}
+
+	return c.JSON(fiber.Map{
+		"success": true,
+		"data": dto.LessonAttendanceAnalyticsResponse{
+			LessonID:       analytics.LessonID,
+			LessonTitle:    analytics.LessonTitle,
+			TotalStudents:  analytics.TotalStudents,
+			PresentCount:   analytics.PresentCount,
+			LateCount:      analytics.LateCount,
+			AbsentCount:    analytics.AbsentCount,
+			ExcusedCount:   analytics.ExcusedCount,
+			AttendanceRate: analytics.AttendanceRate,
+			RecentActivity: func() []dto.RecentStudentActivity {
+				activities := make([]dto.RecentStudentActivity, len(analytics.RecentActivity))
+				for i, a := range analytics.RecentActivity {
+					name := "Student " + a.StudentID.String()[:8]
+					// Fetch student info
+					userInfo, err := h.authClient.GetUserInfo(c.Context(), a.StudentID.String())
+					if err == nil && userInfo != nil {
+						name = userInfo.Name
+					}
+					activities[i] = dto.RecentStudentActivity{
+						StudentID:   a.StudentID.String(),
+						StudentName: name,
+						Status:      a.Status,
+						ScannedAt:   a.ScannedAt,
+					}
+				}
+				return activities
+			}(),
+		},
 	})
 }
 

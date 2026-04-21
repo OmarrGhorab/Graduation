@@ -97,3 +97,22 @@ type ManualOverrideRequest struct {
 	Status    string `json:"status" validate:"required,oneof=PRESENT LATE ABSENT EXCUSED"`
 	Reason    string `json:"reason" validate:"required,min=5"`
 }
+
+type LessonAttendanceAnalyticsResponse struct {
+	LessonID       uuid.UUID               `json:"lessonId"`
+	LessonTitle    string                  `json:"lessonTitle"`
+	TotalStudents  int                     `json:"totalStudents"`
+	PresentCount   int                     `json:"presentCount"`
+	LateCount      int                     `json:"lateCount"`
+	AbsentCount    int                     `json:"absentCount"`
+	ExcusedCount   int                     `json:"excusedCount"`
+	AttendanceRate float64                 `json:"attendanceRate"`
+	RecentActivity []RecentStudentActivity `json:"recentActivity"`
+}
+
+type RecentStudentActivity struct {
+	StudentID   string     `json:"studentId"`
+	StudentName string     `json:"studentName"`
+	Status      string     `json:"status"`
+	ScannedAt   *time.Time `json:"scannedAt"`
+}
