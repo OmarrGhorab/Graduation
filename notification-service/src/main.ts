@@ -5,6 +5,7 @@ import notificationsRouter from "./routes/notifications.route";
 import locationRouter from "./routes/location.route";
 import { errorHandler } from "./middleware/errorHandler";
 import prisma from "./libs/prisma";
+import redis from "./libs/redis";
 import { initConsumer, stopConsumer } from "./libs/kafka-consumer";
 import { setupGenericHandler } from "./handlers/generic.handler";
 import { setupLessonHandlers } from "./handlers/lesson.handler";
@@ -46,14 +47,16 @@ app.get("/health", async (req: Request, res: Response) => {
     try {
         // Check database connectivity
         const dbHealthy = await prisma.$queryRaw`SELECT 1`.then(() => true).catch(() => false);
+        const redisHealthy = await redis.ping().then(() => true).catch(() => false);
 
-        const isHealthy = dbHealthy;
+        const isHealthy = dbHealthy && redisHealthy;
 
         res.status(isHealthy ? 200 : 503).json({
             status: isHealthy ? "ok" : "degraded",
             service: "notification-service",
             dependencies: {
                 database: dbHealthy ? "ok" : "error",
+                redis: redisHealthy ? "ok" : "error",
             },
             timestamp: new Date().toISOString(),
         });
@@ -105,6 +108,8 @@ const gracefulShutdown = async (signal: string) => {
         // Disconnect Prisma first or in parallel
         await prisma.$disconnect();
         console.log('Database connection closed');
+        await redis.quit();
+        console.log('Redis connection closed');
 
         // Stop accepting new connections
         // We use close() but we don't necessarily wait for all connections to finish 

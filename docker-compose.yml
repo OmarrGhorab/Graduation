@@ -1,5 +1,5 @@
-# Docker Compose for Graduation Project - Supporting Infrastructure Only
-# Node services (API Gateway, Auth, Notification) are managed via terminal
+# Docker Compose for Graduation Project
+# Full backend stack, including API Gateway, Auth, and Notification services
 
 services:
   # ============ DATABASES ============
@@ -54,6 +54,124 @@ services:
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
 
+  # ============ CORE NODE SERVICES ============
+  auth-service:
+    build: ./auth-service
+    ports:
+      - "6001:6001"
+    environment:
+      - PORT=6001
+      - NODE_ENV=production
+      - DATABASE_URL=postgresql://graduation:graduation_secret@postgres:5432/graduation?schema=auth
+      - REDIS_URL=redis://redis:6379
+      - JWT_ACCESS_SECRET=47079cb745e7b5c1ebaa8106cabc00f43d6356ce3b0d4b725156742f4084280b
+      - JWT_REFRESH_SECRET=9c827cce69b4710f2bbacaeb9bfb3cf39ced15e52b6791ca1d6ac2f270e645ce
+      - ARCJET_ENV=production
+      - ARCJET_KEY=${ARCJET_KEY:-}
+      - CLOUDINARY_CLOUD_NAME=${CLOUDINARY_CLOUD_NAME}
+      - CLOUDINARY_API_KEY=${CLOUDINARY_API_KEY}
+      - CLOUDINARY_API_SECRET=${CLOUDINARY_API_SECRET}
+      - GOOGLE_CLIENT_ID=564438837664-tcv289cukv6pvmmhgr4n7kki8mj8t3pf.apps.googleusercontent.com
+      - TWO_FACTOR_ENCRYPTION_KEY=fb237104351755c61c81a8bed9e5f2fc9621ecb6a078f2c745881042bb693881
+      - SERVICE_NAME=VeriQ Academy
+      - EMAIL_FROM=${EMAIL_FROM:-onboarding@resend.dev}
+      - RESEND_API_KEY=${RESEND_API_KEY}
+      - NOTIFICATION_SERVICE_URL=http://notification-service:6003
+      - ALLOWED_ORIGINS=http://localhost:3000,http://localhost:8080,http://localhost:3001
+      - INTERNAL_SERVICE_SECRET=graduation-mega-secret-2026
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      notification-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:6001/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  notification-service:
+    build: ./notification-service
+    ports:
+      - "6003:6003"
+    environment:
+      - PORT=6003
+      - NODE_ENV=production
+      - DATABASE_URL=postgresql://graduation:graduation_secret@postgres:5432/graduation?schema=notifications
+      - COURSES_SERVICE_URL=http://courses-service-1:8085
+      - REDIS_URL=redis://redis:6379
+      - AUTH_SERVICE_URL=http://auth-service:6001
+      - JWT_ACCESS_SECRET=47079cb745e7b5c1ebaa8106cabc00f43d6356ce3b0d4b725156742f4084280b
+      - ALLOWED_ORIGINS=http://localhost:3000,http://localhost:8080,http://localhost:3001
+      - INTERNAL_SERVICE_SECRET=graduation-mega-secret-2026
+      - FIREBASE_PROJECT_ID=graduation-project-d71d7
+      - FIREBASE_PRIVATE_KEY=${FIREBASE_PRIVATE_KEY}
+      - FIREBASE_CLIENT_EMAIL=firebase-adminsdk-fbsvc@graduation-project-d71d7.iam.gserviceaccount.com
+      - KAFKA_BROKERS=kafka:29092
+      - KAFKA_GROUP_ID=notification-service
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:6003/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api-gateway:
+    build: ./api-gateway
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+      - NODE_ENV=production
+      - ALLOWED_ORIGINS=*
+      - AUTH_SERVICE_URLS=http://auth-service:6001
+      - NOTIFICATION_SERVICE_URLS=http://notification-service:6003
+      - CHAT_SERVICE_URLS=http://chat-service-1:6004,http://chat-service-2:6014,http://chat-service-3:6024
+      - WS_GATEWAY_URLS=http://ws-gateway-1:6005,http://ws-gateway-2:6015,http://ws-gateway-3:6025
+      - COURSES_SERVICE_URLS=http://courses-service-1:8085,http://courses-service-2:8085
+      - PAYMENT_SERVICE_URLS=http://payment-service:8090
+      - RECOMMENDATION_SERVICE_URLS=http://recommendation-service:8095
+      - ARCJET_KEY=${ARCJET_KEY:-}
+      - INTERNAL_SERVICE_SECRET=graduation-mega-secret-2026
+    depends_on:
+      auth-service:
+        condition: service_healthy
+      notification-service:
+        condition: service_healthy
+      chat-service-1:
+        condition: service_started
+      chat-service-2:
+        condition: service_started
+      chat-service-3:
+        condition: service_started
+      ws-gateway-1:
+        condition: service_started
+      ws-gateway-2:
+        condition: service_started
+      ws-gateway-3:
+        condition: service_started
+      courses-service-1:
+        condition: service_healthy
+      courses-service-2:
+        condition: service_healthy
+      payment-service:
+        condition: service_healthy
+      recommendation-service:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   # ============ CHAT SERVICE (3 instances) ============
   chat-service-1:
     build: ./chat-service
@@ -67,8 +185,8 @@ services:
       - KAFKA_BROKERS=kafka:29092
       - JWT_ACCESS_SECRET=47079cb745e7b5c1ebaa8106cabc00f43d6356ce3b0d4b725156742f4084280b
       - INTERNAL_SERVICE_SECRET=graduation-mega-secret-2026
-      - NOTIFICATION_SERVICE_URL=http://host.docker.internal:6003
-      - AUTH_SERVICE_URL=http://host.docker.internal:6001
+      - NOTIFICATION_SERVICE_URL=http://notification-service:6003
+      - AUTH_SERVICE_URL=http://auth-service:6001
       - COURSES_SERVICE_URL=http://courses-service-1:8085
       - WS_GATEWAY_URL=http://ws-gateway-1:6005
       - CLOUDINARY_CLOUD_NAME=${CLOUDINARY_CLOUD_NAME}
@@ -80,6 +198,10 @@ services:
       postgres:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      auth-service:
+        condition: service_healthy
+      notification-service:
         condition: service_healthy
       ws-gateway-1:
         condition: service_started
@@ -96,8 +218,8 @@ services:
       - KAFKA_BROKERS=kafka:29092
       - JWT_ACCESS_SECRET=47079cb745e7b5c1ebaa8106cabc00f43d6356ce3b0d4b725156742f4084280b
       - INTERNAL_SERVICE_SECRET=graduation-mega-secret-2026
-      - NOTIFICATION_SERVICE_URL=http://host.docker.internal:6003
-      - AUTH_SERVICE_URL=http://host.docker.internal:6001
+      - NOTIFICATION_SERVICE_URL=http://notification-service:6003
+      - AUTH_SERVICE_URL=http://auth-service:6001
       - COURSES_SERVICE_URL=http://courses-service-1:8085
       - WS_GATEWAY_URL=http://ws-gateway-2:6015
       - CLOUDINARY_CLOUD_NAME=${CLOUDINARY_CLOUD_NAME}
@@ -109,6 +231,10 @@ services:
       postgres:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      auth-service:
+        condition: service_healthy
+      notification-service:
         condition: service_healthy
       ws-gateway-2:
         condition: service_started
@@ -125,8 +251,8 @@ services:
       - KAFKA_BROKERS=kafka:29092
       - JWT_ACCESS_SECRET=47079cb745e7b5c1ebaa8106cabc00f43d6356ce3b0d4b725156742f4084280b
       - INTERNAL_SERVICE_SECRET=graduation-mega-secret-2026
-      - NOTIFICATION_SERVICE_URL=http://host.docker.internal:6003
-      - AUTH_SERVICE_URL=http://host.docker.internal:6001
+      - NOTIFICATION_SERVICE_URL=http://notification-service:6003
+      - AUTH_SERVICE_URL=http://auth-service:6001
       - COURSES_SERVICE_URL=http://courses-service-1:8085
       - WS_GATEWAY_URL=http://ws-gateway-3:6025
       - CLOUDINARY_CLOUD_NAME=${CLOUDINARY_CLOUD_NAME}
@@ -138,6 +264,10 @@ services:
       postgres:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      auth-service:
+        condition: service_healthy
+      notification-service:
         condition: service_healthy
       ws-gateway-3:
         condition: service_started
@@ -204,7 +334,7 @@ services:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - KAFKA_BROKERS=kafka:29092
-      - AUTH_SERVICE_URL=http://host.docker.internal:6001
+      - AUTH_SERVICE_URL=http://auth-service:6001
       - INTERNAL_SERVICE_SECRET=graduation-mega-secret-2026
       - QR_SIGNING_SECRET=qr-mega-secret-2026
       - QR_ROTATION_INTERVAL_SECONDS=30
@@ -223,6 +353,8 @@ services:
         condition: service_healthy
       kafka:
         condition: service_started
+      auth-service:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:8085/health"]
       interval: 10s
@@ -244,7 +376,7 @@ services:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - KAFKA_BROKERS=kafka:29092
-      - AUTH_SERVICE_URL=http://host.docker.internal:6001
+      - AUTH_SERVICE_URL=http://auth-service:6001
       - INTERNAL_SERVICE_SECRET=graduation-mega-secret-2026
       - QR_SIGNING_SECRET=qr-mega-secret-2026
       - QR_ROTATION_INTERVAL_SECONDS=30
@@ -263,6 +395,8 @@ services:
         condition: service_healthy
       kafka:
         condition: service_started
+      auth-service:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:8085/health"]
       interval: 10s
@@ -285,7 +419,7 @@ services:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - KAFKA_BROKERS=kafka:29092
-      - AUTH_SERVICE_URL=http://host.docker.internal:6001
+      - AUTH_SERVICE_URL=http://auth-service:6001
       - INTERNAL_SERVICE_SECRET=graduation-mega-secret-2026
       - PAYMOB_API_KEY=${PAYMOB_API_KEY}
       - PAYMOB_CARD_INTEGRATION_ID=${PAYMOB_CARD_INTEGRATION_ID}
@@ -306,6 +440,8 @@ services:
         condition: service_healthy
       kafka:
         condition: service_started
+      auth-service:
+        condition: service_healthy
       courses-service-1:
         condition: service_healthy
     healthcheck:
@@ -326,7 +462,7 @@ services:
       - AI_API_KEY=${AI_API_KEY}
       - AI_MODEL=${AI_MODEL}
       - COURSES_SERVICE_URL=http://courses-service-1:8085
-      - AUTH_SERVICE_URL=http://host.docker.internal:6001
+      - AUTH_SERVICE_URL=http://auth-service:6001
       - INTERNAL_SERVICE_SECRET=graduation-mega-secret-2026
       - CLOUDINARY_CLOUD_NAME=${CLOUDINARY_CLOUD_NAME}
       - CLOUDINARY_API_KEY=${CLOUDINARY_API_KEY}
@@ -340,6 +476,8 @@ services:
       redis:
         condition: service_healthy
       courses-service-1:
+        condition: service_healthy
+      auth-service:
         condition: service_healthy
 
 volumes:

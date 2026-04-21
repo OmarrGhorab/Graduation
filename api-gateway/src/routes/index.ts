@@ -82,7 +82,6 @@ export function setupRoutes(app: Express, config: AppConfig): { wsProxy: any } {
       const services = [
         ...config.services.auth,
         ...config.services.notification,
-        ...config.services.chat,
         ...config.services.courses,
         ...config.services.payment,
         ...config.services.recommendation,

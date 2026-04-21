@@ -84,6 +84,15 @@ def reseed():
             "INSERT INTO auth.\"ParentChildLink\" (id, \"parentId\", \"childId\", \"createdAt\") VALUES (%s, %s, %s, %s)",
             (str(uuid.uuid4()), parent_id, student_id, now)
         )
+
+        # 3.5. ASSIGN INTERESTS TO STUDENT (For Recommendations)
+        print("Assigning 3 interests to student...")
+        student_interests = []
+        selected_interests = random.sample(subjects, 3)
+        for si in selected_interests:
+            student_interests.append((student_id, si[0], now))
+        
+        execute_values(cur, "INSERT INTO auth.\"UserInterest\" (\"userId\", \"interestId\", \"createdAt\") VALUES %s", student_interests)
         
         # Admin
         admin_id = str(uuid.uuid4())
@@ -93,49 +102,90 @@ def reseed():
             (admin_id, "System Admin", "admin_sys", "admin@example.com", pwd, "HR", True, True, now, now)
         )
 
-        # 4. CREATE 10 COURSES
-        print("Creating 10 courses with detailed lessons...")
+        # 4. CREATE 15 COURSES
+        print("Creating 15 courses with detailed lessons...")
         
+        VALID_THUMBS = [
+            "https://images.unsplash.com/photo-1516321318423-f06f85e504b3?w=800&q=80",
+            "https://images.unsplash.com/photo-1501504905252-473c47e087f8?w=800&q=80",
+            "https://images.unsplash.com/photo-1498050108023-c5249f4df085?w=800&q=80",
+            "https://images.unsplash.com/photo-1504639725590-34d0984388bd?w=800&q=80",
+            "https://images.unsplash.com/photo-1517694712202-14dd9538aa97?w=800&q=80"
+        ]
+        VALID_HLS_VIDEOS = [
+            ("https://res.cloudinary.com/demo/video/upload/sp_auto/elephants.m3u8", "demo/elephants"),
+            ("https://res.cloudinary.com/demo/video/upload/sp_auto/sea_turtle.m3u8", "demo/sea_turtle")
+        ]
+        
+        course_prefixes = ["Mastering", "Intro to", "Advanced", "The Art of", "Modern", "Professional", "Complete", "Deep Dive:", "Essential"]
+        course_topics = ["React Native", "Docker", "Python", "Kubernetes", "UI/UX", "Machine Learning", "Cloud Architecture", "Go Programming", "Cybersecurity", "Blockchain", "Data Engineering", "Next.js"]
+        course_suffixes = ["for Experts", "Masterclass", "Bootcamp", "Essentials", "Simplified", "Course 2024", "Handbook", "Workshop"]
+
         course_ids = []
-        for i in range(10):
-            is_paid = i < 5 # First 5 are paid, last 5 are free
-            billing = "MONTHLY" if i % 2 == 0 else "ONE_TIME"
-            # Use fixed ID for the first course to accommodate user requests
-            c_id = "4cc33118-e390-48da-afbc-220ec38925a2" if i == 0 else str(uuid.uuid4())
-            course_ids.append(c_id)
+        for i in range(15):
+            # Variety Coverage
+            is_paid = (i % 5 != 0) 
+            delivery = "ONLINE" if i % 2 == 0 else "OFFLINE"
+            billing = "MONTHLY" if i % 3 == 0 else "ONE_TIME"
+            subj = subjects[i % len(subjects)]
+            total_less = random.randint(4, 20)
             
-            title = f"{subj[1]} Masterclass {i+1}" if is_paid else f"Intro to {subj[1]} {i+1}"
+            prefix = random.choice(course_prefixes)
+            topic = random.choice(course_topics) if i > 0 else subj[1]
+            suffix = random.choice(course_suffixes)
+            title = f"{prefix} {topic} {suffix}" if i > 0 else f"{subj[1]} Masterclass"
+            
+            c_id = "4cc33118-e390-48da-afbc-220ec38925a2" if i == 0 else str(uuid.uuid4())
+            course_ids.append((c_id, title, delivery, total_less))
+            
+            thumb = random.choice(VALID_THUMBS)
+            v_url, v_id = random.choice(VALID_HLS_VIDEOS)
             
             cur.execute("""
-                INSERT INTO public.courses (id, title, description, "subject_id", "teacher_id", "delivery_type", price, status, "is_paid", "free_trial_lessons", "total_lessons", "billing_type", "created_at", "updated_at") 
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                INSERT INTO public.courses (
+                    id, title, description, "subject_id", "teacher_id", "delivery_type", 
+                    price, status, "is_paid", "free_trial_lessons", "total_lessons", 
+                    "billing_type", "course_image", "preview_video_url", "preview_video_public_id",
+                    "created_at", "updated_at"
+                ) 
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """, (
                 c_id, title, f"Full depth guidance into {subj[1]}.",
-                subj[0], teacher_id, "ONLINE", 250.0 if is_paid else 0.0, "ACTIVE", is_paid, 2 if is_paid else 0, 5, billing, now, now
+                subj[0], teacher_id, delivery, 250.0 if is_paid else 0.0, "ACTIVE", is_paid, 2 if is_paid else 0, total_less, billing,
+                thumb, v_url, v_id, now, now
             ))
             
-            # Create 5 lessons for each course
-            for l_idx in range(1, 6):
+            # Create lessons for each course
+            for l_idx in range(1, total_less + 1):
                 l_id = str(uuid.uuid4())
-                # For the specific course 4cc33, make ALL lessons free. 
-                # For others, keep the "first 2 free" logic for paid courses.
                 if c_id == "4cc33118-e390-48da-afbc-220ec38925a2":
                     is_free = True
                 else:
                     is_free = (not is_paid) or (l_idx <= 2)
                 
                 # Mock video and material
-                video_url = "https://res.cloudinary.com/demo/video/upload/dog.mp4" 
-                material_url = "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf" 
+                video_url = "https://res.cloudinary.com/demo/video/upload/dog.mp4" if delivery == "ONLINE" else None
+                material_url = "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf" if delivery == "ONLINE" else None
                 
                 cur.execute("""
-                    INSERT INTO public.lessons (id, course_id, title, description, lesson_number, scheduled_at, status, is_free, video_url, materials_url, duration, delivery_type)
+                    INSERT INTO public.lessons (id, course_id, title, description, lesson_number, scheduled_at, status, is_free, video_url, materials_url, duration_minutes, delivery_type)
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """, (
                     l_id, c_id, f"Lesson {l_idx}: Mastery Path", f"Advanced module covering {title} details.", 
                     l_idx, now + timedelta(days=l_idx), 'SCHEDULED', 
-                    is_free, video_url, material_url, 30, 'ONLINE'
+                    is_free, video_url, material_url, 30, delivery
                 ))
+
+        # 5. ENROLL STUDENT IN SOME COURSES (Especially for testing)
+        print("Enrolling student in first 10 courses...")
+        for i in range(10):
+            c_id = course_ids[i][0]
+            cur.execute("""
+                INSERT INTO public.enrollments (id, user_id, course_id, is_active, enrolled_at, updated_at)
+                VALUES (%s, %s, %s, %s, %s, %s)
+            """, (
+                str(uuid.uuid4()), student_id, c_id, True, now, now
+            ))
 
         conn.commit()
         print("\nDatabase Restored Successfully!")
@@ -143,8 +193,8 @@ def reseed():
         print(f"   - Student: student@example.com / password123")
         print(f"   - Parent:  parent@example.com  / password123")
         print(f"   - Admin:   admin@example.com   / password123")
-        print(f"   - Courses: 10 total (5 Paid, 5 Free) | Lessons: 5 each")
-        print(f"   - Billing: Mixed (ONE_TIME & MONTHLY)")
+        print(f"   - Courses: 15 total | Lessons: Dynamic (4-20 each)")
+        print(f"   - Features: Thumbnails, Previews, All Billing/Delivery types")
 
     except Exception as e:
         print(f"Error: {e}")

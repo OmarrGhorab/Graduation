@@ -21,6 +21,8 @@ FROM node:20-alpine AS production
 
 WORKDIR /app
 
+RUN apk add --no-cache wget
+
 # Copy package files and install production deps only
 COPY package*.json ./
 RUN npm ci --only=production
