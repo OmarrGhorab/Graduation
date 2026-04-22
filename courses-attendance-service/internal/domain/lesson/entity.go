@@ -64,6 +64,9 @@ type Lesson struct {
 
 	// Reminders
 	RemindersSent string `gorm:"type:text;not null;default:''"` // Comma-separated minutes already notified
+	
+	// Virtual fields (calculated)
+	EnrolledStudents int `gorm:"-"`
 
 	// Timestamps
 	CreatedAt time.Time `gorm:"not null;default:now()"`

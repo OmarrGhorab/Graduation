@@ -1882,6 +1882,8 @@ func (h *CourseHandler) UpdateCourseReview(c *fiber.Ctx) error {
 		}
 	}
 
+	// Trigger notification
+	go h.courseService.NotifyCourseReview(context.Background(), courseID, studentID, int(existingReview.Rating), existingReview.Review)
 
 	return c.JSON(fiber.Map{
 		"success": true,

@@ -143,6 +143,7 @@ func (s *Service) CreateLesson(ctx context.Context, teacherID uuid.UUID, input C
 		return nil, err
 	}
 
+	lesson.EnrolledStudents = course.EnrollmentCount
 	return lesson, nil
 }
 
@@ -158,6 +159,7 @@ func (s *Service) GetLesson(ctx context.Context, id uuid.UUID, userID uuid.UUID,
 
 	// Higher roles see everything
 	if userRole == "TEACHER" || userRole == "INSTRUCTOR" || userRole == "ADMIN" {
+		s.populateEnrollmentCount(ctx, lesson)
 		return lesson, nil
 	}
 
@@ -212,6 +214,13 @@ func (s *Service) GetCourseLessons(ctx context.Context, courseID uuid.UUID, user
 
 	// Higher roles see everything
 	if userRole == "TEACHER" || userRole == "INSTRUCTOR" || userRole == "ADMIN" {
+		// Populate enrollment count for all lessons
+		count, err := s.enrollmentRepo.CountByCourseID(ctx, courseID)
+		if err == nil {
+			for i := range lessons {
+				lessons[i].EnrolledStudents = int(count)
+			}
+		}
 		return lessons, nil
 	}
 
@@ -292,6 +301,8 @@ func (s *Service) StartLesson(ctx context.Context, lessonID uuid.UUID) (*lessonD
 		return nil, err
 	}
 
+	s.populateEnrollmentCount(ctx, lesson)
+
 	// Emit event
 	s.events.EmitLessonStarted(ctx, events.LessonStartedPayload{
 		LessonID: lesson.ID,
@@ -335,6 +346,7 @@ func (s *Service) EndLesson(ctx context.Context, lessonID uuid.UUID) (*lessonDom
 	// Trigger progress recomputation for all students in the course
 	go s.recomputeAllStudentsProgress(lesson.CourseID)
 
+	s.populateEnrollmentCount(ctx, lesson)
 	return lesson, nil
 }
 
@@ -369,6 +381,7 @@ func (s *Service) CancelLesson(ctx context.Context, lessonID uuid.UUID) (*lesson
 		Reason:   "Canceled by teacher/assistant",
 	})
 
+	s.populateEnrollmentCount(ctx, lesson)
 	return lesson, nil
 }
 
@@ -401,6 +414,7 @@ func (s *Service) RescheduleLesson(ctx context.Context, lessonID uuid.UUID, newS
 		NewScheduledAt: lesson.ScheduledAt,
 	})
 
+	s.populateEnrollmentCount(ctx, lesson)
 	return lesson, nil
 }
 
@@ -476,6 +490,8 @@ func (s *Service) PatchLesson(ctx context.Context, teacherID uuid.UUID, lessonID
 		return nil, err
 	}
 
+	s.populateEnrollmentCount(ctx, lesson)
+
 	return lesson, nil
 }
 
@@ -536,4 +552,14 @@ func (s *Service) ProcessLessonVideoAsync(ctx context.Context, lessonID, teacher
 		StreamingURL: result.StreamingURL,
 		Duration:     0, // TODO: set from result
 	})
+}
+
+func (s *Service) populateEnrollmentCount(ctx context.Context, lesson *lessonDomain.Lesson) {
+	if lesson == nil {
+		return
+	}
+	count, err := s.enrollmentRepo.CountByCourseID(ctx, lesson.CourseID)
+	if err == nil {
+		lesson.EnrolledStudents = int(count)
+	}
 }

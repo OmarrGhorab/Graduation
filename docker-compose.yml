@@ -96,6 +96,8 @@ services:
     build: ./notification-service
     ports:
       - "6003:6003"
+    env_file:
+      - ./notification-service/.env
     environment:
       - PORT=6003
       - NODE_ENV=production
@@ -103,14 +105,7 @@ services:
       - COURSES_SERVICE_URL=http://courses-service-1:8085
       - REDIS_URL=redis://redis:6379
       - AUTH_SERVICE_URL=http://auth-service:6001
-      - JWT_ACCESS_SECRET=47079cb745e7b5c1ebaa8106cabc00f43d6356ce3b0d4b725156742f4084280b
-      - ALLOWED_ORIGINS=http://localhost:3000,http://localhost:8080,http://localhost:3001
-      - INTERNAL_SERVICE_SECRET=graduation-mega-secret-2026
-      - FIREBASE_PROJECT_ID=graduation-project-d71d7
-      - FIREBASE_PRIVATE_KEY=${FIREBASE_PRIVATE_KEY}
-      - FIREBASE_CLIENT_EMAIL=firebase-adminsdk-fbsvc@graduation-project-d71d7.iam.gserviceaccount.com
       - KAFKA_BROKERS=kafka:29092
-      - KAFKA_GROUP_ID=notification-service
     depends_on:
       postgres:
         condition: service_healthy

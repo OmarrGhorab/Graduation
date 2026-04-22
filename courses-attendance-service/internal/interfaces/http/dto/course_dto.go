@@ -56,12 +56,12 @@ type UpdateCourseRequest struct {
 }
 
 type CourseAnalytics struct {
-	TotalRevenue    float64 `json:"totalRevenue"`
-	TotalStudents   int     `json:"totalStudents"`
-	ActiveStudents  int     `json:"activeStudents"`
-	CompletionRate  float64 `json:"completionRate"`
-	AverageRating   float64 `json:"averageRating"`
-	ReviewCount     int     `json:"reviewCount"`
+	TotalRevenue   float64 `json:"totalRevenue"`
+	TotalStudents  int     `json:"totalStudents"`
+	ActiveStudents int     `json:"activeStudents"`
+	CompletionRate float64 `json:"completionRate"`
+	AverageRating  float64 `json:"averageRating"`
+	ReviewCount    int     `json:"reviewCount"`
 }
 
 type CourseResponse struct {
@@ -121,7 +121,7 @@ func ToCourseResponse(c *course.Course) CourseResponse {
 		Status:                  string(c.Status),
 		AttendanceWeight:        c.AttendanceWeight,
 		EnrollmentCount:         c.EnrollmentCount, // Real count from the entity
-		TeacherProfileImg:       "", // Will be populated by handler
+		TeacherProfileImg:       "",                // Will be populated by handler
 		PreviewVideoURL:         c.PreviewVideoURL,
 		PreviewVideoPublicID:    c.PreviewVideoPublicID,
 		ReminderIntervals:       c.ReminderIntervals,
@@ -229,13 +229,13 @@ type CreateLessonRequest struct {
 	DurationMinutes int       `json:"durationMinutes"`
 	DeliveryType    string    `json:"deliveryType" validate:"required,oneof=ONLINE OFFLINE"`
 	IsFree          bool      `json:"isFree"` // True if this lesson is free (for trial)
-	
+
 	// Online lesson materials (for ONLINE delivery type)
 	VideoURL      string `json:"videoUrl"`      // Cloudinary video URL
 	VideoPublicID string `json:"videoPublicId"` // Cloudinary public ID
 	MaterialsURL  string `json:"materialsUrl"`  // Additional materials URL
 	Duration      *int   `json:"duration"`      // Video duration in seconds
-	
+
 	// Location (for OFFLINE delivery type)
 	LocationName    string   `json:"locationName"`
 	LocationLat     *float64 `json:"locationLat"`
@@ -268,8 +268,9 @@ type LessonResponse struct {
 	MaterialsURL    string     `json:"materialsUrl,omitempty"`
 	Duration        *int       `json:"duration,omitempty"` // in seconds
 	IsFree          bool       `json:"isFree"`
-	CreatedAt       time.Time  `json:"createdAt"`
-	UpdatedAt       time.Time  `json:"updatedAt"`
+	EnrolledStudents int        `json:"enrolledStudents"`
+	CreatedAt        time.Time  `json:"createdAt"`
+	UpdatedAt        time.Time  `json:"updatedAt"`
 }
 
 func ToLessonResponse(l *lessonDomain.Lesson) LessonResponse {
@@ -294,11 +295,11 @@ func ToLessonResponse(l *lessonDomain.Lesson) LessonResponse {
 		MaterialsURL:    l.MaterialsURL,
 		Duration:        l.Duration,
 		IsFree:          l.IsFree,
+		EnrolledStudents: l.EnrolledStudents,
 		CreatedAt:       l.CreatedAt,
 		UpdatedAt:       l.UpdatedAt,
 	}
 }
-
 
 // UpdateLessonMaterialsRequest represents a request to update lesson materials
 type UpdateLessonMaterialsRequest struct {
