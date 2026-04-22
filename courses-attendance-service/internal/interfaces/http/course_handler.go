@@ -96,6 +96,7 @@ func (h *CourseHandler) RegisterRoutes(router fiber.Router) {
 	courses.Post("/:id/reviews", h.CreateCourseReview) // NEW: Create review
 	courses.Put("/:id/reviews/:reviewId", h.UpdateCourseReview) // NEW: Update review
 	courses.Delete("/:id/reviews/:reviewId", h.DeleteCourseReview) // NEW: Delete review
+	courses.Delete("/:id", teacherOnly, h.DeleteCourse)
 	courses.Get("/:id", h.GetCourse)
 	courses.Post("/:id/enroll", h.EnrollStudent)
 
@@ -673,6 +674,8 @@ func (h *CourseHandler) UpdateCourse(c *fiber.Ctx) error {
 		GeofenceRadiusM:         req.GeofenceRadiusM,
 		AttendanceWindowMinutes: req.AttendanceWindowMinutes,
 		Price:                   req.Price,
+		TotalLessons:            req.TotalLessons,
+		AttendanceWeight:        req.AttendanceWeight,
 		FreeTrialLessons:        req.FreeTrialLessons,
 	}
 	if req.BillingType != nil {
@@ -701,6 +704,33 @@ func (h *CourseHandler) UpdateCourse(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{
 		"success": true,
 		"data":    dto.ToCourseResponse(course),
+	})
+}
+
+func (h *CourseHandler) DeleteCourse(c *fiber.Ctx) error {
+	courseID, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"success": false,
+			"error":   "Invalid course ID",
+		})
+	}
+
+	teacherID, err := getUserIDFromContext(c)
+	if err != nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"success": false,
+			"error":   "Unauthorized",
+		})
+	}
+
+	if err := h.courseService.DeleteCourse(c.Context(), courseID, teacherID); err != nil {
+		return handleServiceError(c, err)
+	}
+
+	return c.JSON(fiber.Map{
+		"success": true,
+		"message": "Course deleted successfully",
 	})
 }
 

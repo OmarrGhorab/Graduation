@@ -265,6 +265,8 @@ type UpdateCourseInput struct {
 	GeofenceRadiusM         *int
 	AttendanceWindowMinutes *int
 	Price                   *float64
+	TotalLessons            *int
+	AttendanceWeight        *float64
 	FreeTrialLessons        *int
 	BillingType             *courseDomain.BillingType
 	Status                  *courseDomain.CourseStatus
@@ -320,6 +322,12 @@ func (s *Service) UpdateCourse(ctx context.Context, courseID uuid.UUID, teacherI
 	if input.FreeTrialLessons != nil {
 		course.FreeTrialLessons = *input.FreeTrialLessons
 	}
+	if input.TotalLessons != nil {
+		course.TotalLessons = *input.TotalLessons
+	}
+	if input.AttendanceWeight != nil {
+		course.AttendanceWeight = *input.AttendanceWeight
+	}
 	if input.BillingType != nil {
 		course.BillingType = *input.BillingType
 	}
@@ -342,6 +350,22 @@ func (s *Service) UpdateCourse(ctx context.Context, courseID uuid.UUID, teacherI
 	}
 
 	return course, nil
+}
+
+// DeleteCourse deletes a course and all related data (via DB cascade)
+func (s *Service) DeleteCourse(ctx context.Context, courseID uuid.UUID, teacherID uuid.UUID) error {
+	course, err := s.courseRepo.GetByID(ctx, courseID)
+	if err != nil {
+		return err
+	}
+	if course == nil {
+		return ErrCourseNotFound
+	}
+	if course.TeacherID != teacherID {
+		return ErrUnauthorized
+	}
+
+	return s.courseRepo.Delete(ctx, courseID)
 }
 
 // EnrollStudent enrolls a student in a course

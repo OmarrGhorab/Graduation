@@ -346,16 +346,22 @@ async function sendFcmNotification(
     // For chat messages, use sender_image; for other notifications, use child/parent profile images
     const imageUrl = data.sender_image || data.child?.profileImg || data.parent?.profileImg || data.profileImg || data.imageUrl || null;
 
+    const actionInfo = data.action || getNotificationAction(data.type, data);
+
     // Prepare data payload (all values must be strings)
     const dataPayload: Record<string, string> = {
       type: data.type,
       ...Object.entries(data).reduce((acc, [key, value]) => {
-        if (value !== undefined && value !== null) {
+        if (value !== undefined && value !== null && key !== 'action') {
           acc[key] = typeof value === "string" ? value : JSON.stringify(value);
         }
         return acc;
       }, {} as Record<string, string>),
     };
+
+    if (actionInfo) {
+      dataPayload.action = typeof actionInfo === "string" ? actionInfo : JSON.stringify(actionInfo);
+    }
 
     // Validate payload size (FCM limit: 4KB)
     const payloadSize = JSON.stringify(dataPayload).length;
@@ -665,19 +671,42 @@ function getNotificationAction(
     case "parent_link_request":
       return {
         type: "navigate",
-        target: "link-requests",
+        target: "/link-requests",
         params: { requestId: data.requestId },
       };
     case "unlink_request":
       return {
         type: "navigate",
-        target: "unlink-requests",
+        target: "/unlink-requests",
         params: { requestId: data.requestId },
       };
     case "security_new_device_blocked":
       return {
         type: "navigate",
-        target: "security-settings",
+        target: "/security-settings",
+      };
+    case "LESSON_STARTED":
+      return {
+        type: "navigate",
+        target: "/attendance-list",
+        params: { lessonId: data.lesson_id },
+      };
+    case "COURSE_ENROLLMENT":
+    case "LESSON_CANCELED":
+    case "LESSON_RESCHEDULED":
+    case "LESSON_REMINDER":
+      return {
+        type: "navigate",
+        target: "/course-details",
+        params: { id: data.course_id },
+      };
+    case "CHILD_LESSON_STARTED":
+    case "CHILD_LESSON_ENDED":
+    case "CHILD_ATTENDANCE_RECORDED":
+      return {
+        type: "navigate",
+        target: "/student-progress",
+        params: { childId: data.child_id, courseId: data.course_id },
       };
     default:
       return null;

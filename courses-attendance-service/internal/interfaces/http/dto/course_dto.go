@@ -45,6 +45,8 @@ type UpdateCourseRequest struct {
 	GeofenceRadiusM         *int     `json:"geofenceRadiusM"`
 	AttendanceWindowMinutes *int     `json:"attendanceWindowMinutes"`
 	Price                   *float64 `json:"price"`
+	TotalLessons            *int     `json:"totalLessons"`
+	AttendanceWeight        *float64 `json:"attendanceWeight"`
 	BillingType             *string  `json:"billingType" validate:"omitempty,oneof=ONE_TIME MONTHLY"`
 	FreeTrialLessons        *int     `json:"freeTrialLessons"` // Number of free lessons for trial
 	Status                  *string  `json:"status" validate:"omitempty,oneof=ACTIVE PAUSED ARCHIVED"`
