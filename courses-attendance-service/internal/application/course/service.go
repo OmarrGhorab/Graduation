@@ -406,13 +406,26 @@ func (s *Service) EnrollStudent(ctx context.Context, courseID, studentID uuid.UU
 		return nil, err
 	}
 
+	// Fetch student info for better notification
+	studentName := "A student"
+	studentProfileImg := ""
+	if s.authClient != nil {
+		if userInfo, err := s.authClient.GetUserInfo(ctx, studentID.String()); err == nil {
+			studentName = userInfo.Name
+			studentProfileImg = userInfo.ProfileImg
+		}
+	}
+
 	// Emit notification event for teacher
 	s.events.EmitNotificationRequested(ctx, studentID, events.NotificationRequestedPayload{
 		RecipientID: course.TeacherID,
 		Type:        "COURSE_ENROLLMENT",
 		Data: map[string]interface{}{
-			"course_name": course.Title,
-			"student_id":  studentID.String(),
+			"course_name":  course.Title,
+			"course_id":    courseID.String(),
+			"student_id":   studentID.String(),
+			"student_name": studentName,
+			"profileImg":   studentProfileImg,
 		},
 	})
 
@@ -427,6 +440,36 @@ func (s *Service) EnrollStudent(ctx context.Context, courseID, studentID uuid.UU
 
 func (s *Service) GetEnrollment(ctx context.Context, courseID, studentID uuid.UUID) (*courseDomain.Enrollment, error) {
 	return s.enrollmentRepo.GetByCourseAndUser(ctx, courseID, studentID)
+}
+
+// NotifyCourseReview sends a notification to the teacher when a course is reviewed
+func (s *Service) NotifyCourseReview(ctx context.Context, courseID, studentID uuid.UUID, rating int, reviewText string) error {
+	course, err := s.courseRepo.GetByID(ctx, courseID)
+	if err != nil || course == nil {
+		return err
+	}
+
+	studentName := "A student"
+	if s.authClient != nil {
+		if userInfo, err := s.authClient.GetUserInfo(ctx, studentID.String()); err == nil {
+			studentName = userInfo.Name
+		}
+	}
+
+	s.events.EmitNotificationRequested(ctx, studentID, events.NotificationRequestedPayload{
+		RecipientID: course.TeacherID,
+		Type:        "COURSE_REVIEW",
+		Data: map[string]interface{}{
+			"course_id":    courseID.String(),
+			"course_name":  course.Title,
+			"student_id":   studentID.String(),
+			"student_name": studentName,
+			"rating":       rating,
+			"review_text":  reviewText,
+		},
+	})
+
+	return nil
 }
 
 

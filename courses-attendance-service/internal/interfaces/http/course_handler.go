@@ -1,6 +1,7 @@
 package http
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"time"
@@ -1774,6 +1775,8 @@ func (h *CourseHandler) CreateCourseReview(c *fiber.Ctx) error {
 		}
 	}
 
+	// Trigger notification
+	go h.courseService.NotifyCourseReview(context.Background(), courseID, studentID, int(req.Rating), req.Review)
 
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{
 		"success": true,

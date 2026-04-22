@@ -550,6 +550,7 @@ function getNotificationTitle(type: string, data?: Record<string, any>): string 
     "CHILD_ATTENDANCE_RECORDED": "Child Arrived at Lesson 📍",
     "SUBSCRIPTION_RENEWAL_SOON": "Subscription Renewal Soon 💳",
     "SUBSCRIPTION_PAYMENT_FAILED": "Payment Failed ❌",
+    "COURSE_REVIEW": "New Course Review ⭐",
   };
 
   return titles[type] || "New Notification";
@@ -601,7 +602,7 @@ function getNotificationBody(
       return body;
     // Course & Lesson notifications
     case "COURSE_ENROLLMENT":
-      return `A student has enrolled in your course: ${data.course_name || "Course"}`;
+      return `${data.student_name || "A student"} has enrolled in your course: ${data.course_name || "Course"}`;
     case "LESSON_STARTED":
       return `The lesson "${data.lesson_title || "Lesson"}" has started! Get ready.`;
     case "CHILD_LESSON_STARTED":
@@ -620,6 +621,8 @@ function getNotificationBody(
       return `Your subscription for "${data.course_name || "Course"}" is renewing in ${data.days_left || 3} days (${data.amount} ${data.currency}).`;
     case "SUBSCRIPTION_PAYMENT_FAILED":
       return `We couldn't process your payment for "${data.course_name || "Course"}". Please check your payment method.`;
+    case "COURSE_REVIEW":
+      return `${data.student_name || "A student"} left a ${data.rating}-star review on "${data.course_name || "Course"}": "${data.review_text || ""}"`;
     default:
       return "You have a new notification";
   }
@@ -698,6 +701,12 @@ function getNotificationAction(
       return {
         type: "navigate",
         target: "/course-details",
+        params: { id: data.course_id },
+      };
+    case "COURSE_REVIEW":
+      return {
+        type: "navigate",
+        target: "/course-reviews",
         params: { id: data.course_id },
       };
     case "CHILD_LESSON_STARTED":
