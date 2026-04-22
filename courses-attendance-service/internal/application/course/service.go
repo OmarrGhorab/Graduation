@@ -3,6 +3,7 @@ package course
 import (
 	"context"
 	"errors"
+	"log"
 	"mime/multipart"
 
 	courseDomain "github.com/OmarrGhorab/courses-attendance-service/internal/domain/course"
@@ -449,6 +450,8 @@ func (s *Service) NotifyCourseReview(ctx context.Context, courseID, studentID uu
 		return err
 	}
 
+	log.Printf("[NotifyCourseReview] Triggering review notification for course %s, teacher %s", courseID, course.TeacherID)
+
 	studentName := "A student"
 	if s.authClient != nil {
 		if userInfo, err := s.authClient.GetUserInfo(ctx, studentID.String()); err == nil {
@@ -466,6 +469,36 @@ func (s *Service) NotifyCourseReview(ctx context.Context, courseID, studentID uu
 			"student_name": studentName,
 			"rating":       rating,
 			"review_text":  reviewText,
+		},
+	})
+
+	return nil
+}
+
+// NotifyStudentEnrollment sends a notification to the teacher when a student enrolls
+func (s *Service) NotifyStudentEnrollment(ctx context.Context, courseID, studentID uuid.UUID) error {
+	course, err := s.courseRepo.GetByID(ctx, courseID)
+	if err != nil || course == nil {
+		return err
+	}
+
+	log.Printf("[NotifyStudentEnrollment] Triggering enrollment notification for course %s, teacher %s", courseID, course.TeacherID)
+
+	studentName := "A student"
+	if s.authClient != nil {
+		if userInfo, err := s.authClient.GetUserInfo(ctx, studentID.String()); err == nil {
+			studentName = userInfo.Name
+		}
+	}
+
+	s.events.EmitNotificationRequested(ctx, studentID, events.NotificationRequestedPayload{
+		RecipientID: course.TeacherID,
+		Type:        "COURSE_ENROLLMENT",
+		Data: map[string]interface{}{
+			"course_id":    courseID.String(),
+			"course_name":  course.Title,
+			"student_id":   studentID.String(),
+			"student_name": studentName,
 		},
 	})
 
@@ -654,6 +687,13 @@ func (s *Service) MarkEnrollmentPaid(ctx context.Context, courseID, studentID uu
 			return err
 		}
 	}
+
+	// Notify teacher of the new enrollment
+	go func() {
+		if err := s.NotifyStudentEnrollment(context.Background(), courseID, studentID); err != nil {
+			log.Printf("Warning: failed to notify teacher of enrollment: %v", err)
+		}
+	}()
 
 	// If a specific period is provided (for monthly billing), mark it as paid
 	if periodKey != "" {

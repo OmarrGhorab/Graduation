@@ -35,6 +35,7 @@ const consumer = kafka.consumer({ groupId: process.env.KAFKA_GROUP_ID || 'notifi
 
 export const initConsumer = async () => {
     await consumer.connect();
+    console.log('[Kafka] Registered handlers:', Object.keys(handlers));
 
     for (const topic of TOPICS) {
         await consumer.subscribe({ topic, fromBeginning: false });

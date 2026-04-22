@@ -8,7 +8,7 @@ export interface NotificationRequestedPayload {
 }
 
 export const setupGenericHandler = () => {
-    registerHandler('notifications.requested.v1', async (envelope: EventEnvelope<NotificationRequestedPayload>) => {
+    registerHandler('courses.notification.requested.v1', async (envelope: EventEnvelope<NotificationRequestedPayload>) => {
         const { recipient_id, type, data } = envelope.payload;
 
         console.log(`[Kafka Handler] Processing notification request for user ${recipient_id}, type: ${type}`);
