@@ -41,12 +41,13 @@ class CourseClient:
                 logger.error(f"Failed to fetch user analytics: {str(e)}")
                 return {}
 
-    async def get_weekly_activity(self, user_id: str):
-        """Fetches the user's weekly activity (watch time, completed lessons) for reports."""
+    async def get_activity(self, user_id: str, period: str = "weekly"):
+        """Fetches the user's activity (watch time, completed lessons) for reports based on period."""
         async with httpx.AsyncClient() as client:
             try:
                 response = await client.get(
-                    f"{self.base_url}/api/v1/internal/reports/student/{user_id}/weekly",
+                    f"{self.base_url}/api/v1/internal/reports/student/{user_id}",
+                    params={"period": period},
                     headers={"x-internal-service-secret": self.secret},
                     timeout=10.0
                 )
@@ -54,7 +55,7 @@ class CourseClient:
                 data = response.json()
                 return data.get("data", {})
             except Exception as e:
-                logger.error(f"Failed to fetch weekly activity: {str(e)}")
+                logger.error(f"Failed to fetch {period} activity: {str(e)}")
                 return {}
 
 course_client = CourseClient()

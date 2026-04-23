@@ -450,24 +450,33 @@ func (s *Service) GetRecommendationProfile(ctx context.Context, userID uuid.UUID
 	}, nil
 }
 
-// GetWeeklyReportData returns activity analytics for the last 7 days specifically for the AI Parent Report
-func (s *Service) GetWeeklyReportData(ctx context.Context, userID uuid.UUID) (*RecommendationProfile, error) {
+// GetReportData returns activity analytics for a specific period (weekly/monthly) specifically for the AI Parent Report
+func (s *Service) GetReportData(ctx context.Context, userID uuid.UUID, period string) (*RecommendationProfile, error) {
 	// Get general profile for baseline
 	profile, err := s.GetRecommendationProfile(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
 
-	// Filter stats for the last 7 days
-	sevenDaysAgo := s.clock.Now().AddDate(0, 0, -7)
-	watchSeconds, completedCount, err := s.watchRepo.GetWeeklyWatchStats(ctx, userID, sevenDaysAgo)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get weekly watch stats: %w", err)
+	// Determine the start date based on period
+	var since time.Time
+	now := s.clock.Now()
+	
+	switch period {
+	case "monthly":
+		since = now.AddDate(0, -1, 0)
+	case "weekly":
+		fallthrough
+	default:
+		since = now.AddDate(0, 0, -7)
 	}
 
-	// For the parent report, we reuse RecommendationProfile but fill it with weekly data
-	// AvgSessionDuration -> Total watch time this week
-	// AvgCompletionPct -> Lessons completed this week
+	watchSeconds, completedCount, err := s.watchRepo.GetWeeklyWatchStats(ctx, userID, since)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get report watch stats: %w", err)
+	}
+
+	// For the parent report, we reuse RecommendationProfile but fill it with periodic data
 	profile.AvgSessionDuration = watchSeconds
 	profile.AvgCompletionPct = float64(completedCount)
 

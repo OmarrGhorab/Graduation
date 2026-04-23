@@ -14,10 +14,10 @@ class ReportEngine:
     """Orchestrates AI-generated progress reports for parents."""
 
     async def generate_parent_report(
-        self, student_id: str, student_name: str, language: str = "en"
+        self, student_id: str, student_name: str, language: str = "en", period: str = "weekly"
     ) -> Optional[str]:
         """
-        1. Fetches weekly activity (Go)
+        1. Fetches activity for period (Go)
         2. Fetches chatbot questions (Python)
         3. Generates AI summary (Gemma) in the student/parent's language
         4. Returns the report text
@@ -25,8 +25,8 @@ class ReportEngine:
         try:
             # Step 1 & 2: Parallel data fetch
             activity, chat_topics = await asyncio.gather(
-                course_client.get_weekly_activity(student_id),
-                chat_engine.get_weekly_topics(student_id)
+                course_client.get_activity(student_id, period),
+                chat_engine.get_weekly_topics(student_id) # Chat topics stay weekly for simplicity or can be expanded
             )
 
             # Step 3: Format data for Gemma
@@ -39,7 +39,8 @@ class ReportEngine:
                 "watch_time_minutes": watch_time_mins,
                 "lessons_completed": lessons_completed,
                 "top_subjects": top_subjects,
-                "chatbot_queries": chat_topics[:10]
+                "chatbot_queries": chat_topics[:10],
+                "period": period
             }
 
             # Step 4: AI Summary in specified language
@@ -53,13 +54,14 @@ class ReportEngine:
     async def _generate_ai_summary(self, data: dict, language: str) -> str:
         """Calls Gemma 4 to create a friendly parent summary."""
         
+        period_text = "weekly" if data["period"] == "weekly" else "monthly"
         lang_instruction = f"The entire report must be written in {language}."
         if language == "ar":
             lang_instruction += " Use formal Arabic (Fusha) but keep it friendly."
 
         system_prompt = (
             "You are an AI Education Assistant for a learning platform. "
-            "Your task is to write a weekly progress report for a parent about their child's learning. "
+            f"Your task is to write a {period_text} progress report for a parent about their child's learning. "
             "Tone: Encouraging, professional, and clear. Avoid technical jargon. "
             "Style: Human-readable, 2-3 short paragraphs. "
             f"{lang_instruction} "
@@ -68,7 +70,7 @@ class ReportEngine:
 
         user_prompt = (
             f"Child Name: {data['student_name']}\n"
-            f"Activity this week:\n"
+            f"Activity over the last {period_text}:\n"
             f"- Total Video Learning Time: {data['watch_time_minutes']} minutes\n"
             f"- Lessons Fully Completed: {data['lessons_completed']}\n"
             f"- Most Active Subjects: {', '.join(data['top_subjects']) if data['top_subjects'] else 'General'}\n"
@@ -78,45 +80,112 @@ class ReportEngine:
 
         response = ""
         async for chunk in gemma_client.stream_chat(system_prompt, [{"role": "user", "content": user_prompt}]):
+            print(chunk, end="", flush=True)
             response += chunk
         
+        print("\n") # New line after streaming
+        logger.info(f"Full Report Generated (first 100 chars): {response[:100]}...")
         return response
 
-    def generate_pdf(self, student_name: str, report_text: str, language: str = "en") -> bytes:
+    def generate_pdf(self, student_name: str, report_text: str, language: str = "en", period: str = "weekly") -> bytes:
         """Generates a nicely formatted PDF of the report."""
-        pdf = FPDF()
-        pdf.add_page()
-        
-        # Header
-        pdf.set_font("Helvetica", "B", 20)
-        pdf.set_text_color(40, 50, 110)
-        title = "Weekly Learning Report" if language != "ar" else "تقرير التعلم الأسبوعي"
-        pdf.cell(0, 20, title, ln=True, align="C")
-        
-        # Student Info
-        pdf.set_font("Helvetica", "B", 14)
-        pdf.set_text_color(0, 0, 0)
-        pdf.cell(0, 10, f"Student: {student_name}", ln=True)
-        pdf.set_font("Helvetica", "", 10)
-        from datetime import datetime
-        pdf.cell(0, 10, f"Date: {datetime.now().strftime('%Y-%m-%d')}", ln=True)
-        pdf.ln(10)
-        
-        # Report Body
-        pdf.set_font("Helvetica", "", 12)
-        # Handle line breaks from AI
-        pdf.multi_cell(0, 10, report_text)
-        
-        # Footer
-        pdf.set_y(-30)
-        pdf.set_font("Helvetica", "I", 8)
-        pdf.set_text_color(128, 128, 128)
-        pdf.cell(0, 10, "Powered by Gemma 4 AI Learning Platform", align="C")
-        
-        return pdf.output()
+        try:
+            logger.info("PDF: Starting generation...")
+            pdf = FPDF()
+            pdf.add_page()
+            
+            # Helper to clean text for FPDF (Helvetica only supports Latin-1)
+            def clean_text(text):
+                if not text: return ""
+                # Replace common unicode characters that crash Helvetica
+                replacements = {
+                    "’": "'", "‘": "'", "“": '"', "”": '"', 
+                    "–": "-", "—": "-", "…": "...", "•": "*",
+                    "é": "e", "á": "a", "í": "i", "ó": "o", "ú": "u",
+                    "ü": "u", "ñ": "n"
+                }
+                for old, new in replacements.items():
+                    text = text.replace(old, new)
+                
+                # Final pass: Force to latin-1 and ignore what doesn't fit
+                return text.encode('latin-1', 'replace').decode('latin-1')
+
+            safe_report = clean_text(report_text)
+            safe_name = clean_text(student_name)
+            
+            # Header
+            logger.info("PDF: Writing Header...")
+            pdf.set_font("Helvetica", "B", 20)
+            pdf.set_text_color(40, 50, 110)
+            
+            period_label = "Weekly" if period == "weekly" else "Monthly"
+            title = f"{period_label} Learning Report"
+            if language == "ar":
+                title = f"{period_label} Learning Report (Arabic Summary)"
+
+            pdf.cell(0, 20, title, ln=True, align="C")
+            
+            # Student Info
+            logger.info("PDF: Writing Student Info...")
+            pdf.set_font("Helvetica", "B", 14)
+            pdf.set_text_color(0, 0, 0)
+            pdf.cell(0, 10, f"Student: {safe_name}", ln=True)
+            pdf.set_font("Helvetica", "", 10)
+            from datetime import datetime
+            pdf.cell(0, 10, f"Date: {datetime.now().strftime('%Y-%m-%d')}", ln=True)
+            pdf.ln(10)
+            
+            # Report Body
+            logger.info("PDF: Writing Body...")
+            pdf.set_font("Helvetica", "", 12)
+            pdf.multi_cell(0, 10, safe_report)
+            
+            # Footer
+            logger.info("PDF: Writing Footer...")
+            pdf.set_y(-30)
+            pdf.set_font("Helvetica", "I", 8)
+            pdf.set_text_color(128, 128, 128)
+            pdf.cell(0, 10, "Powered by Gemma 4 AI Learning Platform", align="C")
+            
+            logger.info("PDF: Generation Complete.")
+            pdf_data = bytes(pdf.output())
+            logger.info(f"PDF: Size is {len(pdf_data) / 1024:.2f} KB")
+            return pdf_data
+        except Exception as e:
+            logger.error(f"PDF Generation failed: {str(e)}", exc_info=True)
+            raise e
+
+    async def run_report_background(
+        self, parent_id: str, student_id: str, student_name: str, language: str = "en", period: str = "weekly"
+    ):
+        """Full background flow: Generate -> Notify."""
+        report_text = await self.generate_parent_report(student_id, student_name, language, period)
+        if report_text:
+            await self.send_notification(parent_id, student_id, report_text)
+        else:
+            logger.error(f"Background report failed for student {student_id}")
 
     async def send_notification(self, parent_id: str, student_id: str, content: str):
         """Calls the Notification Service to send the report."""
-        logger.info(f"Sending Parent Report to {parent_id} for student {student_id}...")
+        url = f"{settings.NOTIFICATION_SERVICE_URL}/api/v1/notifications/publish"
+        headers = {"x-internal-service-secret": settings.INTERNAL_SERVICE_SECRET}
+        
+        payload = {
+            "userId": parent_id,
+            "type": "parent_report_ready",
+            "studentId": student_id,
+            "summary": content[:500] + ("..." if len(content) > 500 else ""),
+            "fullReport": content,
+            "title": "New Progress Report Ready",
+            "body": f"Your child's progress report is ready. View it now!"
+        }
+
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(url, json=payload, headers=headers)
+                response.raise_for_status()
+                logger.info(f"Notification sent to parent {parent_id}")
+        except Exception as e:
+            logger.error(f"Failed to send notification: {str(e)}")
 
 report_engine = ReportEngine()

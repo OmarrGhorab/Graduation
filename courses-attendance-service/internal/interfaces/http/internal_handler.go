@@ -35,7 +35,8 @@ func (h *InternalHandler) RegisterRoutes(router fiber.Router) {
 	internal.Post("/enrollments", h.InternalEnroll)
 	internal.Get("/courses", h.ListAllCourses)
 	internal.Get("/analytics/user/:userId", h.GetUserAnalytics)
-	internal.Get("/reports/student/:userId/weekly", h.GetWeeklyReport)
+	internal.Get("/reports/student/:userId", h.GetReport)
+	internal.Get("/reports/student/:userId/weekly", h.GetReport) // Backward compatibility
 	internal.Get("/users/:userId/chat-contexts", h.GetChatContexts)
 }
 
@@ -246,7 +247,7 @@ func (h *InternalHandler) GetUserAnalytics(c *fiber.Ctx) error {
 	})
 }
 
-func (h *InternalHandler) GetWeeklyReport(c *fiber.Ctx) error {
+func (h *InternalHandler) GetReport(c *fiber.Ctx) error {
 	userId, err := uuid.Parse(c.Params("userId"))
 	if err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
@@ -255,7 +256,9 @@ func (h *InternalHandler) GetWeeklyReport(c *fiber.Ctx) error {
 		})
 	}
 
-	reportData, err := h.watchService.GetWeeklyReportData(c.Context(), userId)
+	period := c.Query("period", "weekly")
+
+	reportData, err := h.watchService.GetReportData(c.Context(), userId, period)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"success": false,

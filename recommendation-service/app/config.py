@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     INTERNAL_SERVICE_SECRET: str
     COURSES_SERVICE_URL: str = "http://localhost:8085"
     AUTH_SERVICE_URL: str = "http://localhost:6001"
+    NOTIFICATION_SERVICE_URL: str = "http://localhost:6003"
     
     # Cache settings
     RECOMMENDATION_CACHE_TTL: int = 21600  # 6 hours in seconds

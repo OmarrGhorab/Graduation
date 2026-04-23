@@ -100,21 +100,27 @@ def seed():
         course_suffixes = ["for Experts", "Masterclass", "Bootcamp", "Essentials", "Simplified", "Course 2024", "Handbook", "Workshop"]
 
         courses_to_create = []
-        for i in range(20):
+        for i in range(15):
             prefix = random.choice(course_prefixes)
             topic = random.choice(course_topics)
             suffix = random.choice(course_suffixes)
-            title = f"{prefix} {topic} {suffix}"
             
-            # Coverage for all cases
+            # First 5 are for enrollment and notification testing
+            enroll = (i < 5)
+            if enroll:
+                title = f"ENROLLED - Notification Test {i+1}"
+            else:
+                title = f"BUY ME - Course {i-4}"
+            
             delivery = "ONLINE" if i % 2 == 0 else "OFFLINE"
             billing = "ONE_TIME" if i % 3 == 0 else "MONTHLY"
-            is_paid = (i % 4 != 0) # Every 4th course is free
+            
+            # Make sure non-enrolled courses are PAID so they can be "bought"
+            is_paid = True if not enroll else (i % 4 != 0)
             price = round(random.uniform(50.0, 1000.0), 2) if is_paid else 0.0
             
             s_idx = random.randint(0, len(subjects) - 1)
-            enroll = (i < 5) # Enroll in the first 5 for testing
-            total_less = random.randint(3, 15)
+            total_less = random.randint(3, 8)
             
             thumb = random.choice(VALID_THUMBS)
             v_url, v_id = random.choice(VALID_HLS_VIDEOS)
@@ -131,16 +137,24 @@ def seed():
                 "total_lessons": total_less,
                 "thumb": thumb,
                 "v_url": v_url,
-                "v_id": v_id
+                "v_id": v_id,
+                "index": i
             })
+
+        # 4. Insert Courses
         course_data = []
         for c in courses_to_create:
+            subjects_id = subjects[c["subject_idx"]][0]
             course_data.append((
-                c["id"], c["title"], f"Learn {c['title']} with real world projects.", subjects[c["subject_idx"]][0], teacher_id, c["delivery"],
-                "Cairo Digital District" if c["delivery"] == "OFFLINE" else None,
-                30.0444 if c["delivery"] == "OFFLINE" else None, 31.2357 if c["delivery"] == "OFFLINE" else None,
-                150, c["total_lessons"], 15, c["price"], c["is_paid"], "ACTIVE", 0.3, "EGP", c["billing"],
-                random.choice(["15,10,5", "30,15", "60,30,5", "15"]), # NEW: reminder_intervals
+                c["id"], c["title"], f"This is a premium {c['title']} description.",
+                subjects_id, teacher_id, c["delivery"],
+                "Test Center" if c["delivery"] == "OFFLINE" else None, 
+                30.0444 if c["delivery"] == "OFFLINE" else None, 
+                31.2357 if c["delivery"] == "OFFLINE" else None, 
+                20000000 if c["should_enroll"] else 100, # Big geofence for test courses
+                c["total_lessons"], 30, c["price"], c["is_paid"],
+                "ACTIVE", 0.5, "EGP", c["billing"],
+                "30,15,5", # reminders
                 c["thumb"], c["v_url"], c["v_id"], now, now
             ))
 
@@ -160,17 +174,25 @@ def seed():
         for c in courses_to_create:
             for n in range(1, c["total_lessons"] + 1):
                 l_id = str(uuid.uuid4())
-                is_free = (n <= 2) # First 2 lessons are always free trial
+                is_free = (n <= 2)
                 is_online = (c["delivery"] == "ONLINE")
                 
-                # Use dog.mp4 for lessons
                 vid = VALID_MP4 if is_online else None
                 mat = "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf" if is_online else None
                 
+                # Staggered timing for enrolled courses to test reminders
+                if c["should_enroll"] and n == 1:
+                    # 30, 40, 50, 60, 70 mins from now
+                    offset = 30 + (c["index"] * 10)
+                    scheduled_time = now + timedelta(minutes=offset)
+                else:
+                    scheduled_time = now + timedelta(days=n)
+
                 lesson_data.append((
-                    l_id, c["id"], f"Part {n}: Moving forward", f"Module {n} description for {c['title']}",
-                    n, now + timedelta(days=n), 60, "SCHEDULED", c["delivery"], is_free,
-                    vid, "demo/dog" if vid else None, mat, "", now, now # NEW: "" for reminders_sent
+                    l_id, c["id"], f"Part {n}: Moving forward", f"Module {n} description",
+                    n, scheduled_time, 60, "SCHEDULED", c["delivery"], is_free,
+                    vid, "demo/dog" if vid else None, mat, "", now, now, # reminders_sent
+                    "Test Center" if not is_online else None, 30.0 if not is_online else None, 31.0 if not is_online else None, 20000000 if not is_online else None
                 ))
 
         execute_values(cur, """
@@ -178,7 +200,8 @@ def seed():
                 id, course_id, title, description, lesson_number, 
                 scheduled_at, duration_minutes, status, delivery_type, 
                 is_free, video_url, video_public_id, materials_url,
-                reminders_sent, created_at, updated_at
+                reminders_sent, created_at, updated_at,
+                location_name, location_lat, location_lng, geofence_radius_m
             ) VALUES %s
         """, lesson_data)
 
@@ -190,56 +213,12 @@ def seed():
                     "INSERT INTO public.enrollments (id, course_id, user_id, is_active, is_paid, enrolled_at) VALUES (%s, %s, %s, %s, %s, %s)",
                     (e_id, c["id"], student_id, True, True, now)
                 )
+                
                 if c["billing"] == "MONTHLY":
                     cur.execute(
                         "INSERT INTO public.enrollment_periods (id, enrollment_id, period_key, is_paid, paid_at) VALUES (%s, %s, %s, %s, %s)",
                         (str(uuid.uuid4()), e_id, now.strftime("%Y-%m"), True, now)
                     )
-
-        # 7. SPECIAL TEST SCENARIO (As per USER_REQUEST)
-        print("Creating 5 Special Test Scenario Courses...")
-        for i in range(1, 6):
-            test_course_id = str(uuid.uuid4())
-            test_lesson_id = str(uuid.uuid4())
-            # Schedule staggered lessons: 25, 35, 45, 55, 65 mins from now
-            offset_mins = 25 + ((i-1) * 10)
-            lesson_time = now + timedelta(minutes=offset_mins)
-            
-            # Course with 10km radius (relaxed) and 15,10,5 reminders
-            cur.execute("""
-                INSERT INTO public.courses (
-                    id, title, description, subject_id, teacher_id, delivery_type, 
-                    location_name, location_lat, location_lng, geofence_radius_m, 
-                    total_lessons, attendance_window_minutes, price, is_paid, 
-                    status, attendance_weight, currency, billing_type, 
-                    reminder_intervals, course_image, preview_video_url, preview_video_public_id,
-                    created_at, updated_at
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            """, (
-                test_course_id, f"OFFLINE LIVE TEST #{i} - Reminders & Attendance", f"Test course #{i} for offline reminders and attendance.",
-                subjects[0][0], teacher_id, "OFFLINE", f"Test Location {i}", 30.0444, 31.2357, 10000, 
-                1, 30, 99.99, True, "ACTIVE", 0.5, "EGP", "ONE_TIME", "15,10,5", 
-                VALID_THUMBS[i % len(VALID_THUMBS)], VALID_HLS_VIDEOS[0][0], VALID_HLS_VIDEOS[0][1], now, now
-            ))
-
-            # Lesson for this course
-            cur.execute("""
-                INSERT INTO public.lessons (
-                    id, course_id, title, description, lesson_number, 
-                    scheduled_at, duration_minutes, status, delivery_type, 
-                    is_free, reminders_sent, created_at, updated_at
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            """, (
-                test_lesson_id, test_course_id, f"Live Demo Lesson #{i}", f"Join this demo #{i} to test notifications.",
-                1, lesson_time, 60, "SCHEDULED", "OFFLINE", False, "", now, now
-            ))
-
-            # Enroll student in this test course
-            test_enroll_id = str(uuid.uuid4())
-            cur.execute(
-                "INSERT INTO public.enrollments (id, course_id, user_id, is_active, is_paid, enrolled_at) VALUES (%s, %s, %s, %s, %s, %s)",
-                (test_enroll_id, test_course_id, student_id, True, True, now)
-            )
 
         conn.commit()
         print("SUCCESS: Data seeded with valid URLs.")
