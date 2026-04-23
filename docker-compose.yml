@@ -464,6 +464,7 @@ services:
       - CLOUDINARY_API_KEY=${CLOUDINARY_API_KEY}
       - CLOUDINARY_API_SECRET=${CLOUDINARY_API_SECRET}
       - CLOUDINARY_FOLDER=chatbot-media
+      - NOTIFICATION_SERVICE_URL=http://notification-service:6003
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:

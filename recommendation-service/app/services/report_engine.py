@@ -7,6 +7,8 @@ from app.config import settings
 from app.services.course_client import course_client
 from app.services.chat_engine import chat_engine
 from app.services.gemma_client import gemma_client
+from app.models.database import SessionLocal
+from app.models.report import StudentReport
 
 logger = logging.getLogger(__name__)
 
@@ -158,9 +160,28 @@ class ReportEngine:
     async def run_report_background(
         self, parent_id: str, student_id: str, student_name: str, language: str = "en", period: str = "weekly"
     ):
-        """Full background flow: Generate -> Notify."""
+        """Full background flow: Generate -> Save to DB -> Notify."""
         report_text = await self.generate_parent_report(student_id, student_name, language, period)
         if report_text:
+            # 1. Save to Database for history
+            try:
+                db = SessionLocal()
+                new_report = StudentReport(
+                    student_id=student_id,
+                    parent_id=parent_id,
+                    student_name=student_name,
+                    report_text=report_text,
+                    period=period,
+                    language=language
+                )
+                db.add(new_report)
+                db.commit()
+                db.close()
+                logger.info(f"Report saved to DB for student {student_id}")
+            except Exception as e:
+                logger.error(f"Failed to save report to DB: {str(e)}")
+
+            # 2. Notify Parent
             await self.send_notification(parent_id, student_id, report_text)
         else:
             logger.error(f"Background report failed for student {student_id}")

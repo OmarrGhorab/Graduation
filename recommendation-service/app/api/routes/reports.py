@@ -2,6 +2,9 @@ from fastapi import APIRouter, Depends, HTTPException, Response, BackgroundTasks
 from app.api.dependencies import get_current_user
 from app.schemas.chat import ResponseModel
 from app.services.report_engine import report_engine
+from app.models.database import get_db
+from app.models.report import StudentReport
+from sqlalchemy.orm import Session
 import logging
 
 logger = logging.getLogger(__name__)
@@ -44,6 +47,69 @@ async def trigger_parent_report(
         }
     }
 
+@router.get("/parent/student/{student_id}/history")
+async def get_report_history(
+    student_id: str,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
+    """Returns a list of all past AI reports for a specific student."""
+    if current_user["role"] != "PARENT":
+        raise HTTPException(status_code=403, detail="Unauthorized")
+
+    reports = db.query(StudentReport).filter(
+        StudentReport.student_id == student_id,
+        StudentReport.parent_id == current_user["user_id"]
+    ).order_by(StudentReport.created_at.desc()).all()
+
+    return {
+        "success": True,
+        "data": [
+            {
+                "id": r.id,
+                "studentName": r.student_name,
+                "period": r.period,
+                "language": r.language,
+                "createdAt": r.created_at,
+                "summary": r.report_text[:100] + "..."
+            } for r in reports
+        ]
+    }
+
+@router.get("/history/{report_id}/download")
+async def download_historical_report(
+    report_id: str,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
+    """Generates a PDF for a specific past report from the database."""
+    if current_user["role"] != "PARENT":
+        raise HTTPException(status_code=403, detail="Unauthorized")
+
+    report = db.query(StudentReport).filter(
+        StudentReport.id == report_id,
+        StudentReport.parent_id == current_user["user_id"]
+    ).first()
+
+    if not report:
+        raise HTTPException(status_code=404, detail="Report not found")
+
+    # Re-generate PDF from the saved text
+    pdf_bytes = report_engine.generate_pdf(
+        report.student_name, 
+        report.report_text, 
+        report.language, 
+        report.period
+    )
+
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f"attachment; filename=history_report_{report.student_id}_{report.period}.pdf"
+        }
+    )
+
 @router.get("/parent/student/{student_id}/download")
 async def download_parent_report(
     student_id: str,
@@ -52,7 +118,7 @@ async def download_parent_report(
     period: str = "weekly",
     current_user: dict = Depends(get_current_user)
 ):
-    """Generates and returns the progress report as a downloadable PDF."""
+    """Generates and returns a FRESH progress report as a downloadable PDF."""
     if current_user["role"] != "PARENT":
          raise HTTPException(status_code=403, detail="Unauthorized")
 

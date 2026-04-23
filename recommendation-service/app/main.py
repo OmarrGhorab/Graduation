@@ -38,6 +38,7 @@ async def startup_event():
     from app.models.database import engine, Base
     from app.models.recommendation import RecommendationHistory  # noqa: F401
     from app.models.chat import ChatSession, ChatMessage  # noqa: F401
+    from app.models.report import StudentReport # noqa: F401
     Base.metadata.create_all(bind=engine)
     logger.info("Database tables verified/created.")
 
