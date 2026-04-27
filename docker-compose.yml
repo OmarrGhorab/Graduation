@@ -72,6 +72,7 @@ services:
       - CLOUDINARY_CLOUD_NAME=${CLOUDINARY_CLOUD_NAME}
       - CLOUDINARY_API_KEY=${CLOUDINARY_API_KEY}
       - CLOUDINARY_API_SECRET=${CLOUDINARY_API_SECRET}
+      - SENTRY_DSN=https://af6a4e0ac2bfdd50552fe552a0f31364@o4511274234216448.ingest.de.sentry.io/4511274248765520
       - GOOGLE_CLIENT_ID=564438837664-tcv289cukv6pvmmhgr4n7kki8mj8t3pf.apps.googleusercontent.com
       - TWO_FACTOR_ENCRYPTION_KEY=fb237104351755c61c81a8bed9e5f2fc9621ecb6a078f2c745881042bb693881
       - SERVICE_NAME=VeriQ Academy
@@ -80,6 +81,8 @@ services:
       - NOTIFICATION_SERVICE_URL=http://notification-service:6003
       - ALLOWED_ORIGINS=http://localhost:3000,http://localhost:8080,http://localhost:3001
       - INTERNAL_SERVICE_SECRET=graduation-mega-secret-2026
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+      - OTEL_SERVICE_NAME=auth-service
     depends_on:
       postgres:
         condition: service_healthy
@@ -107,6 +110,9 @@ services:
       - REDIS_URL=redis://redis:6379
       - AUTH_SERVICE_URL=http://auth-service:6001
       - KAFKA_BROKERS=kafka:29092
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+      - OTEL_SERVICE_NAME=notification-service
+      - SENTRY_DSN=https://af6a4e0ac2bfdd50552fe552a0f31364@o4511274234216448.ingest.de.sentry.io/4511274248765520
     depends_on:
       postgres:
         condition: service_healthy
@@ -137,6 +143,9 @@ services:
       - RECOMMENDATION_SERVICE_URLS=http://recommendation-service:8095
       - ARCJET_KEY=${ARCJET_KEY:-}
       - INTERNAL_SERVICE_SECRET=graduation-mega-secret-2026
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+      - OTEL_SERVICE_NAME=api-gateway
+      - SENTRY_DSN=https://af6a4e0ac2bfdd50552fe552a0f31364@o4511274234216448.ingest.de.sentry.io/4511274248765520
     depends_on:
       auth-service:
         condition: service_healthy
@@ -188,6 +197,9 @@ services:
       - CLOUDINARY_CLOUD_NAME=${CLOUDINARY_CLOUD_NAME}
       - CLOUDINARY_API_KEY=${CLOUDINARY_API_KEY}
       - CLOUDINARY_API_SECRET=${CLOUDINARY_API_SECRET}
+      - SENTRY_DSN=https://650632f93e84eca685e498f8730301d3@o4511274234216448.ingest.de.sentry.io/4511274619371600
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+      - OTEL_SERVICE_NAME=chat-service
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
@@ -221,6 +233,9 @@ services:
       - CLOUDINARY_CLOUD_NAME=${CLOUDINARY_CLOUD_NAME}
       - CLOUDINARY_API_KEY=${CLOUDINARY_API_KEY}
       - CLOUDINARY_API_SECRET=${CLOUDINARY_API_SECRET}
+      - SENTRY_DSN=https://650632f93e84eca685e498f8730301d3@o4511274234216448.ingest.de.sentry.io/4511274619371600
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+      - OTEL_SERVICE_NAME=chat-service
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
@@ -254,6 +269,9 @@ services:
       - CLOUDINARY_CLOUD_NAME=${CLOUDINARY_CLOUD_NAME}
       - CLOUDINARY_API_KEY=${CLOUDINARY_API_KEY}
       - CLOUDINARY_API_SECRET=${CLOUDINARY_API_SECRET}
+      - SENTRY_DSN=https://650632f93e84eca685e498f8730301d3@o4511274234216448.ingest.de.sentry.io/4511274619371600
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+      - OTEL_SERVICE_NAME=chat-service
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
@@ -278,6 +296,9 @@ services:
       - REDIS_URL=redis://redis:6379
       - KAFKA_BROKERS=kafka:29092
       - JWT_SECRET=47079cb745e7b5c1ebaa8106cabc00f43d6356ce3b0d4b725156742f4084280b
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+      - OTEL_SERVICE_NAME=ws-gateway
+      - SENTRY_DSN=https://650632f93e84eca685e498f8730301d3@o4511274234216448.ingest.de.sentry.io/4511274619371600
     depends_on:
       redis:
         condition: service_healthy
@@ -293,6 +314,9 @@ services:
       - REDIS_URL=redis://redis:6379
       - KAFKA_BROKERS=kafka:29092
       - JWT_SECRET=47079cb745e7b5c1ebaa8106cabc00f43d6356ce3b0d4b725156742f4084280b
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+      - OTEL_SERVICE_NAME=ws-gateway
+      - SENTRY_DSN=https://650632f93e84eca685e498f8730301d3@o4511274234216448.ingest.de.sentry.io/4511274619371600
     depends_on:
       redis:
         condition: service_healthy
@@ -308,6 +332,9 @@ services:
       - REDIS_URL=redis://redis:6379
       - KAFKA_BROKERS=kafka:29092
       - JWT_SECRET=47079cb745e7b5c1ebaa8106cabc00f43d6356ce3b0d4b725156742f4084280b
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+      - OTEL_SERVICE_NAME=ws-gateway
+      - SENTRY_DSN=https://650632f93e84eca685e498f8730301d3@o4511274234216448.ingest.de.sentry.io/4511274619371600
     depends_on:
       redis:
         condition: service_healthy
@@ -340,6 +367,9 @@ services:
       - CLOUDINARY_API_SECRET=${CLOUDINARY_API_SECRET}
       - CLOUDINARY_FOLDER=course-materials
       - AI_SERVICE_URL=http://recommendation-service:8095
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+      - OTEL_SERVICE_NAME=courses-service
+      - SENTRY_DSN=https://650632f93e84eca685e498f8730301d3@o4511274234216448.ingest.de.sentry.io/4511274619371600
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
@@ -382,6 +412,9 @@ services:
       - CLOUDINARY_API_SECRET=${CLOUDINARY_API_SECRET}
       - CLOUDINARY_FOLDER=course-materials
       - AI_SERVICE_URL=http://recommendation-service:8095
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+      - OTEL_SERVICE_NAME=courses-service
+      - SENTRY_DSN=https://650632f93e84eca685e498f8730301d3@o4511274234216448.ingest.de.sentry.io/4511274619371600
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
@@ -427,6 +460,9 @@ services:
       - RESEND_API_KEY=${RESEND_API_KEY}
       - EMAIL_FROM=${EMAIL_FROM:-onboarding@resend.dev}
       - EMAIL_FROM_NAME=${EMAIL_FROM_NAME:-Payment Service}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+      - OTEL_SERVICE_NAME=payment-service
+      - SENTRY_DSN=https://650632f93e84eca685e498f8730301d3@o4511274234216448.ingest.de.sentry.io/4511274619371600
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
@@ -465,6 +501,9 @@ services:
       - CLOUDINARY_API_SECRET=${CLOUDINARY_API_SECRET}
       - CLOUDINARY_FOLDER=chatbot-media
       - NOTIFICATION_SERVICE_URL=http://notification-service:6003
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318/v1/traces
+      - OTEL_SERVICE_NAME=recommendation-service
+      - SENTRY_DSN=https://2c7015f8c45826659a02758ef9754d8e@o4511274234216448.ingest.de.sentry.io/4511274615636048
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
@@ -476,6 +515,70 @@ services:
         condition: service_healthy
       auth-service:
         condition: service_healthy
+  # ============ OBSERVABILITY STACK ============
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.96.0
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    volumes:
+      - ./observability/otel-collector-config.yaml:/etc/otel-collector-config.yaml
+    ports:
+      - "4317:4317" # OTLP gRPC
+      - "4318:4318" # OTLP HTTP
+      - "8889:8889" # Prometheus metrics
+    depends_on:
+      - jaeger
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.54
+    ports:
+      - "16686:16686" # UI
+      - "4317"       # OTLP gRPC (internal)
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+
+  prometheus:
+    image: prom/prometheus:v2.50.0
+    volumes:
+      - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml
+    ports:
+      - "9090:9090"
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+
+  loki:
+    image: grafana/loki:2.9.4
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./observability/loki-config.yaml:/etc/loki/local-config.yaml
+    command: -config.file=/etc/loki/local-config.yaml
+
+  promtail:
+    image: grafana/promtail:2.9.4
+    volumes:
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./observability/promtail-config.yaml:/etc/promtail/config.yml
+    command: -config.file=/etc/promtail/config.yml
+
+  grafana:
+    image: grafana/grafana:10.3.0
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
+      - GF_AUTH_GITHUB_ENABLED=true
+      - GF_AUTH_GITHUB_CLIENT_ID=Ov23libvObBAey2Lgw44
+      - GF_AUTH_GITHUB_CLIENT_SECRET=f390d0d5959f3f4fa6f2de45e9e07180b8979823
+      - GF_AUTH_GITHUB_ALLOW_SIGN_UP=true
+      - GF_SERVER_ROOT_URL=http://localhost:3001
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning
+    depends_on:
+      - prometheus
+      - loki
+      - jaeger
 
 volumes:
   postgres_data:

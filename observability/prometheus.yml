@@ -1,0 +1,40 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: 'otel-collector'
+    static_configs:
+      - targets: ['otel-collector:8889']
+
+  - job_name: 'api-gateway'
+    static_configs:
+      - targets: ['api-gateway:3000']
+
+  - job_name: 'auth-service'
+    static_configs:
+      - targets: ['auth-service:6001']
+
+  - job_name: 'notification-service'
+    static_configs:
+      - targets: ['notification-service:6003']
+
+  - job_name: 'chat-service'
+    static_configs:
+      - targets: ['chat-service-1:6004', 'chat-service-2:6014', 'chat-service-3:6024']
+
+  - job_name: 'ws-gateway'
+    static_configs:
+      - targets: ['ws-gateway-1:6005', 'ws-gateway-2:6015', 'ws-gateway-3:6025']
+
+  - job_name: 'courses-service'
+    static_configs:
+      - targets: ['courses-service-1:8085', 'courses-service-2:8085']
+
+  - job_name: 'payment-service'
+    static_configs:
+      - targets: ['payment-service:8090']
+
+  - job_name: 'recommendation-service'
+    static_configs:
+      - targets: ['recommendation-service:8095']

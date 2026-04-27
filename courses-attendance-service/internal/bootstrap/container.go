@@ -26,6 +26,7 @@ import (
 	"github.com/OmarrGhorab/courses-attendance-service/internal/infrastructure/persistence/postgres"
 	"github.com/OmarrGhorab/courses-attendance-service/internal/infrastructure/qr"
 	"github.com/OmarrGhorab/courses-attendance-service/internal/interfaces/http"
+	"github.com/OmarrGhorab/courses-attendance-service/internal/observability"
 	"github.com/gofiber/fiber/v2"
 )
 
@@ -34,6 +35,7 @@ type Container struct {
 	Config *config.Config
 	App    *fiber.App
 	DB     *postgres.Database
+	Obs    *observability.Observability
 
 	// Repositories
 	CourseRepo            *postgres.CourseRepository
@@ -103,6 +105,9 @@ func New() (*Container, error) {
 		DB:     db,
 		Redis:  redisClient,
 	}
+
+	// Initialize Observability
+	container.Obs = observability.Init(app)
 
 	// Initialize infrastructure
 	container.initInfrastructure()
@@ -343,6 +348,11 @@ func (c *Container) Shutdown() error {
 		if err := c.DB.Close(); err != nil {
 			log.Printf("Error closing database: %v", err)
 		}
+	}
+
+	// Shutdown observability
+	if c.Obs != nil {
+		c.Obs.Shutdown()
 	}
 
 	return c.App.Shutdown()

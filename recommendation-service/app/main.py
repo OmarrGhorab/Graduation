@@ -4,13 +4,15 @@ from app.api.routes import recommendations
 from app.api.routes import chat
 from app.api.routes import reports
 from app.config import settings
+from app.observability import setup_observability
 import logging
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title=settings.APP_NAME)
+
+# Initialize observability (Tracing, Metrics, Logger, Sentry)
+setup_observability(app)
 
 # Set up CORS
 app.add_middleware(
@@ -29,6 +31,11 @@ app.include_router(reports.router, prefix="/api/v1/reports", tags=["reports"])
 @app.get("/health")
 async def health_check():
     return {"status": "healthy", "service": settings.APP_NAME}
+
+@app.get("/debug-sentry")
+async def debug_sentry():
+    1 / 0  # Trigger zero division error
+    return {"message": "Should not reach here"}
 
 @app.on_event("startup")
 async def startup_event():

@@ -11,6 +11,7 @@ import (
 	"github.com/graduation/chat-service/internal/handlers"
 	"github.com/graduation/chat-service/internal/kafka"
 	"github.com/graduation/chat-service/internal/middleware"
+	"github.com/graduation/chat-service/internal/observability"
 	"github.com/graduation/chat-service/internal/repository"
 	"github.com/graduation/chat-service/internal/router"
 	"github.com/graduation/chat-service/internal/service"
@@ -39,6 +40,11 @@ func main() {
 
 	// 5. App
 	app := fiber.New()
+
+	// Initialize Observability
+	obs := observability.Init(app)
+	defer obs.Shutdown()
+
 	app.Use(logger.New())
 	app.Use(cors.New())
 

@@ -1,4 +1,5 @@
 import express, { Request, Response } from "express";
+import { initObservability, setupSentryErrorHandler } from "./observability/index.js";
 import cors from "cors";
 import dotenv from "dotenv";
 import notificationsRouter from "./routes/notifications.route";
@@ -15,6 +16,9 @@ import { setupSubscriptionHandlers } from "./handlers/subscription.handler";
 dotenv.config();
 
 const app = express();
+
+// Initialize observability (Tracing, Metrics, Logger, Sentry)
+initObservability(app);
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -73,6 +77,12 @@ app.get("/health", async (req: Request, res: Response) => {
 app.use("/api/v1/notifications", notificationsRouter);
 app.use("/api/v1/location", locationRouter);
 
+app.get("/debug-sentry", (req, res) => {
+    throw new Error("Sentry Debug Test: Notification Service is connected!");
+});
+
+// Add Sentry error handler (must be before custom error handler)
+setupSentryErrorHandler(app);
 // Error handler last
 app.use(errorHandler);
 
