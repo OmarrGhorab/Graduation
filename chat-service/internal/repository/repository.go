@@ -1,9 +1,12 @@
 package repository
 
 import (
+	"fmt"
+	"sort"
 	"time"
-	
+
 	"github.com/graduation/chat-service/internal/models"
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
 
@@ -56,6 +59,91 @@ func (r *Repository) GetUserConversations(userID string) ([]models.Conversation,
 		return nil, err
 	}
 	return conversations, nil
+}
+
+func (r *Repository) FindOrCreateDirectConversation(user1, user2 string) (*models.Conversation, error) {
+	uids := []string{user1, user2}
+	sort.Strings(uids)
+	// Use MD5 hash of the name to create a deterministic UUID that is actually a valid UUID!
+	// This ensures it fits into the DB's UUID column.
+	source := fmt.Sprintf("direct:%s:%s", uids[0], uids[1])
+	convID := uuid.NewMD5(uuid.NameSpaceDNS, []byte(source)).String()
+
+	// 2. Try to find by this deterministic ID first!
+	var existing models.Conversation
+	if err := r.db.Preload("Members").First(&existing, "id = ?", convID).Error; err == nil {
+		return &existing, nil
+	}
+
+	// 3. Not found, create a new one
+	conv := &models.Conversation{
+		ID:        convID,
+		Type:      models.Direct,
+		CreatedBy: user1,
+		Members: []models.ConversationMember{
+			{UserID: user1, Role: models.RoleMember, JoinedAt: time.Now()},
+			{UserID: user2, Role: models.RoleMember, JoinedAt: time.Now()},
+		},
+		UpdatedAt: time.Now(),
+	}
+
+	if err := r.db.Create(conv).Error; err != nil {
+		// If someone else created it in the meantime, retry fetching
+		if err == gorm.ErrDuplicatedKey {
+			if err := r.db.Preload("Members").First(&existing, "id = ?", convID).Error; err == nil {
+				return &existing, nil
+			}
+		}
+		return nil, err
+	}
+	return conv, nil
+}
+
+func (r *Repository) UpsertCourseGroup(courseID, name, creatorID, imageURL string) (*models.Conversation, error) {
+	var conv models.Conversation
+	if err := r.db.First(&conv, "id = ?", courseID).Error; err == nil {
+		// Update name and image if exists without touching updated_at
+		return &conv, r.db.Model(&conv).UpdateColumns(map[string]interface{}{
+			"name":      name,
+			"image_url": imageURL,
+		}).Error
+	}
+
+	newConv := &models.Conversation{
+		ID:          courseID,
+		Type:        models.Group,
+		Name:        name,
+		Description: "Official Course Group",
+		ImageURL:    imageURL,
+		CreatedBy:   creatorID,
+		UpdatedAt:   time.Now(),
+	}
+
+	if err := r.db.Create(newConv).Error; err != nil {
+		if err == gorm.ErrDuplicatedKey {
+			if err := r.db.First(&conv, "id = ?", courseID).Error; err == nil {
+				return &conv, nil
+			}
+		}
+		return nil, err
+	}
+	return newConv, nil
+}
+
+func (r *Repository) EnsureMembership(conversationID, userID string) error {
+	var m models.ConversationMember
+	err := r.db.Where("conversation_id = ? AND user_id = ?", conversationID, userID).First(&m).Error
+	if err == nil {
+		return nil // already a member
+	}
+
+	m = models.ConversationMember{
+		ConversationID: conversationID,
+		UserID:         userID,
+		Role:           models.RoleMember,
+		JoinedAt:       time.Now(),
+	}
+	return r.db.Create(&m).Error
 }
 
 // --- Members ---

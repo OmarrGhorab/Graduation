@@ -16,6 +16,7 @@ type Config struct {
 	InternalServiceSecret  string
 	NotificationServiceURL string // For offline push notifications
 	AuthServiceURL         string // For fetching user profiles
+	CoursesServiceURL      string // For academic contexts
 	WSGatewayURL           string // For checking user presence
 
 	// Cloudinary
@@ -37,6 +38,7 @@ func Load() *Config {
 		InternalServiceSecret:  getEnv("INTERNAL_SERVICE_SECRET", "internal_secret"),
 		NotificationServiceURL: getEnv("NOTIFICATION_SERVICE_URL", "http://localhost:6003"),
 		AuthServiceURL:         getEnv("AUTH_SERVICE_URL", "http://localhost:6001"),
+		CoursesServiceURL:      getEnv("COURSES_SERVICE_URL", "http://localhost:8085"),
 		WSGatewayURL:           getEnv("WS_GATEWAY_URL", "http://localhost:6005"),
 
 		CloudinaryCloudName: getEnv("CLOUDINARY_CLOUD_NAME", ""),

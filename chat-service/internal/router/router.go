@@ -14,6 +14,7 @@ func SetupRoutes(app *fiber.App, h *handlers.Handler, auth *middleware.AuthMiddl
 	conversations.Post("/", h.CreateGroupConversation)
 	conversations.Post("/direct", h.CreateDirectConversation)
 	conversations.Get("/", h.GetUserConversations)
+	conversations.Get("/discover", h.DiscoverContacts)
 	conversations.Get("/:id", h.GetConversation)
 	conversations.Delete("/:id", h.DeleteConversation)
 	conversations.Post("/:id/leave", h.LeaveConversation)

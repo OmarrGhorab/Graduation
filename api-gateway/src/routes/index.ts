@@ -23,6 +23,9 @@ const serviceIndexes: Record<string, number> = {
   notification: 0,
   chat: 0,
   ws: 0,
+  courses: 0,
+  payment: 0,
+  recommendation: 0,
 };
 
 /**
@@ -79,7 +82,9 @@ export function setupRoutes(app: Express, config: AppConfig): { wsProxy: any } {
       const services = [
         ...config.services.auth,
         ...config.services.notification,
-        ...config.services.chat,
+        ...config.services.courses,
+        ...config.services.payment,
+        ...config.services.recommendation,
       ];
       const healthCheck = await checkAllServices(services);
 
@@ -101,6 +106,8 @@ export function setupRoutes(app: Express, config: AppConfig): { wsProxy: any } {
     "/api/v1/conversations",
     proxy(() => getNextServiceUrl(config.services.chat, "chat"), {
       proxyReqPathResolver: (req) => req.originalUrl,
+      parseReqBody: false,
+      limit: "2gb"
     })
   );
 
@@ -115,6 +122,8 @@ export function setupRoutes(app: Express, config: AppConfig): { wsProxy: any } {
     "/api/v1/media",
     proxy(() => getNextServiceUrl(config.services.chat, "chat"), {
       proxyReqPathResolver: (req) => req.originalUrl,
+      parseReqBody: false,
+      limit: "2gb"
     })
   );
 
@@ -168,7 +177,117 @@ export function setupRoutes(app: Express, config: AppConfig): { wsProxy: any } {
     res.send("WS Path is reachable");
   });
 
+  // Courses & Attendance service routes
+  const coursePaths = [
+    "/api/v1/courses",
+    "/api/v1/subjects",
+    "/api/v1/lessons",
+    "/api/v1/attendance",
+    "/api/v1/absences",
+    "/api/v1/progress",
+    "/api/v1/calendar",
+    "/api/v1/internal",
+    "/api/v1/watch",
+    "/api/v1/parent",
+  ];
+
+
+  coursePaths.forEach(path => {
+    app.use(
+      path,
+      (req, res, next) => {
+        console.log(`[Proxy] Routing ${req.method} ${req.originalUrl} to Courses Service`);
+        next();
+      },
+      proxy(() => getNextServiceUrl(config.services.courses, "courses"), {
+        proxyReqPathResolver: (req) => req.originalUrl,
+        parseReqBody: false, // Let the underlying service handle the body
+        limit: "2gb" // Set limit for the proxy as well
+      })
+    );
+  });
+
   app.use("/ws", wsProxy);
+
+  // Payment service routes
+  const paymentPaths = ["/api/v1/payments", "/api/v1/cart", "/api/v1/subscriptions"];
+  paymentPaths.forEach(path => {
+    app.use(
+      path,
+      // Skip authentication for the Paymob webhook and the redirect status page
+      (req, res, next) => {
+        const isWebhook = req.path.includes("/webhook/paymob");
+        const isStatus = req.path.includes("/payments/status");
+        if (isWebhook || isStatus) {
+            return next();
+        }
+        // Otherwise, run normal auth (checkAuth should be here if it's not global)
+        next();
+      },
+      proxy(() => getNextServiceUrl(config.services.payment, "payment"), {
+        proxyReqPathResolver: (req) => req.originalUrl,
+        parseReqBody: false, // Essential for Paymob Webhook HMAC validation
+      })
+    );
+  });
+
+  // Recommendation service routes
+  app.use(
+    "/api/v1/recommendations",
+    proxy(() => getNextServiceUrl(config.services.recommendation, "recommendation"), {
+      proxyReqPathResolver: (req) => req.originalUrl,
+      parseReqBody: false,
+      limit: "2gb"
+    })
+  );
+
+  app.use(
+    "/api/v1/chatbot",
+    proxy(() => getNextServiceUrl(config.services.recommendation, "recommendation"), {
+      proxyReqPathResolver: (req) => req.originalUrl,
+      parseReqBody: false,
+      limit: "2gb"
+    })
+  );
+
+  app.use(
+    "/api/v1/reports",
+    proxy(() => getNextServiceUrl(config.services.recommendation, "recommendation"), {
+      proxyReqPathResolver: (req) => req.originalUrl,
+      parseReqBody: false,
+      limit: "2gb"
+    })
+  );
+
+  // Auth service with Pre-warming trigger on login
+  app.use(
+    "/api/v1/auth",
+    proxy(() => getNextServiceUrl(config.services.auth, "auth"), {
+      proxyReqPathResolver: (req) => req.originalUrl,
+      userResDecorator: (proxyRes, proxyResData, userReq, userRes) => {
+        // Trigger pre-warming ONLY on successful login
+        if (userReq.path.includes("/login") && proxyRes.statusCode === 200) {
+          try {
+            const data = JSON.parse(proxyResData.toString('utf8'));
+            const token = data.data?.accessToken;
+            
+            if (token) {
+              const recUrl = getNextServiceUrl(config.services.recommendation, "recommendation");
+              console.log(`[PreWarming] Triggering background AI warming for token...`);
+              
+              // Fire and forget (don't await)
+              fetch(`${recUrl}/api/v1/recommendations`, {
+                headers: { 'Authorization': `Bearer ${token}` }
+              }).catch((err: any) => console.error(`[PreWarming] Failed: ${err.message}`));
+            }
+          } catch (e: any) {
+            console.error(`[PreWarming] Error: ${e.message}`);
+          }
+        }
+        return proxyResData;
+      }
+    })
+  );
 
   // Auth service catch-all (load balanced, must be last)
   app.use(

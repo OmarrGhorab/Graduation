@@ -5,6 +5,12 @@ import notificationsRouter from "./routes/notifications.route";
 import locationRouter from "./routes/location.route";
 import { errorHandler } from "./middleware/errorHandler";
 import prisma from "./libs/prisma";
+import redis from "./libs/redis";
+import { initConsumer, stopConsumer } from "./libs/kafka-consumer";
+import { setupGenericHandler } from "./handlers/generic.handler";
+import { setupLessonHandlers } from "./handlers/lesson.handler";
+import { setupAttendanceHandlers } from "./handlers/attendance.handler";
+import { setupSubscriptionHandlers } from "./handlers/subscription.handler";
 
 dotenv.config();
 
@@ -41,14 +47,16 @@ app.get("/health", async (req: Request, res: Response) => {
     try {
         // Check database connectivity
         const dbHealthy = await prisma.$queryRaw`SELECT 1`.then(() => true).catch(() => false);
+        const redisHealthy = await redis.ping().then(() => true).catch(() => false);
 
-        const isHealthy = dbHealthy;
+        const isHealthy = dbHealthy && redisHealthy;
 
         res.status(isHealthy ? 200 : 503).json({
             status: isHealthy ? "ok" : "degraded",
             service: "notification-service",
             dependencies: {
                 database: dbHealthy ? "ok" : "error",
+                redis: redisHealthy ? "ok" : "error",
             },
             timestamp: new Date().toISOString(),
         });
@@ -70,8 +78,20 @@ app.use(errorHandler);
 
 const PORT = process.env.PORT || 6003;
 
-const server = app.listen(PORT, () => {
+const server = app.listen(PORT, async () => {
     console.log(`notification service is running on port ${PORT}`);
+
+    // Initialize Kafka
+    try {
+        setupGenericHandler();
+        setupLessonHandlers();
+        setupAttendanceHandlers();
+        setupSubscriptionHandlers();
+        await initConsumer();
+        console.log('[Kafka] Consumer started successfully');
+    } catch (error) {
+        console.error('[Kafka] Failed to start consumer:', error);
+    }
 });
 
 // Graceful shutdown
@@ -88,16 +108,27 @@ const gracefulShutdown = async (signal: string) => {
         // Disconnect Prisma first or in parallel
         await prisma.$disconnect();
         console.log('Database connection closed');
+        await redis.quit();
+        console.log('Redis connection closed');
 
         // Stop accepting new connections
         // We use close() but we don't necessarily wait for all connections to finish 
         // because SSE connections will keep it open forever.
-        server.close((err) => {
+        server.close(async (err) => {
             if (err) {
                 console.error('Error closing HTTP server:', err);
             } else {
                 console.log('HTTP server closed');
             }
+
+            // Stop Kafka
+            try {
+                await stopConsumer();
+                console.log('Kafka consumer stopped');
+            } catch (error) {
+                console.error('Error stopping Kafka consumer:', error);
+            }
+
             clearTimeout(forceShutdownTimeout);
             process.exit(0);
         });

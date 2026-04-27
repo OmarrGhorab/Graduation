@@ -1,5 +1,11 @@
+import path from "path";
 import dotenv from "dotenv";
-dotenv.config();
+dotenv.config({ path: path.resolve(process.cwd(), ".env") });
+
+const secret = process.env.INTERNAL_SERVICE_SECRET || "";
+const jwtSecret = process.env.JWT_ACCESS_SECRET || "";
+console.log(`[Auth Service] Internal Secret: ${secret.substring(0, 5)}...${secret.substring(secret.length - 4)}`);
+console.log(`[Auth Service] JWT Secret: ${jwtSecret.substring(0, 5)}...${jwtSecret.substring(jwtSecret.length - 4)}`);
 
 import express, { Request, Response } from "express";
 import cors from "cors";

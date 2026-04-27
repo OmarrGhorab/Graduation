@@ -142,6 +142,7 @@ type UserStub struct {
 	ID    string `json:"id"`
 	Name  string `json:"name"`
 	Image string `json:"image"`
+	Role  string `json:"role"`
 }
 
 // Enriched Conversation Response
@@ -161,6 +162,10 @@ type ConversationResponse struct {
 	PeerProfile  *UserStub                    `json:"peer_profile,omitempty"` // For direct chats
 	PeerOnline   bool                         `json:"peer_online"`            // For direct chats (no omitempty so false shows)
 	UnreadCount  int                          `json:"unread_count"`           // Number of unread messages
+	Category     string                       `json:"category,omitempty"`     // ACADEMIC, FAMILY, etc.
+	Relation     string                       `json:"relation,omitempty"`     // Parent, Teacher, etc.
+	Role         string                       `json:"role,omitempty"`         // Peer role for direct chats
+	LastMessagePreview string                 `json:"last_message_preview"`
 }
 
 // Enriched Member Response
@@ -241,4 +246,37 @@ type MediaItem struct {
 	SenderID  string         `json:"sender_id"`
 	Sender    *UserStub      `json:"sender,omitempty"`
 	CreatedAt time.Time      `json:"created_at"`
+}
+
+// Discovery Result Categories
+type DiscoveryCategory string
+
+const (
+	CategoryFamily   DiscoveryCategory = "FAMILY"
+	CategoryAcademic DiscoveryCategory = "ACADEMIC"
+	CategoryGroups   DiscoveryCategory = "GROUPS"
+)
+
+// Contact Suggestion (for Direct Chats)
+type ContactSuggestion struct {
+	ID       string            `json:"id"`
+	Name     string            `json:"name"`
+	Image    string            `json:"image"`
+	Role     string            `json:"role"`
+	Category DiscoveryCategory `json:"category"`
+	Relation string            `json:"relation"` // e.g., "Parent", "Teacher"
+}
+
+// Group Suggestion (for Course Groups)
+type GroupSuggestion struct {
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	Image string `json:"image"`
+	Type  string `json:"type"` // e.g., "COURSE_GROUP"
+}
+
+// Full Discovery Response
+type DiscoveryResponse struct {
+	Contacts []ContactSuggestion `json:"contacts"`
+	Groups   []GroupSuggestion   `json:"groups"`
 }

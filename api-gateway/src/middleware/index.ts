@@ -42,17 +42,16 @@ export function setupMiddleware(app: Express, config: AppConfig): void {
 
   // 2. Timeout (set timeout for all requests)
   // Applied early to ensure all requests have a timeout limit
-  const [timeoutMiddleware, haltOnTimeout] = createTimeoutMiddleware(30000);
+  // Increase timeout to 15 minutes (900,000ms) to support large file uploads (up to 2GB)
+  const [timeoutMiddleware, haltOnTimeout] = createTimeoutMiddleware(900000);
   app.use(timeoutMiddleware);
 
-  // 3. Body parsing with halt-on-timeout checks between parsers
-  // Parse JSON bodies (up to 10MB)
-  app.use(json({ limit: "10mb" }));
-  app.use(haltOnTimeout); // Check timeout after JSON parsing to prevent processing timed-out requests
+  // 3. Body parsing (REMOVED: Body parser consumes the stream, which causes express-http-proxy to hang when proxyReqBody: false)
+  // app.use(json({ limit: "2gb" }));
+  // app.use(haltOnTimeout);
 
-  // Parse URL-encoded bodies (up to 10MB)
-  app.use(urlencoded({ extended: true, limit: "10mb" }));
-  app.use(haltOnTimeout); // Check timeout after URL-encoded parsing
+  // app.use(urlencoded({ extended: true, limit: "2gb" }));
+  // app.use(haltOnTimeout); // Check timeout after URL-encoded parsing
 
   // 4. CORS (after body parsing, before business logic)
   // Applied after body parsing so we can read request bodies if needed

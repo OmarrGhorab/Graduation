@@ -54,6 +54,17 @@ func (s *Service) CreateDirectConversation(initiatorID, peerID string) (*models.
 }
 
 func (s *Service) CreateGroupConversation(creatorID, name, description string, memberIDs []string) (*models.Conversation, error) {
+	// 1. Verify Creator Role (Only Teacher/Instructor can create groups)
+	profile, err := s.userService.FetchUserProfiles([]string{creatorID})
+	if err != nil || profile[creatorID] == nil {
+		return nil, errors.New("failed to verify creator permissions")
+	}
+
+	role := profile[creatorID].Role
+	if role != "TEACHER" && role != "INSTRUCTOR" {
+		return nil, errors.New("only instructors and teachers can create groups")
+	}
+
 	members := make([]models.ConversationMember, len(memberIDs)+1)
 	members[0] = models.ConversationMember{UserID: creatorID, Role: models.RoleOwner, JoinedAt: time.Now()}
 
@@ -75,88 +86,68 @@ func (s *Service) CreateGroupConversation(creatorID, name, description string, m
 	return conv, nil
 }
 
-func (s *Service) GetUserConversations(userID, convType, search string, limit, offset int) ([]models.ConversationResponse, error) {
+func (s *Service) GetUserConversations(userID, role, convType, search string, limit, offset int) ([]models.ConversationResponse, error) {
+	// 1. Fetch Academic & Family Context (Discovery)
+	discoveryMetadata := make(map[string]struct {
+		Category string
+		Relation string
+	})
+
+	discovery, err := s.DiscoverContacts(userID, role)
+	if err == nil {
+		// Sync & Store Metadata for Groups
+		for _, g := range discovery.Groups {
+			_, _ = s.repo.UpsertCourseGroup(g.ID, g.Name, userID, g.Image)
+			_ = s.repo.EnsureMembership(g.ID, userID)
+			discoveryMetadata[g.ID] = struct {
+				Category string
+				Relation string
+			}{Category: "ACADEMIC", Relation: "Course Group"}
+		}
+		// Sync & Store Metadata for Direct Contacts
+		for _, c := range discovery.Contacts {
+			if c.ID != userID {
+				conv, err := s.repo.FindOrCreateDirectConversation(userID, c.ID)
+				if err == nil {
+					discoveryMetadata[conv.ID] = struct {
+						Category string
+						Relation string
+					}{Category: string(c.Category), Relation: c.Relation}
+				}
+			}
+		}
+	}
+
+	// 2. Fetch all local conversations
 	convs, err := s.repo.GetUserConversations(userID)
 	if err != nil {
 		return nil, err
 	}
 
-	// Filter by type if specified
-	if convType != "" {
-		filtered := []models.Conversation{}
-		for _, conv := range convs {
-			if string(conv.Type) == convType {
-				filtered = append(filtered, conv)
-			}
-		}
-		convs = filtered
-	}
-
-	// Filter by search if specified
-	if search != "" {
-		filtered := []models.Conversation{}
-		searchLower := strings.ToLower(search)
-		for _, conv := range convs {
-			if strings.Contains(strings.ToLower(conv.Name), searchLower) ||
-				strings.Contains(strings.ToLower(conv.Description), searchLower) {
-				filtered = append(filtered, conv)
-			}
-		}
-		convs = filtered
-	}
-
-	// Sort by updated_at descending (most recent first) after filtering
-	// This ensures conversations with latest messages appear first
-	sort.Slice(convs, func(i, j int) bool {
-		return convs[i].UpdatedAt.After(convs[j].UpdatedAt)
-	})
-
-	// Apply pagination
-	total := len(convs)
-	if offset >= total {
-		return []models.ConversationResponse{}, nil
-	}
-	end := offset + limit
-	if end > total {
-		end = total
-	}
-	convs = convs[offset:end]
-
-	// Collect all user IDs to fetch profiles and presence
+	// 3. Batch Enrich profiles for ALL (to enable searching by peer name)
 	userIDsMap := make(map[string]bool)
 	for _, conv := range convs {
 		userIDsMap[conv.CreatedBy] = true
-		// Get members for each conversation
 		members, _ := s.repo.GetMembers(conv.ID)
 		for _, m := range members {
 			userIDsMap[m.UserID] = true
 		}
 	}
 
-	// Convert map to slice
 	userIDs := make([]string, 0, len(userIDsMap))
 	for id := range userIDsMap {
 		userIDs = append(userIDs, id)
 	}
 
-	// Fetch all user profiles
-	profiles, err := s.userService.FetchUserProfiles(userIDs)
-	if err != nil {
-		fmt.Printf("Error fetching user profiles: %v\n", err)
-		profiles = make(map[string]*UserProfile)
-	}
+	profiles, _ := s.userService.FetchUserProfiles(userIDs)
+	presenceMap, _ := s.presenceService.CheckPresence(userIDs)
 
-	// Fetch presence information
-	presenceMap, err := s.presenceService.CheckPresence(userIDs)
-	if err != nil {
-		fmt.Printf("Error fetching presence: %v\n", err)
-		presenceMap = make(map[string]bool)
-	}
+	// 4. Build and Filter responses
+	responses := []models.ConversationResponse{}
+	searchLower := strings.ToLower(search)
 
-	// Build enriched responses
-	responses := make([]models.ConversationResponse, len(convs))
-	for i, conv := range convs {
-		responses[i] = models.ConversationResponse{
+	for _, conv := range convs {
+		res := models.ConversationResponse{
 			ID:          conv.ID,
 			Type:        conv.Type,
 			Name:        conv.Name,
@@ -167,55 +158,113 @@ func (s *Service) GetUserConversations(userID, convType, search string, limit, o
 			UpdatedAt:   conv.UpdatedAt,
 		}
 
-		// Get unread count for this conversation
-		unreadCount, _ := s.repo.GetUnreadCount(conv.ID, userID)
-		responses[i].UnreadCount = int(unreadCount)
+		// Apply discovery metadata
+		if meta, ok := discoveryMetadata[conv.ID]; ok {
+			res.Category = meta.Category
+			res.Relation = meta.Relation
+		}
 
-		// Get last message
+		// Resolve Direct Chat Peer Info
+		if conv.Type == models.Direct {
+			members, _ := s.repo.GetMembers(conv.ID)
+			for _, m := range members {
+				if m.UserID != userID {
+					peer := profiles[m.UserID]
+					res.PeerProfile = &models.UserStub{
+						ID:    m.UserID,
+						Name:  peer.Name,
+						Image: peer.Image,
+						Role:  peer.Role,
+					}
+					res.PeerOnline = presenceMap[m.UserID]
+					res.Name = peer.Name // Override name with peer's name
+					res.ImageURL = peer.Image
+					res.Role = peer.Role // Explicitly set role at response root for easier filtering
+					break
+				}
+			}
+		}
+
+		// Type/Filter shortcut
+		if convType != "" {
+			if convType == "groups" && conv.Type != models.Group {
+				continue
+			}
+			if convType == "students" && (conv.Type != models.Direct || (res.PeerProfile != nil && res.PeerProfile.Role != "STUDENT")) {
+				continue
+			}
+			if convType == "teachers" && (conv.Type != models.Direct || (res.PeerProfile != nil && res.PeerProfile.Role != "TEACHER")) {
+				continue
+			}
+			if convType == "instructors" && (conv.Type != models.Direct || (res.PeerProfile != nil && res.PeerProfile.Role != "INSTRUCTOR")) {
+				continue
+			}
+			if convType == "parents" && (conv.Type != models.Direct || (res.PeerProfile != nil && res.PeerProfile.Role != "PARENT")) {
+				continue
+			}
+			// Fallback to exact type match if it's not a shortcut
+			if convType != "groups" && convType != "students" && convType != "teachers" && convType != "instructors" && convType != "parents" && string(conv.Type) != convType {
+				continue
+			}
+		}
+
+		// Search filter (Matches Group Names OR Peer Names)
+		if search != "" {
+			nameMatch := strings.Contains(strings.ToLower(res.Name), searchLower)
+			descMatch := strings.Contains(strings.ToLower(res.Description), searchLower)
+			if !nameMatch && !descMatch {
+				continue
+			}
+		}
+
+		// Get unread count & last message (only for those that pass filters)
+		unreadCount, _ := s.repo.GetUnreadCount(conv.ID, userID)
+		res.UnreadCount = int(unreadCount)
+
 		messages, _ := s.repo.GetMessages(conv.ID, "", 1, 0)
 		if len(messages) > 0 {
 			lastMsg := messages[0]
-			senderProfile := profiles[lastMsg.SenderID]
-			responses[i].LastMessage = &models.MessageResponse{
+			sender := profiles[lastMsg.SenderID]
+			res.LastMessage = &models.MessageResponse{
 				ID:             lastMsg.ID,
 				ConversationID: lastMsg.ConversationID,
 				SenderID:       lastMsg.SenderID,
 				Content:        lastMsg.Content,
 				Type:           lastMsg.Type,
-				MediaURLs:      lastMsg.MediaURLs,
-				ReplyToID:      lastMsg.ReplyToID,
-				IsDeleted:      lastMsg.IsDeleted,
 				CreatedAt:      lastMsg.CreatedAt,
 				Sender: &models.UserStub{
 					ID:    lastMsg.SenderID,
-					Name:  senderProfile.Name,
-					Image: senderProfile.Image,
+					Name:  sender.Name,
+					Image: sender.Image,
 				},
 			}
-		}
 
-		// For direct chats, show peer profile and online status
-		if conv.Type == models.Direct {
-			members, _ := s.repo.GetMembers(conv.ID)
-			for _, m := range members {
-				if m.UserID != userID {
-					peerProfile := profiles[m.UserID]
-					responses[i].PeerProfile = &models.UserStub{
-						ID:    m.UserID,
-						Name:  peerProfile.Name,
-						Image: peerProfile.Image,
-					}
-					responses[i].PeerOnline = presenceMap[m.UserID]
-					// Use peer's name and avatar for direct chat display
-					responses[i].Name = peerProfile.Name
-					responses[i].ImageURL = peerProfile.Image
-					break
-				}
+			// Format Preview Text
+			if conv.Type == models.Group {
+				res.LastMessagePreview = fmt.Sprintf("%s: %s", sender.Name, lastMsg.Content)
+			} else {
+				res.LastMessagePreview = lastMsg.Content
 			}
 		}
+
+		responses = append(responses, res)
 	}
 
-	return responses, nil
+	// 5. Sort by updated_at descending
+	sort.Slice(responses, func(i, j int) bool {
+		return responses[i].UpdatedAt.After(responses[j].UpdatedAt)
+	})
+
+	// 6. Paginate
+	total := len(responses)
+	if offset >= total {
+		return []models.ConversationResponse{}, nil
+	}
+	end := offset + limit
+	if end > total {
+		end = total
+	}
+	return responses[offset:end], nil
 }
 
 func (s *Service) GetConversation(id, userID string) (*models.ConversationResponse, error) {
@@ -273,6 +322,7 @@ func (s *Service) GetConversation(id, userID string) (*models.ConversationRespon
 				ID:    m.UserID,
 				Name:  profile.Name,
 				Image: profile.Image,
+				Role:  profile.Role,
 			},
 			IsOnline: presenceMap[m.UserID],
 		}
@@ -288,10 +338,12 @@ func (s *Service) GetConversation(id, userID string) (*models.ConversationRespon
 					ID:    m.UserID,
 					Name:  peerProfile.Name,
 					Image: peerProfile.Image,
+					Role:  peerProfile.Role,
 				}
 				response.PeerOnline = presenceMap[m.UserID]
 				response.Name = peerProfile.Name
 				response.ImageURL = peerProfile.Image
+				response.Role = peerProfile.Role
 				break
 			}
 		}
@@ -340,10 +392,21 @@ func (s *Service) SendMessage(conversationID, senderID string, content string, m
 	}
 
 	// 4. Produce Event
+	// Fetch sender profile for enrichment
+	profiles, _ := s.userService.FetchUserProfiles([]string{senderID})
+	senderName := "Unknown"
+	senderImage := ""
+	if profiles[senderID] != nil {
+		senderName = profiles[senderID].Name
+		senderImage = profiles[senderID].Image
+	}
+
 	event := events.MessageCreatedEvent{
 		ID:                    msg.ID,
 		ConversationID:        msg.ConversationID,
 		SenderID:              msg.SenderID,
+		SenderName:            senderName,
+		SenderImage:           senderImage,
 		Content:               msg.Content,
 		Type:                  string(msg.Type),
 		MediaURLs:             []string(msg.MediaURLs),
@@ -433,9 +496,10 @@ func (s *Service) sendOfflineNotifications(msg *models.Message, members []models
 
 		// Prepare notification content
 		notificationBody := msg.Content
-		if msg.Type == models.Image {
+		switch msg.Type {
+		case models.Image:
 			notificationBody = "📷 Photo"
-		} else if msg.Type == models.Voice {
+		case models.Voice:
 			notificationBody = "🎤 Voice message"
 		}
 
@@ -622,11 +686,13 @@ func (s *Service) SetTyping(conversationID, userID string, isTyping bool) error 
 		recipientIDs = append(recipientIDs, m.UserID)
 	}
 
-	// 3. Fetch User Profile for name
+	// 3. Fetch User Profile for name and image
 	userName := "Someone"
+	userImage := ""
 	profiles, err := s.userService.FetchUserProfiles([]string{userID})
 	if err == nil && profiles[userID] != nil {
 		userName = profiles[userID].Name
+		userImage = profiles[userID].Image
 	}
 
 	// 4. Produce Event
@@ -634,6 +700,7 @@ func (s *Service) SetTyping(conversationID, userID string, isTyping bool) error 
 		ConversationID: conversationID,
 		UserID:         userID,
 		UserName:       userName,
+		UserImage:      userImage,
 		IsTyping:       isTyping,
 		RecipientIDs:   recipientIDs,
 	}
@@ -1202,4 +1269,100 @@ func (s *Service) MarkMessageAsRead(conversationID, messageID, userID string) er
 	}
 
 	return s.repo.CreateReadReceipt(messageID, userID)
+}
+
+// DiscoverContacts returns potential chat participants based on academic and family relationships
+func (s *Service) DiscoverContacts(userID, role string) (*models.DiscoveryResponse, error) {
+	response := &models.DiscoveryResponse{
+		Contacts: []models.ContactSuggestion{},
+		Groups:   []models.GroupSuggestion{},
+	}
+
+	allRelatedUserIDs := make(map[string]string) // userID -> relation
+
+	// 1. Fetch Family Contexts from Auth Service
+	switch role {
+	case "STUDENT":
+		parents, err := s.userService.FetchParents(userID)
+		if err == nil {
+			for _, p := range parents {
+				allRelatedUserIDs[p.ID] = "Parent"
+			}
+		}
+	case "PARENT":
+		children, err := s.userService.FetchChildren(userID)
+		if err == nil {
+			for _, c := range children {
+				allRelatedUserIDs[c.ID] = "Child"
+
+				// For each child, also fetch their teachers/assistants
+				academic, err := s.userService.FetchChatContexts(c.ID, "STUDENT")
+				if err == nil {
+					for _, tID := range academic.Teachers {
+						allRelatedUserIDs[tID] = "Teacher (of " + c.Name + ")"
+					}
+					for _, aID := range academic.Assistants {
+						allRelatedUserIDs[aID] = "Assistant (of " + c.Name + ")"
+					}
+				}
+			}
+		}
+	}
+
+	// 2. Fetch Academic Contexts from Courses Service (except for pure parents who are handled above)
+	if role != "PARENT" {
+		academic, err := s.userService.FetchChatContexts(userID, role)
+		if err == nil {
+			// Add Groups
+			for _, g := range academic.Groups {
+				response.Groups = append(response.Groups, models.GroupSuggestion{
+					ID:    g.ID,
+					Name:  g.Name,
+					Image: g.Image,
+					Type:  "COURSE_GROUP",
+				})
+			}
+
+			// Add Individual Contacts
+			for _, tID := range academic.Teachers {
+				allRelatedUserIDs[tID] = "Teacher"
+			}
+			for _, sID := range academic.Students {
+				allRelatedUserIDs[sID] = "Student"
+			}
+			for _, aID := range academic.Assistants {
+				allRelatedUserIDs[aID] = "Assistant"
+			}
+		}
+	}
+
+	// 3. Batch fetch profiles for all unique user IDs
+	if len(allRelatedUserIDs) > 0 {
+		userIDs := make([]string, 0, len(allRelatedUserIDs))
+		for id := range allRelatedUserIDs {
+			userIDs = append(userIDs, id)
+		}
+
+		profiles, err := s.userService.FetchUserProfiles(userIDs)
+		if err == nil {
+			for id, profile := range profiles {
+				relation := allRelatedUserIDs[id]
+				category := models.CategoryAcademic
+				if strings.Contains(relation, "Parent") || strings.Contains(relation, "Child") {
+					category = models.CategoryFamily
+				}
+
+				response.Contacts = append(response.Contacts, models.ContactSuggestion{
+					ID:       profile.ID,
+					Name:     profile.Name,
+					Image:    profile.Image,
+					Role:     profile.Role,
+					Category: category,
+					Relation: relation,
+				})
+			}
+		}
+	}
+
+	return response, nil
 }

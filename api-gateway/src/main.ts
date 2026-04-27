@@ -32,6 +32,13 @@ async function main(): Promise<void> {
     // Create HTTP server explicitly
     const server = http.createServer(app);
 
+    // Configure server timeouts for large file uploads (2GB+)
+    // Set timeout to 15 minutes (900,000ms)
+    server.timeout = 900000;
+    // Set headers timeout and keep-alive to be slightly higher than normal to handle slow clients
+    server.headersTimeout = 905000;
+    server.keepAliveTimeout = 900000;
+
     // Start server
     server.listen(config.server.port, () => {
       console.log(

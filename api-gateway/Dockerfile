@@ -21,6 +21,8 @@ FROM node:20-alpine AS production
 
 WORKDIR /app
 
+RUN apk add --no-cache wget
+
 # Copy package files and install production deps only
 COPY package*.json ./
 RUN npm ci --only=production
@@ -35,4 +37,4 @@ ENV NODE_ENV=production
 EXPOSE 3000
 
 # Start the server
-CMD ["node", "dist/main.js"]
+CMD ["node", "--experimental-specifier-resolution=node", "dist/main.js"]
