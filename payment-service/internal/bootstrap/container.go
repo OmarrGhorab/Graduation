@@ -23,6 +23,7 @@ import (
 	"github.com/OmarrGhorab/payment-service/internal/infrastructure/paymob"
 	"github.com/OmarrGhorab/payment-service/internal/infrastructure/persistence/postgres"
 	"github.com/OmarrGhorab/payment-service/internal/interfaces/http"
+	"github.com/OmarrGhorab/payment-service/internal/observability"
 	"github.com/gofiber/fiber/v2"
 )
 
@@ -30,6 +31,7 @@ type Container struct {
 	Config *config.Config
 	App    *fiber.App
 	DB     *postgres.Database
+	Obs    *observability.Observability
 
 	// Repositories
 	PaymentRepo       *postgres.PaymentRepository
@@ -86,6 +88,9 @@ func New() (*Container, error) {
 		jobCtx:    jobCtx,
 		jobCancel: jobCancel,
 	}
+
+	// Initialize Observability
+	container.Obs = observability.Init(app)
 
 	// Auto-migrate tables
 	if err := db.DB.AutoMigrate(
@@ -217,6 +222,11 @@ func (c *Container) Shutdown() error {
 	}
 	if c.KafkaProducer != nil {
 		c.KafkaProducer.Close()
+	}
+
+	// Shutdown observability
+	if c.Obs != nil {
+		c.Obs.Shutdown()
 	}
 
 	return c.App.Shutdown()

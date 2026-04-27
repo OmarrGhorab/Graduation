@@ -13,6 +13,9 @@ func NewHealthHandler() *HealthHandler {
 func (h *HealthHandler) RegisterRoutes(app *fiber.App) {
 	app.Get("/health", h.Health)
 	app.Get("/ready", h.Ready)
+	app.Get("/debug-sentry", func(c *fiber.Ctx) error {
+		panic("Sentry Debug Test: Courses Service is connected!")
+	})
 }
 
 // Health returns basic service health status

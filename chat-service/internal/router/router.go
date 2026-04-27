@@ -9,6 +9,16 @@ import (
 func SetupRoutes(app *fiber.App, h *handlers.Handler, auth *middleware.AuthMiddleware) {
 	api := app.Group("/api/v1")
 
+	// Sentry Debug
+	app.Get("/debug-sentry", func(c *fiber.Ctx) error {
+		panic("Sentry Debug Test: Chat Service is connected!")
+	})
+
+	// Health Check
+	app.Get("/health", func(c *fiber.Ctx) error {
+		return c.SendStatus(fiber.StatusOK)
+	})
+
 	// Conversations
 	conversations := api.Group("/conversations", auth.Protected())
 	conversations.Post("/", h.CreateGroupConversation)

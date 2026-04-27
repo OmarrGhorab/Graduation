@@ -3,6 +3,7 @@ import { AppConfig } from "./config/index.js";
 import { setupMiddleware } from "./middleware/index.js";
 import { setupRoutes } from "./routes/index.js";
 import { errorHandler } from "./middleware/error.middleware.js";
+import { initObservability, setupSentryErrorHandler } from "./observability/index.js";
 
 /**
  * Creates and configures the Express application for the API Gateway.
@@ -28,11 +29,22 @@ import { errorHandler } from "./middleware/error.middleware.js";
 export function createApp(config: AppConfig): { app: Express, wsProxy: any } {
   const app = express();
 
+  // Initialize observability (Tracing, Metrics, Logger, Sentry)
+  initObservability(app);
+
   // Set up middleware (compression, timeout, body parsing, CORS, Arcjet)
   setupMiddleware(app, config);
 
   // Set up routes (health check, proxy routes)
   const routes = setupRoutes(app, config);
+
+  // Sentry Debug Endpoint
+  app.get("/debug-sentry", (req, res) => {
+    throw new Error("Sentry Debug Test: API Gateway is connected!");
+  });
+
+  // Add Sentry error handler (must be before custom error handler)
+  setupSentryErrorHandler(app);
 
   // Add error handler (must be last)
   app.use(errorHandler);

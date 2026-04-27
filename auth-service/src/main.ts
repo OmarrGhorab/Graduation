@@ -19,8 +19,12 @@ import { errorHandler } from "./middleware/errorHandler";
 import { extractDeviceInfo } from "./middleware/deviceInfo.middleware";
 import prisma from "./libs/prisma";
 import redis from "./libs/redis";
+import { initObservability, setupSentryErrorHandler } from "./observability/index.js";
 
 const app = express();
+
+// Initialize observability (Tracing, Metrics, Logger, Sentry)
+initObservability(app);
 
 // Trust proxy for correct IP detection behind reverse proxies
 app.set("trust proxy", true);
@@ -94,6 +98,13 @@ app.use("/api/v1/parent-link", parentLinkRouter);
 app.use("/api/v1/profile", profileRouter);
 app.use("/api/v1/location", locationRouter);
 app.use("/api/v1/internal", internalRouter);
+
+// Sentry Debug Endpoint
+app.get("/debug-sentry", (req, res) => {
+    throw new Error("Sentry Debug Test: Auth Service is connected!");
+});
+// Add Sentry error handler (must be before custom error handler)
+setupSentryErrorHandler(app);
 // Error handler last
 app.use(errorHandler);
 

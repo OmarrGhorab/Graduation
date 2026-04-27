@@ -12,6 +12,9 @@ func NewHealthHandler() *HealthHandler {
 
 func (h *HealthHandler) RegisterRoutes(app *fiber.App) {
 	app.Get("/health", h.Health)
+	app.Get("/debug-sentry", func(c *fiber.Ctx) error {
+		panic("Sentry Debug Test: Payment Service is connected!")
+	})
 }
 
 func (h *HealthHandler) Health(c *fiber.Ctx) error {
