@@ -35,13 +35,13 @@ export function createApp(config: AppConfig): { app: Express, wsProxy: any } {
   // Set up middleware (compression, timeout, body parsing, CORS, Arcjet)
   setupMiddleware(app, config);
 
-  // Set up routes (health check, proxy routes)
-  const routes = setupRoutes(app, config);
-
-  // Sentry Debug Endpoint
+  // Sentry Debug Endpoint (Must be BEFORE setupRoutes to prevent proxying)
   app.get("/debug-sentry", (req, res) => {
     throw new Error("Sentry Debug Test: API Gateway is connected!");
   });
+
+  // Set up routes (health check, proxy routes)
+  const routes = setupRoutes(app, config);
 
   // Add Sentry error handler (must be before custom error handler)
   setupSentryErrorHandler(app);

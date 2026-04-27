@@ -25,8 +25,9 @@ var (
 
 func MetricsMiddleware() fiber.Handler {
 	return func(c *fiber.Ctx) error {
-		path := c.Path()
-		method := c.Method()
+		// Copy strings to prevent fasthttp byte slice mutation which corrupts Prometheus maps
+		path := string(append([]byte(nil), c.Path()...))
+		method := string(append([]byte(nil), c.Method()...))
 
 		timer := prometheus.NewTimer(prometheus.ObserverFunc(func(v float64) {
 		status := fmt.Sprintf("%d", c.Response().StatusCode())

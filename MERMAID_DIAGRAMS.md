@@ -1,57 +1,91 @@
-# 🎨 Mermaid Diagrams - Services & Database Architecture
+# Mermaid Diagrams - Services & Database Architecture
 
 ## 1. OVERALL SYSTEM ARCHITECTURE
 
 ```mermaid
 graph TB
-    Client["🖥️ Client Applications<br/>(Web, iOS, Android)"]
+    Client["Client Applications<br/>(Web, iOS, Android)"]
     
-    Client -->|HTTPS| Gateway["🚪 API Gateway<br/>Port 6000<br/>Node.js + Express"]
+    Client -->|HTTPS| Gateway["API Gateway<br/>Port 6000<br/>Node.js + Express"]
     
-    Gateway -->|Route| Auth["🔐 Auth Service<br/>Port 6001<br/>Node.js + Prisma"]
-    Gateway -->|Route| Notif["📢 Notification Service<br/>Port 6003<br/>Node.js + Firebase"]
-    Gateway -->|Route| Chat["💬 Chat Service<br/>Ports 6004/14/24<br/>Go + Fiber (3x)"]
-    Gateway -->|Route| Courses["📚 Courses Service<br/>Ports 8085/86<br/>Go + Fiber (2x)"]
-    Gateway -->|Route| Payment["💳 Payment Service<br/>Port 8090<br/>Go + Fiber"]
-    Gateway -->|Route| Recommend["🤖 Recommendation Svc<br/>Port 8095<br/>Python + FastAPI"]
+    Gateway -->|Route| Auth["Auth Service<br/>Port 6001<br/>Node.js + Prisma"]
+    Gateway -->|Route| Notif["Notification Service<br/>Port 6003<br/>Node.js + Firebase"]
+    Gateway -->|Route| Chat["Chat Service<br/>Ports 6004/14/24<br/>Go + Fiber (3x)"]
+    Gateway -->|Route| Courses["Courses Service<br/>Ports 8085/86<br/>Go + Fiber (2x)"]
+    Gateway -->|Route| Payment["Payment Service<br/>Port 8090<br/>Go + Fiber"]
+    Gateway -->|Route| Recommend["Recommendation Svc<br/>Port 8095<br/>Python + FastAPI"]
     
-    WS["🔌 WS Gateway<br/>Ports 6005/15/25<br/>Go + Fiber (3x)"]
+    WS["WS Gateway<br/>Ports 6005/15/25<br/>Go + Fiber (3x)"]
     Client -->|WebSocket| WS
     
-    Auth -->|Query/Store| DB["🗄️ PostgreSQL<br/>Port 5432"]
+    Auth -->|Query/Store| DB["PostgreSQL<br/>Port 5432"]
     Notif -->|Query/Store| DB
     Chat -->|Query/Store| DB
     Courses -->|Query/Store| DB
     Payment -->|Query/Store| DB
     Recommend -->|Query/Store| DB
     
-    Auth -->|Cache/Session| Redis["⚡ Redis<br/>Port 6379"]
+    Auth -->|Cache/Session| Redis["Redis<br/>Port 6379"]
     Chat -->|Cache| Redis
     Courses -->|QR Tokens| Redis
     Payment -->|Cart| Redis
     Recommend -->|Cache| Redis
     WS -->|Pub/Sub| Redis
     
-    Auth -->|Events| Kafka["📨 Kafka<br/>Port 9092"]
+    Auth -->|Events| Kafka["Kafka<br/>Port 9092"]
     Notif -->|Consume| Kafka
     Chat -->|Events| Kafka
     Courses -->|Events| Kafka
     Payment -->|Events| Kafka
     WS -->|Consume| Kafka
     
-    Notif -->|Push| FCM["🔔 Firebase FCM"]
-    Notif -->|Email| Resend["📧 Resend"]
+    Notif -->|Push| FCM["Firebase FCM"]
+    Notif -->|Email| Resend["Resend"]
     Payment -->|Email| Resend
     
-    Payment -->|Process| Paymob["💰 Paymob API"]
+    Payment -->|Process| Paymob["Paymob API"]
     
-    Chat -->|Media| Cloudinary["🖼️ Cloudinary CDN"]
+    Chat -->|Media| Cloudinary["Cloudinary CDN"]
     Courses -->|Media| Cloudinary
     Auth -->|Images| Cloudinary
     
-    Recommend -->|AI| Gemini["🧠 Google Gemini AI"]
+    Recommend -->|AI| Gemini["Google Gemini AI"]
     
-    Gateway -->|Security| Arcjet["🛡️ Arcjet<br/>Bot Detection"]
+    Gateway -->|Security| Arcjet["Arcjet<br/>Bot Detection"]
+
+    subgraph "Observability & Monitoring"
+        Prometheus["Prometheus<br/>Port 9090"]
+        Grafana["Grafana<br/>Port 3001"]
+        Loki["Loki<br/>Port 3100"]
+        Jaeger["Jaeger<br/>Port 16686"]
+        OTel["OTel Collector<br/>Port 4318"]
+        Sentry["Sentry<br/>Cloud"]
+    end
+    
+    Prometheus -->|Scrape Metrics| Gateway
+    Prometheus -->|Scrape Metrics| Auth
+    Prometheus -->|Scrape Metrics| Chat
+    Prometheus -->|Scrape Metrics| Courses
+    Prometheus -->|Scrape Metrics| Payment
+    Prometheus -->|Scrape Metrics| Recommend
+    
+    Gateway -->|Send Traces| OTel
+    Auth -->|Send Traces| OTel
+    Chat -->|Send Traces| OTel
+    Courses -->|Send Traces| OTel
+    Payment -->|Send Traces| OTel
+    Recommend -->|Send Traces| OTel
+    
+    OTel -->|Export Traces| Jaeger
+    Grafana -->|Query| Prometheus
+    Grafana -->|Query| Loki
+    
+    Gateway -->|Report Errors| Sentry
+    Auth -->|Report Errors| Sentry
+    Chat -->|Report Errors| Sentry
+    Courses -->|Report Errors| Sentry
+    Payment -->|Report Errors| Sentry
+    Recommend -->|Report Errors| Sentry
 ```
 
 ---
@@ -175,8 +209,8 @@ graph LR
 
 ```mermaid
 graph TB
-    Teacher["👨‍🏫 Teacher"]
-    Student["👨‍🎓 Student"]
+    Teacher["Teacher"]
+    Student["Student"]
     
     Teacher -->|Create Course| CourseHandler["Create Course Handler"]
     Teacher -->|Start Lesson| LessonHandler["Start Lesson Handler"]
@@ -223,7 +257,7 @@ graph TB
 
 ```mermaid
 graph TB
-    Student["👨‍🎓 Student"]
+    Student["Student"]
     
     Student -->|Add to Cart| CartHandler["Add to Cart Handler"]
     Student -->|View Cart| ViewHandler["View Cart Handler"]
@@ -395,37 +429,37 @@ graph TB
 ```mermaid
 graph TB
     subgraph "Client Layer"
-        Web["🌐 Web Browser"]
-        Mobile["📱 Mobile App"]
+        Web["Web Browser"]
+        Mobile["Mobile App"]
     end
     
     subgraph "API Layer"
-        Gateway["🚪 API Gateway<br/>Port 6000"]
+        Gateway["API Gateway<br/>Port 6000"]
     end
     
     subgraph "Service Layer"
-        Auth["🔐 Auth Service<br/>6001"]
-        Notif["📢 Notification<br/>6003"]
-        Chat["💬 Chat<br/>6004/14/24"]
-        WS["🔌 WS Gateway<br/>6005/15/25"]
-        Courses["📚 Courses<br/>8085/86"]
-        Payment["💳 Payment<br/>8090"]
-        Recommend["🤖 Recommend<br/>8095"]
+        Auth["Auth Service<br/>6001"]
+        Notif["Notification<br/>6003"]
+        Chat["Chat<br/>6004/14/24"]
+        WS["WS Gateway<br/>6005/15/25"]
+        Courses["Courses<br/>8085/86"]
+        Payment["Payment<br/>8090"]
+        Recommend["Recommend<br/>8095"]
     end
     
     subgraph "Data Layer"
-        DB["🗄️ PostgreSQL"]
-        Redis["⚡ Redis"]
-        Kafka["📨 Kafka"]
+        DB["PostgreSQL"]
+        Redis["Redis"]
+        Kafka["Kafka"]
     end
     
     subgraph "External Services"
-        FCM["🔔 Firebase FCM"]
-        Paymob["💰 Paymob"]
-        Resend["📧 Resend"]
-        Cloudinary["🖼️ Cloudinary"]
-        Gemini["🧠 Gemini AI"]
-        Arcjet["🛡️ Arcjet"]
+        FCM["Firebase FCM"]
+        Paymob["Paymob"]
+        Resend["Resend"]
+        Cloudinary["Cloudinary"]
+        Gemini["Gemini AI"]
+        Arcjet["Arcjet"]
     end
     
     Web -->|HTTPS| Gateway
@@ -475,4 +509,3 @@ graph TB
     
     Gateway -->|Security| Arcjet
 ```
-
