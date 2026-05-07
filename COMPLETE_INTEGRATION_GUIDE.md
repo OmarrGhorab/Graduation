@@ -32,7 +32,7 @@ graph TB
     
     subgraph "Data Layer"
         DB["PostgreSQL<br/>Port 5432<br/>34 Tables"]
-        Redis["Redis<br/>Port 6379<br/>Caching & Sessions"]
+        RedisDB["Redis<br/>Port 6379<br/>Caching & Sessions"]
         Kafka["Kafka<br/>Port 9092<br/>Event Streaming"]
     end
     
@@ -65,12 +65,12 @@ graph TB
     Notif -->|Query/Store| DB
     Recommend -->|Query/Store| DB
     
-    Auth -->|Cache| Redis
-    Chat -->|Cache| Redis
-    Courses -->|Cache| Redis
-    Payment -->|Cache| Redis
-    Recommend -->|Cache| Redis
-    WS -->|Pub/Sub| Redis
+    Auth -->|Cache| RedisDB
+    Chat -->|Cache| RedisDB
+    Courses -->|Cache| RedisDB
+    Payment -->|Cache| RedisDB
+    Recommend -->|Cache| RedisDB
+    WS -->|Pub/Sub| RedisDB
     
     Auth -->|Emit| Kafka
     Chat -->|Emit| Kafka
@@ -115,7 +115,7 @@ sequenceDiagram
     Auth->>Auth: Validate input
     Auth->>Auth: Hash password (Bcrypt)
     Auth->>DB: Create user
-    Auth->>Redis: Store session
+    Auth->>RedisDB: Store session
     Auth->>Auth: Generate JWT
     Auth->>Notif: Send verification email
     Auth->>Kafka: Emit user.registered
@@ -131,7 +131,7 @@ sequenceDiagram
     User->>Gateway: POST /cart/add
     Gateway->>Payment: Forward request
     Payment->>DB: Add to cart
-    Payment->>Redis: Cache cart
+    Payment->>RedisDB: Cache cart
     Payment->>Gateway: Cart updated
     Gateway->>User: Success
     
@@ -173,7 +173,7 @@ sequenceDiagram
     Teacher->>Gateway: POST /lessons/:id/start
     Gateway->>Courses: Forward request
     Courses->>DB: Update lesson status
-    Courses->>Redis: Start QR rotation
+    Courses->>RedisDB: Start QR rotation
     Courses->>Kafka: Emit lesson.started
     Kafka->>Notif: Consume event
     Notif->>FCM: Send "Lesson started"
@@ -182,7 +182,7 @@ sequenceDiagram
     User->>Gateway: POST /attendance/scan
     Gateway->>Courses: Forward request
     Courses->>Auth: Verify device
-    Courses->>Redis: Get QR token
+    Courses->>RedisDB: Get QR token
     Courses->>Courses: Verify signature
     Courses->>Courses: Check geofence
     Courses->>DB: Record attendance
@@ -246,7 +246,7 @@ graph TB
 
 ```mermaid
 graph TB
-    Redis["Redis<br/>Port 6379"]
+    RedisDB["Redis<br/>Port 6379"]
     
     Auth["Auth Service"]
     Chat["Chat Service"]
@@ -255,31 +255,31 @@ graph TB
     Recommend["Recommendation Service"]
     WS["WS Gateway"]
     
-    Auth -->|session:{token}| Redis
-    Auth -->|ratelimit:login:{ip}| Redis
-    Auth -->|verify:{email}| Redis
-    Auth -->|reset:{token}| Redis
+    Auth -->|session:{token}| RedisDB
+    Auth -->|ratelimit:login:{ip}| RedisDB
+    Auth -->|verify:{email}| RedisDB
+    Auth -->|reset:{token}| RedisDB
     
-    Chat -->|typing:{conv_id}:{user_id}| Redis
-    Chat -->|presence:user:{user_id}| Redis
-    Chat -->|messages:{conv_id}:recent| Redis
+    Chat -->|typing:{conv_id}:{user_id}| RedisDB
+    Chat -->|presence:user:{user_id}| RedisDB
+    Chat -->|messages:{conv_id}:recent| RedisDB
     
-    Courses -->|attendance:lesson:{id}:active_qr| Redis
-    Courses -->|attendance:lesson:{id}:nonce:{nonce}| Redis
-    Courses -->|attendance:lock:scan:{lesson_id}:{student_id}| Redis
-    Courses -->|ratelimit:scan:{user_id}| Redis
+    Courses -->|attendance:lesson:{id}:active_qr| RedisDB
+    Courses -->|attendance:lesson:{id}:nonce:{nonce}| RedisDB
+    Courses -->|attendance:lock:scan:{lesson_id}:{student_id}| RedisDB
+    Courses -->|ratelimit:scan:{user_id}| RedisDB
     
-    Payment -->|cart:{user_id}| Redis
-    Payment -->|payment:idempotency:{key}| Redis
-    Payment -->|subscription:lock:{id}| Redis
+    Payment -->|cart:{user_id}| RedisDB
+    Payment -->|payment:idempotency:{key}| RedisDB
+    Payment -->|subscription:lock:{id}| RedisDB
     
-    Recommend -->|recommendation:v1:{user_id}| Redis
-    Recommend -->|course:{id}| Redis
-    Recommend -->|trending:courses| Redis
+    Recommend -->|recommendation:v1:{user_id}| RedisDB
+    Recommend -->|course:{id}| RedisDB
+    Recommend -->|trending:courses| RedisDB
     
-    WS -->|ws:user:{user_id}:connections| Redis
-    WS -->|ws:broadcast| Redis
-    WS -->|ws:user:{user_id}| Redis
+    WS -->|ws:user:{user_id}:connections| RedisDB
+    WS -->|ws:broadcast| RedisDB
+    WS -->|ws:user:{user_id}| RedisDB
 ```
 
 ---
@@ -541,9 +541,9 @@ graph TB
     Chat2 -->|Shared| DB
     Chat3 -->|Shared| DB
     
-    Chat1 -->|Shared| Redis["Redis Single Instance"]
-    Chat2 -->|Shared| Redis
-    Chat3 -->|Shared| Redis
+    Chat1 -->|Shared| RedisDB["Redis Single Instance"]
+    Chat2 -->|Shared| RedisDB
+    Chat3 -->|Shared| RedisDB
     
     Chat1 -->|Shared| Kafka["Kafka Single Instance"]
     Chat2 -->|Shared| Kafka
@@ -627,7 +627,7 @@ graph TB
         ProdK8s["Kubernetes Cluster Production namespace"]
         ProdLB["Load Balancer"]
         ProdDB["PostgreSQL Replicated"]
-        ProdRedis["Redis Cluster"]
+        ProdRedisDB["Redis Cluster"]
         ProdKafka["Kafka Cluster"]
     end
     
@@ -636,7 +636,7 @@ graph TB
     
     ProdLB -->|Route| ProdK8s
     ProdK8s -->|Query| ProdDB
-    ProdK8s -->|Cache| ProdRedis
+    ProdK8s -->|Cache| ProdRedisDB
     ProdK8s -->|Events| ProdKafka
 ```
 
