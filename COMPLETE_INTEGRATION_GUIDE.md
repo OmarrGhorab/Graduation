@@ -248,38 +248,38 @@ graph TB
 graph TB
     RedisDB["Redis<br/>Port 6379"]
     
-    Auth["Auth Service"]
-    Chat["Chat Service"]
-    Courses["Courses Service"]
-    Payment["Payment Service"]
-    Recommend["Recommendation Service"]
-    WS["WS Gateway"]
+    AuthSvc["Auth Service"]
+    ChatSvc["Chat Service"]
+    CoursesSvc["Courses Service"]
+    PaymentSvc["Payment Service"]
+    RecommendSvc["Recommendation Service"]
+    WSGateway["WS Gateway"]
     
-    Auth -->|session:{token}| RedisDB
-    Auth -->|ratelimit:login:{ip}| RedisDB
-    Auth -->|verify:{email}| RedisDB
-    Auth -->|reset:{token}| RedisDB
+    AuthSvc -->|"session:token"| RedisDB
+    AuthSvc -->|"ratelimit:login:ip"| RedisDB
+    AuthSvc -->|"verify:email"| RedisDB
+    AuthSvc -->|"reset:token"| RedisDB
     
-    Chat -->|typing:{conv_id}:{user_id}| RedisDB
-    Chat -->|presence:user:{user_id}| RedisDB
-    Chat -->|messages:{conv_id}:recent| RedisDB
+    ChatSvc -->|"typing:conv_id:user_id"| RedisDB
+    ChatSvc -->|"presence:user:user_id"| RedisDB
+    ChatSvc -->|"messages:conv_id:recent"| RedisDB
     
-    Courses -->|attendance:lesson:{id}:active_qr| RedisDB
-    Courses -->|attendance:lesson:{id}:nonce:{nonce}| RedisDB
-    Courses -->|attendance:lock:scan:{lesson_id}:{student_id}| RedisDB
-    Courses -->|ratelimit:scan:{user_id}| RedisDB
+    CoursesSvc -->|"attendance:lesson:id:active_qr"| RedisDB
+    CoursesSvc -->|"attendance:lesson:id:nonce"| RedisDB
+    CoursesSvc -->|"attendance:lock:scan"| RedisDB
+    CoursesSvc -->|"ratelimit:scan:user_id"| RedisDB
     
-    Payment -->|cart:{user_id}| RedisDB
-    Payment -->|payment:idempotency:{key}| RedisDB
-    Payment -->|subscription:lock:{id}| RedisDB
+    PaymentSvc -->|"cart:user_id"| RedisDB
+    PaymentSvc -->|"payment:idempotency:key"| RedisDB
+    PaymentSvc -->|"subscription:lock:id"| RedisDB
     
-    Recommend -->|recommendation:v1:{user_id}| RedisDB
-    Recommend -->|course:{id}| RedisDB
-    Recommend -->|trending:courses| RedisDB
+    RecommendSvc -->|"recommendation:v1:user_id"| RedisDB
+    RecommendSvc -->|"course:id"| RedisDB
+    RecommendSvc -->|"trending:courses"| RedisDB
     
-    WS -->|ws:user:{user_id}:connections| RedisDB
-    WS -->|ws:broadcast| RedisDB
-    WS -->|ws:user:{user_id}| RedisDB
+    WSGateway -->|"ws:user:user_id:connections"| RedisDB
+    WSGateway -->|"ws:broadcast"| RedisDB
+    WSGateway -->|"ws:user:user_id"| RedisDB
 ```
 
 ---
