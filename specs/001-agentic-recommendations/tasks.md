@@ -68,14 +68,14 @@
 
 **Purpose**: Add bounded reasoning loop and structured ranking.
 
-- [ ] T032 [P] [US1] Create `RecommendationState` in `recommendation-service/app/agents/state.py`
-- [ ] T033 [P] [US1] Create agent prompts in `recommendation-service/app/agents/prompts.py`
-- [ ] T034 [US1] Extend `recommendation-service/app/services/gemma_client.py` with structured JSON planning and ranking helpers
-- [ ] T035 [US1] Implement LangGraph nodes in `recommendation-service/app/agents/graph.py`
-- [ ] T036 [US1] Implement tool planning and execution loop in `recommendation-service/app/agents/graph.py`
-- [ ] T037 [US1] Implement LLM ranking node in `recommendation-service/app/agents/graph.py`
-- [ ] T038 [US1] Implement validation and fallback nodes in `recommendation-service/app/agents/graph.py`
-- [ ] T039 [US1] Create `RecommendationAgent` facade in `recommendation-service/app/agents/recommendation_agent.py`
+- [X] T032 [P] [US1] Create `RecommendationState` in `recommendation-service/app/agents/state.py`
+- [X] T033 [P] [US1] Create agent prompts in `recommendation-service/app/agents/prompts.py`
+- [X] T034 [US1] Extend `recommendation-service/app/services/gemma_client.py` with structured JSON planning and ranking helpers
+- [X] T035 [US1] Implement LangGraph nodes in `recommendation-service/app/agents/graph.py`
+- [X] T036 [US1] Implement tool planning and execution loop in `recommendation-service/app/agents/graph.py`
+- [X] T037 [US1] Implement LLM ranking node in `recommendation-service/app/agents/graph.py`
+- [X] T038 [US1] Implement validation and fallback nodes in `recommendation-service/app/agents/graph.py`
+- [X] T039 [US1] Create `RecommendationAgent` facade in `recommendation-service/app/agents/recommendation_agent.py`
 
 ## Phase 7: API Integration
 

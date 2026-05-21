@@ -2,7 +2,7 @@
 
 **Feature**: `001-agentic-recommendations`
 
-**Current Phase**: Phase 5 - MCP Tools complete
+**Current Phase**: Phase 6 - LangGraph Agent complete
 
 ## Completed
 
@@ -36,10 +36,15 @@
 - Added course retrieval/trending tools in `recommendation-service/app/tools/course_tools.py`.
 - Added cluster tools in `recommendation-service/app/tools/cluster_tools.py`.
 - Added registry-level output truncation and prompt-injection text sanitization in `recommendation-service/app/tools/registry.py`.
+- Added agent state contract in `recommendation-service/app/agents/state.py`.
+- Added planner/ranker prompts in `recommendation-service/app/agents/prompts.py`.
+- Added LangGraph recommendation workflow nodes and execution loop in `recommendation-service/app/agents/graph.py`.
+- Added recommendation agent facade in `recommendation-service/app/agents/recommendation_agent.py`.
+- Extended Gemma client with structured JSON planner/ranker helpers in `recommendation-service/app/services/gemma_client.py`.
 
 ## In Progress
 
-- Awaiting explicit approval to begin Phase 6 - LangGraph Agent.
+- Awaiting explicit approval to begin Phase 7 - API Integration.
 
 ## Blockers
 
@@ -56,6 +61,7 @@
 - New Phase 3 retrieval modules compile successfully with `python -m py_compile`.
 - New Phase 4 clustering modules compile successfully with `python -m py_compile`.
 - New Phase 5 tool modules compile successfully with `python -m py_compile`.
+- New Phase 6 agent modules compile successfully with `python -m py_compile`.
 - Container build and dependency installation were not run because they would require network/package downloads.
 
 ## Notes

@@ -67,6 +67,46 @@ class GemmaClient:
             logger.error(f"Chat error: {str(e)}")
             return f"Error: {str(e)}"
 
+    async def _generate_json(self, system_prompt: str, payload: dict):
+        try:
+            response = self.client.models.generate_content(
+                model=self.model_id,
+                contents=json.dumps(payload),
+                config=types.GenerateContentConfig(
+                    system_instruction=system_prompt,
+                    response_mime_type="application/json",
+                ),
+            )
+            if not response.text:
+                return {}
+            parsed = json.loads(response.text)
+            return parsed
+        except Exception as e:
+            logger.error(f"Structured generation error: {str(e)}", exc_info=True)
+            return {}
+
+    async def plan_next_tool(self, system_prompt: str, payload: dict):
+        result = await self._generate_json(system_prompt, payload)
+        if not isinstance(result, dict):
+            return {"done": True, "tool_name": None, "arguments": {}, "reasoning_summary": "Planner fallback"}
+        return {
+            "done": bool(result.get("done", False)),
+            "tool_name": result.get("tool_name"),
+            "arguments": result.get("arguments") or {},
+            "reasoning_summary": result.get("reasoning_summary", ""),
+        }
+
+    async def rank_recommendation_candidates(self, system_prompt: str, payload: dict):
+        result = await self._generate_json(system_prompt, payload)
+        if isinstance(result, list):
+            return result
+        if isinstance(result, dict):
+            if "recommendations" in result and isinstance(result["recommendations"], list):
+                return result["recommendations"]
+            if "data" in result and isinstance(result["data"], list):
+                return result["data"]
+        return []
+
     async def stream_chat(self, system_prompt: str, messages: list, media: dict = None):
         """
         Streams a multi-turn chat response via async generator.
