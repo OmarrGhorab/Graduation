@@ -1,7 +1,8 @@
-from pydantic_settings import BaseSettings
-from typing import Optional
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
     APP_NAME: str = "AI Course Recommendation Service"
     SERVER_PORT: int = 8095
     
@@ -56,8 +57,5 @@ class Settings(BaseSettings):
     CLOUDINARY_API_KEY: str
     CLOUDINARY_API_SECRET: str
     CLOUDINARY_FOLDER: str = "chatbot-media"
-
-    class Config:
-        env_file = ".env"
 
 settings = Settings()
