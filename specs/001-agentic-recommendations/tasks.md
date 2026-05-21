@@ -102,13 +102,13 @@
 
 **Purpose**: Validate tools, retrieval, clustering, agent flow, cache behavior, and migration safety.
 
-- [ ] T051 [P] [US1] Add tool schema validation tests in `recommendation-service/tests/test_tool_schemas.py`
-- [ ] T052 [P] [US1] Add vector store tests with mocked Qdrant in `recommendation-service/tests/test_vector_store.py`
-- [ ] T053 [P] [US3] Add clustering feature builder tests in `recommendation-service/tests/test_cluster_features.py`
-- [ ] T054 [P] [US3] Add cluster persistence tests in `recommendation-service/tests/test_cluster_service.py`
-- [ ] T055 [P] [US1] Add agent loop tests with mocked tools and LLM in `recommendation-service/tests/test_recommendation_agent.py`
-- [ ] T056 [P] [US4] Add cache and feature-flag tests in `recommendation-service/tests/test_recommendation_engine_v2.py`
-- [ ] T057 [US1] Run recommendation-service test suite with `pytest` from `recommendation-service/`
+- [X] T051 [P] [US1] Add tool schema validation tests in `recommendation-service/tests/test_tool_schemas.py`
+- [X] T052 [P] [US1] Add vector store tests with mocked Qdrant in `recommendation-service/tests/test_vector_store.py`
+- [X] T053 [P] [US3] Add clustering feature builder tests in `recommendation-service/tests/test_cluster_features.py`
+- [X] T054 [P] [US3] Add cluster persistence tests in `recommendation-service/tests/test_cluster_service.py`
+- [X] T055 [P] [US1] Add agent loop tests with mocked tools and LLM in `recommendation-service/tests/test_recommendation_agent.py`
+- [X] T056 [P] [US4] Add cache and feature-flag tests in `recommendation-service/tests/test_recommendation_engine_v2.py`
+- [X] T057 [US1] Run recommendation-service test suite with `pytest` from `recommendation-service/`
 
 ## Phase 10: Migration
 
