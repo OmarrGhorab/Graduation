@@ -26,6 +26,24 @@ async def get_my_recommendations(user = Depends(get_current_user)):
         logger.error(f"Failed to get recommendations for {user_id}: {str(e)}")
         raise HTTPException(status_code=500, detail="Could not generate recommendations")
 
+@router.get("/explain")
+@router.get("/explain/")
+async def get_recommendations_explain(user = Depends(get_current_user)):
+    """
+    Returns reasoning summary and tool trace for latest v2 recommendation generation.
+    """
+    from app.services.recommendation_engine import get_recommendation_explanation
+    user_id = user["user_id"]
+    try:
+        explanation = await get_recommendation_explanation(user_id)
+        return {
+            "success": True,
+            "data": explanation
+        }
+    except Exception as e:
+        logger.error(f"Failed to get explanation for {user_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail="Could not fetch recommendation explanation")
+
 @router.post("/refresh")
 async def refresh_recommendations(background_tasks: BackgroundTasks, user = Depends(get_current_user)):
     """

@@ -2,9 +2,13 @@ from app.services.course_client import course_client
 from app.services.gemma_client import gemma_client
 from app.utils.prompt_builder import build_recommendation_prompt
 from app.config import settings
+from app.agents.recommendation_agent import recommendation_agent
+from app.models.database import SessionLocal
+from app.models.recommendation import RecommendationHistory
 import logging
 import json
 import redis.asyncio as redis
+import uuid
 
 logger = logging.getLogger(__name__)
 
@@ -12,6 +16,60 @@ logger = logging.getLogger(__name__)
 redis_conn = redis.from_url(settings.REDIS_URL, decode_responses=True)
 
 async def get_personalized_recommendations(user_id: str):
+    if settings.AGENT_RECOMMENDATIONS_ENABLED:
+        return await _get_agentic_recommendations(user_id)
+    return await _get_legacy_recommendations(user_id)
+
+
+async def _get_agentic_recommendations(user_id: str):
+    cache_key = f"recommendation:v2:{user_id}"
+    explain_key = f"recommendation:v2:explain:{user_id}"
+
+    try:
+        cached_data = await redis_conn.get(cache_key)
+        if cached_data:
+            logger.info(f"V2 cache hit for user {user_id}")
+            return json.loads(cached_data)
+    except Exception as e:
+        logger.warning(f"Redis error: {str(e)}")
+
+    result = await recommendation_agent.recommend(user_id)
+    recommendations = result.get("recommendations", [])
+    reasoning_summary = result.get("reasoning_summary", "")
+    tool_trace = result.get("tool_trace", [])
+    errors = result.get("errors", [])
+
+    for rec in recommendations:
+        rec.setdefault("source", ["semantic_similarity"])
+        rec.setdefault("clusterContribution", 0.0)
+        rec.setdefault("confidence", float(rec.get("score", 0)) / 100.0)
+        rec.setdefault("reason", rec.get("matchReason", "Recommended by agentic retrieval and ranking."))
+
+    try:
+        await redis_conn.setex(
+            cache_key,
+            settings.RECOMMENDATION_CACHE_TTL,
+            json.dumps(recommendations)
+        )
+        await redis_conn.setex(
+            explain_key,
+            settings.AGENT_REASONING_LOG_TTL,
+            json.dumps(
+                {
+                    "reasoningSummary": reasoning_summary,
+                    "toolTrace": tool_trace,
+                    "errors": errors,
+                }
+            ),
+        )
+    except Exception as e:
+        logger.warning(f"Failed to cache v2 recommendations/explanation: {str(e)}")
+
+    _persist_v2_recommendation_history(user_id, recommendations)
+    return recommendations
+
+
+async def _get_legacy_recommendations(user_id: str):
     """
     Orchestrates the full recommendation flow:
     1. Check cache
@@ -115,10 +173,62 @@ async def get_personalized_recommendations(user_id: str):
         logger.error(f"CRITICAL: recommendation_engine failure: {str(e)}", exc_info=True)
         raise
 
+
+def _persist_v2_recommendation_history(user_id: str, recommendations: list):
+    db = SessionLocal()
+    try:
+        try:
+            user_uuid = uuid.UUID(str(user_id))
+        except Exception:
+            user_uuid = None
+
+        for rec in recommendations:
+            try:
+                course_id_raw = rec.get("courseId")
+                course_uuid = uuid.UUID(str(course_id_raw)) if course_id_raw else None
+            except Exception:
+                course_uuid = None
+
+            row = RecommendationHistory(
+                user_id=user_uuid,
+                course_id=course_uuid,
+                score=float(rec.get("score", 0)),
+                match_reason=rec.get("reason") or rec.get("matchReason"),
+                match_type="agentic_v2",
+                model_version=f"{settings.AI_MODEL}:agentic-v2",
+            )
+            db.add(row)
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        logger.warning(f"Failed to persist v2 recommendation history: {exc}")
+    finally:
+        db.close()
+
+
+async def get_recommendation_explanation(user_id: str):
+    explain_key = f"recommendation:v2:explain:{user_id}"
+    data = await redis_conn.get(explain_key)
+    if not data:
+        return {
+            "reasoningSummary": "",
+            "toolTrace": [],
+            "errors": [],
+        }
+    try:
+        return json.loads(data)
+    except Exception:
+        return {
+            "reasoningSummary": "",
+            "toolTrace": [],
+            "errors": ["failed_to_parse_explanation"],
+        }
+
 async def clear_cache(user_id: str):
     """Removes the cached recommendations for a specific user."""
-    cache_key = f"recommendation:v1:{user_id}"
-    await redis_conn.delete(cache_key)
+    await redis_conn.delete(f"recommendation:v1:{user_id}")
+    await redis_conn.delete(f"recommendation:v2:{user_id}")
+    await redis_conn.delete(f"recommendation:v2:explain:{user_id}")
     logger.info(f"Cache cleared for user: {user_id}")
 
 async def get_trending_recommendations():

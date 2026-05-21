@@ -2,7 +2,7 @@
 
 **Feature**: `001-agentic-recommendations`
 
-**Current Phase**: Phase 6 - LangGraph Agent complete
+**Current Phase**: Phase 7 - API Integration complete
 
 ## Completed
 
@@ -41,10 +41,16 @@
 - Added LangGraph recommendation workflow nodes and execution loop in `recommendation-service/app/agents/graph.py`.
 - Added recommendation agent facade in `recommendation-service/app/agents/recommendation_agent.py`.
 - Extended Gemma client with structured JSON planner/ranker helpers in `recommendation-service/app/services/gemma_client.py`.
+- Updated recommendation engine to route between legacy v1 and agentic v2 by `AGENT_RECOMMENDATIONS_ENABLED`.
+- Added v2 cache keys and explanation cache storage in `recommendation-service/app/services/recommendation_engine.py`.
+- Added v2 recommendation history persistence in `recommendation-service/app/services/recommendation_engine.py`.
+- Added recommendation explanation endpoint in `recommendation-service/app/api/routes/recommendations.py`.
+- Added explanation and v2 recommendation schemas in `recommendation-service/app/schemas/recommendation.py`.
+- Kept legacy prompt-builder path active with explicit v1 fallback note in `recommendation-service/app/utils/prompt_builder.py`.
 
 ## In Progress
 
-- Awaiting explicit approval to begin Phase 7 - API Integration.
+- Awaiting explicit approval to begin Phase 8 - Observability.
 
 ## Blockers
 
@@ -62,6 +68,7 @@
 - New Phase 4 clustering modules compile successfully with `python -m py_compile`.
 - New Phase 5 tool modules compile successfully with `python -m py_compile`.
 - New Phase 6 agent modules compile successfully with `python -m py_compile`.
+- New Phase 7 API integration modules compile successfully with `python -m py_compile`.
 - Container build and dependency installation were not run because they would require network/package downloads.
 
 ## Notes

@@ -81,12 +81,12 @@
 
 **Purpose**: Route public recommendation APIs through the new path without breaking legacy behavior.
 
-- [ ] T040 [US4] Update `recommendation-service/app/services/recommendation_engine.py` to choose legacy or agentic path by `AGENT_RECOMMENDATIONS_ENABLED`
-- [ ] T041 [US4] Add `recommendation:v2:{user_id}` cache usage in `recommendation-service/app/services/recommendation_engine.py`
-- [ ] T042 [US2] Add explanation response schemas in `recommendation-service/app/schemas/recommendation.py`
-- [ ] T043 [US2] Add `GET /explain` route in `recommendation-service/app/api/routes/recommendations.py`
-- [ ] T044 [US1] Persist v2 recommendation history and source metadata in `recommendation-service/app/services/recommendation_engine.py`
-- [ ] T045 [US4] Keep legacy prompt builder available until rollout is complete in `recommendation-service/app/utils/prompt_builder.py`
+- [X] T040 [US4] Update `recommendation-service/app/services/recommendation_engine.py` to choose legacy or agentic path by `AGENT_RECOMMENDATIONS_ENABLED`
+- [X] T041 [US4] Add `recommendation:v2:{user_id}` cache usage in `recommendation-service/app/services/recommendation_engine.py`
+- [X] T042 [US2] Add explanation response schemas in `recommendation-service/app/schemas/recommendation.py`
+- [X] T043 [US2] Add `GET /explain` route in `recommendation-service/app/api/routes/recommendations.py`
+- [X] T044 [US1] Persist v2 recommendation history and source metadata in `recommendation-service/app/services/recommendation_engine.py`
+- [X] T045 [US4] Keep legacy prompt builder available until rollout is complete in `recommendation-service/app/utils/prompt_builder.py`
 
 ## Phase 8: Observability
 

@@ -4,6 +4,7 @@ from typing import List, Dict
 def build_recommendation_prompt(user_profile: Dict, courses: List[Dict]) -> str:
     """
     Constructs a detailed prompt for Gemma 4 to generate personalized recommendations.
+    Legacy v1 flow is intentionally kept for feature-flag fallback while v2 agentic path rolls out.
     """
     
     # Extract key analytics
