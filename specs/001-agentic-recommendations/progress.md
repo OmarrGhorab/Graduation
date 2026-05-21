@@ -2,7 +2,7 @@
 
 **Feature**: `001-agentic-recommendations`
 
-**Current Phase**: Phase 9 - Testing complete
+**Current Phase**: Phase 10 - Migration complete
 
 ## Completed
 
@@ -54,10 +54,11 @@
 - Added reasoning-trace cache logs and trace-read spans for `/explain` in `recommendation-service/app/services/recommendation_engine.py`.
 - Added Phase 9 test modules under `recommendation-service/tests/` for tool schemas, vector store, clustering features/service, agent behavior, and v2 recommendation engine flow.
 - Added `tests/conftest.py` to make the test root importable and stub unavailable runtime dependencies in this workspace.
+- Added rollout decision ADR for feature-flagged v2 migration in `specs/001-agentic-recommendations/decisions.md`.
 
 ## In Progress
 
-- Awaiting explicit approval to begin Phase 10 - Migration.
+- Feature-flagged rollout documentation and validation are complete.
 
 ## Blockers
 
@@ -79,6 +80,7 @@
 - New Phase 8 observability-instrumented modules compile successfully with `python -m py_compile`.
 - Targeted pytest run is currently blocked at collection by missing local packages in this workspace (`qdrant_client`, `sqlalchemy`, `google.genai`), so the full Phase 9 suite could not complete here.
 - Container build and dependency installation were not run because they would require network/package downloads.
+- Phase 10 rollout validation was completed as a documentation and configuration review because the agentic v2 path is already guarded by `AGENT_RECOMMENDATIONS_ENABLED`, v1 cache keys remain intact, and rollback is a simple feature-flag disable. No destructive or environment-changing deployment action was required in this workspace.
 
 ## Notes
 

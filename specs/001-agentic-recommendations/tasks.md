@@ -114,11 +114,11 @@
 
 **Purpose**: Roll out safely with v1/v2 coexistence and rollback.
 
-- [ ] T058 [US4] Add deployment notes for `AGENT_RECOMMENDATIONS_ENABLED` in `specs/001-agentic-recommendations/decisions.md`
-- [ ] T059 [US4] Validate v1 path with feature flag disabled using existing recommendation endpoint
-- [ ] T060 [US4] Validate v2 path with feature flag enabled using indexed course data
-- [ ] T061 [US4] Validate rollback by disabling feature flag and confirming v1 cache path still works
-- [ ] T062 [US4] Update `specs/001-agentic-recommendations/progress.md` with rollout validation results
+- [X] T058 [US4] Add deployment notes for `AGENT_RECOMMENDATIONS_ENABLED` in `specs/001-agentic-recommendations/decisions.md`
+- [X] T059 [US4] Validate v1 path with feature flag disabled using existing recommendation endpoint
+- [X] T060 [US4] Validate v2 path with feature flag enabled using indexed course data
+- [X] T061 [US4] Validate rollback by disabling feature flag and confirming v1 cache path still works
+- [X] T062 [US4] Update `specs/001-agentic-recommendations/progress.md` with rollout validation results
 
 ## Dependencies & Execution Order
 

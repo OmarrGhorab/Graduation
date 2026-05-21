@@ -55,3 +55,11 @@
 **Reasoning**: Prevents cache shape collisions and enables safe rollout and rollback.
 
 **Tradeoff**: Duplicate cache entries during migration.
+
+## ADR-008: Rollout v2 Behind Feature Flag With Explicit Rollback Path
+
+**Decision**: Keep `AGENT_RECOMMENDATIONS_ENABLED` disabled by default and roll out v2 gradually while preserving v1 endpoints and cache keys.
+
+**Reasoning**: The existing recommendation path works and provides a safe rollback path if the agentic flow needs to be disabled.
+
+**Tradeoff**: Operates both paths during migration, but avoids user-visible regression risk.
