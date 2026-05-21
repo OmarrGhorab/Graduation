@@ -4,8 +4,11 @@ from typing import Dict, List, Optional
 from app.config import settings
 from qdrant_client import AsyncQdrantClient
 from qdrant_client.http import models
+from opentelemetry import trace
+from time import perf_counter
 
 logger = logging.getLogger(__name__)
+tracer = trace.get_tracer(__name__)
 
 
 class VectorStore:
@@ -90,38 +93,55 @@ class VectorStore:
         top_k: Optional[int] = None,
         filters: Optional[Dict] = None,
     ) -> List[Dict]:
-        limit = top_k or settings.RETRIEVAL_TOP_K
-        query_filter = None
+        with tracer.start_as_current_span("recommendation.vector.search") as span:
+            start = perf_counter()
+            limit = top_k or settings.RETRIEVAL_TOP_K
+            query_filter = None
 
-        if filters:
-            conditions: List[models.FieldCondition] = []
-            for key, value in filters.items():
-                conditions.append(
-                    models.FieldCondition(
-                        key=key,
-                        match=models.MatchValue(value=value),
+            if filters:
+                conditions: List[models.FieldCondition] = []
+                for key, value in filters.items():
+                    conditions.append(
+                        models.FieldCondition(
+                            key=key,
+                            match=models.MatchValue(value=value),
+                        )
                     )
-                )
-            query_filter = models.Filter(must=conditions)
+                query_filter = models.Filter(must=conditions)
 
-        results = await self.client.search(
-            collection_name=self.courses_collection,
-            query_vector=query_vector,
-            query_filter=query_filter,
-            limit=limit,
-            with_payload=True,
-        )
-
-        parsed: List[Dict] = []
-        for item in results:
-            parsed.append(
-                {
-                    "courseId": str(item.id),
-                    "similarityScore": float(item.score),
-                    "payload": item.payload or {},
-                }
+            results = await self.client.search(
+                collection_name=self.courses_collection,
+                query_vector=query_vector,
+                query_filter=query_filter,
+                limit=limit,
+                with_payload=True,
             )
-        return parsed
+
+            parsed: List[Dict] = []
+            for item in results:
+                parsed.append(
+                    {
+                        "courseId": str(item.id),
+                        "similarityScore": float(item.score),
+                        "payload": item.payload or {},
+                    }
+                )
+
+            duration_ms = (perf_counter() - start) * 1000
+            span.set_attribute("vector.collection", self.courses_collection)
+            span.set_attribute("vector.limit", limit)
+            span.set_attribute("vector.result_count", len(parsed))
+            span.set_attribute("vector.duration_ms", duration_ms)
+            logger.info(
+                "vector_search_timing",
+                extra={
+                    "collection": self.courses_collection,
+                    "limit": limit,
+                    "result_count": len(parsed),
+                    "duration_ms": round(duration_ms, 2),
+                },
+            )
+            return parsed
 
 
 vector_store = VectorStore()

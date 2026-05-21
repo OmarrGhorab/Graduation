@@ -2,6 +2,8 @@ import re
 from typing import Any, Awaitable, Callable, Dict
 
 from pydantic import BaseModel, ValidationError
+from opentelemetry import trace
+import logging
 
 from app.tools.cluster_tools import (
     get_cluster_top_courses_tool,
@@ -37,6 +39,8 @@ from app.tools.user_tools import (
 
 
 ToolHandler = Callable[..., Awaitable[Dict[str, Any]]]
+logger = logging.getLogger(__name__)
+tracer = trace.get_tracer(__name__)
 
 
 def _sanitize_text(value: str) -> str:
@@ -150,31 +154,53 @@ class ToolRegistry:
         return result
 
     async def invoke(self, name: str, arguments: Dict[str, Any]) -> ToolInvokeResponse:
-        if name not in self._definitions:
-            return ToolInvokeResponse(name=name, success=False, data={}, error=f"Unknown tool: {name}")
+        with tracer.start_as_current_span("recommendation.tool.execute") as span:
+            span.set_attribute("tool.name", name)
+            span.set_attribute("tool.arg_keys", ",".join(sorted(arguments.keys())))
+            if name not in self._definitions:
+                logger.warning("tool_unknown", extra={"tool_name": name})
+                span.set_attribute("tool.success", False)
+                return ToolInvokeResponse(name=name, success=False, data={}, error=f"Unknown tool: {name}")
 
-        definition = self._definitions[name]
-        handler = self._handlers[name]
+            definition = self._definitions[name]
+            handler = self._handlers[name]
 
-        try:
-            validated_input = definition.input_model(**arguments)
-        except ValidationError as exc:
-            return ToolInvokeResponse(name=name, success=False, data={}, error=f"Invalid input: {exc}")
+            try:
+                validated_input = definition.input_model(**arguments)
+            except ValidationError as exc:
+                logger.warning("tool_invalid_input", extra={"tool_name": name, "error": str(exc)})
+                span.set_attribute("tool.success", False)
+                return ToolInvokeResponse(name=name, success=False, data={}, error=f"Invalid input: {exc}")
 
-        try:
-            raw_output = await handler(**validated_input.model_dump())
-            safe_output = _truncate_obj(raw_output, max_items=25)
-            validated_output = definition.output_model(**safe_output)
-            return ToolInvokeResponse(
-                name=name,
-                success=True,
-                data=validated_output.model_dump(),
-                error=None,
-            )
-        except ValidationError as exc:
-            return ToolInvokeResponse(name=name, success=False, data={}, error=f"Invalid output: {exc}")
-        except Exception as exc:
-            return ToolInvokeResponse(name=name, success=False, data={}, error=str(exc))
+            try:
+                raw_output = await handler(**validated_input.model_dump())
+                safe_output = _truncate_obj(raw_output, max_items=25)
+                validated_output = definition.output_model(**safe_output)
+                data = validated_output.model_dump()
+                logger.info(
+                    "tool_executed",
+                    extra={
+                        "tool_name": name,
+                        "success": True,
+                        "result_keys": list(data.keys())[:10],
+                    },
+                )
+                span.set_attribute("tool.success", True)
+                span.set_attribute("tool.result_keys", ",".join(list(data.keys())[:10]))
+                return ToolInvokeResponse(
+                    name=name,
+                    success=True,
+                    data=data,
+                    error=None,
+                )
+            except ValidationError as exc:
+                logger.warning("tool_invalid_output", extra={"tool_name": name, "error": str(exc)})
+                span.set_attribute("tool.success", False)
+                return ToolInvokeResponse(name=name, success=False, data={}, error=f"Invalid output: {exc}")
+            except Exception as exc:
+                logger.error("tool_execution_failed", extra={"tool_name": name, "error": str(exc)})
+                span.set_attribute("tool.success", False)
+                return ToolInvokeResponse(name=name, success=False, data={}, error=str(exc))
 
 
 tool_registry = ToolRegistry()

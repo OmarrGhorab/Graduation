@@ -9,8 +9,10 @@ import logging
 import json
 import redis.asyncio as redis
 import uuid
+from opentelemetry import trace
 
 logger = logging.getLogger(__name__)
+tracer = trace.get_tracer(__name__)
 
 # Initialize Redis
 redis_conn = redis.from_url(settings.REDIS_URL, decode_responses=True)
@@ -61,6 +63,15 @@ async def _get_agentic_recommendations(user_id: str):
                     "errors": errors,
                 }
             ),
+        )
+        logger.info(
+            "recommendation_reasoning_trace_cached",
+            extra={
+                "user_id": str(user_id),
+                "tool_calls": len(tool_trace),
+                "error_count": len(errors),
+                "recommendation_count": len(recommendations),
+            },
         )
     except Exception as e:
         logger.warning(f"Failed to cache v2 recommendations/explanation: {str(e)}")
@@ -208,21 +219,31 @@ def _persist_v2_recommendation_history(user_id: str, recommendations: list):
 
 async def get_recommendation_explanation(user_id: str):
     explain_key = f"recommendation:v2:explain:{user_id}"
-    data = await redis_conn.get(explain_key)
-    if not data:
-        return {
-            "reasoningSummary": "",
-            "toolTrace": [],
-            "errors": [],
-        }
-    try:
-        return json.loads(data)
-    except Exception:
-        return {
-            "reasoningSummary": "",
-            "toolTrace": [],
-            "errors": ["failed_to_parse_explanation"],
-        }
+    with tracer.start_as_current_span("recommendation.reasoning.trace.read") as span:
+        span.set_attribute("recommendation.user_id", str(user_id))
+        data = await redis_conn.get(explain_key)
+        if not data:
+            logger.info("recommendation_reasoning_trace_missing", extra={"user_id": str(user_id)})
+            span.set_attribute("recommendation.trace_found", False)
+            return {
+                "reasoningSummary": "",
+                "toolTrace": [],
+                "errors": [],
+            }
+        try:
+            parsed = json.loads(data)
+            span.set_attribute("recommendation.trace_found", True)
+            span.set_attribute("recommendation.tool_calls", len(parsed.get("toolTrace", [])))
+            return parsed
+        except Exception:
+            logger.warning("recommendation_reasoning_trace_parse_failed", extra={"user_id": str(user_id)})
+            span.set_attribute("recommendation.trace_found", True)
+            span.set_attribute("recommendation.trace_parse_failed", True)
+            return {
+                "reasoningSummary": "",
+                "toolTrace": [],
+                "errors": ["failed_to_parse_explanation"],
+            }
 
 async def clear_cache(user_id: str):
     """Removes the cached recommendations for a specific user."""

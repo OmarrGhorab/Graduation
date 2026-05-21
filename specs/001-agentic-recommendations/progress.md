@@ -2,7 +2,7 @@
 
 **Feature**: `001-agentic-recommendations`
 
-**Current Phase**: Phase 7 - API Integration complete
+**Current Phase**: Phase 8 - Observability complete
 
 ## Completed
 
@@ -47,10 +47,15 @@
 - Added recommendation explanation endpoint in `recommendation-service/app/api/routes/recommendations.py`.
 - Added explanation and v2 recommendation schemas in `recommendation-service/app/schemas/recommendation.py`.
 - Kept legacy prompt-builder path active with explicit v1 fallback note in `recommendation-service/app/utils/prompt_builder.py`.
+- Added `recommendation.agent.run` span and structured completion logs in `recommendation-service/app/agents/recommendation_agent.py`.
+- Added `recommendation.tool.execute` span and structured tool execution logs in `recommendation-service/app/tools/registry.py`.
+- Added `recommendation.vector.search` span and timing logs in `recommendation-service/app/retrieval/vector_store.py`.
+- Added `recommendation.cluster.assign` span and clustering job metrics/logs in `recommendation-service/app/clustering/jobs.py`.
+- Added reasoning-trace cache logs and trace-read spans for `/explain` in `recommendation-service/app/services/recommendation_engine.py`.
 
 ## In Progress
 
-- Awaiting explicit approval to begin Phase 8 - Observability.
+- Awaiting explicit approval to begin Phase 9 - Testing.
 
 ## Blockers
 
@@ -69,6 +74,7 @@
 - New Phase 5 tool modules compile successfully with `python -m py_compile`.
 - New Phase 6 agent modules compile successfully with `python -m py_compile`.
 - New Phase 7 API integration modules compile successfully with `python -m py_compile`.
+- New Phase 8 observability-instrumented modules compile successfully with `python -m py_compile`.
 - Container build and dependency installation were not run because they would require network/package downloads.
 
 ## Notes

@@ -92,11 +92,11 @@
 
 **Purpose**: Make agent behavior debuggable and measurable.
 
-- [ ] T046 [P] [US1] Add agent run spans in `recommendation-service/app/agents/recommendation_agent.py`
-- [ ] T047 [P] [US1] Add tool execution spans and structured logs in `recommendation-service/app/tools/registry.py`
-- [ ] T048 [P] [US1] Add vector search timing logs in `recommendation-service/app/retrieval/vector_store.py`
-- [ ] T049 [P] [US3] Add clustering job metrics and logs in `recommendation-service/app/clustering/jobs.py`
-- [ ] T050 [US2] Add reasoning trace storage for explanation endpoint in `recommendation-service/app/services/recommendation_engine.py`
+- [X] T046 [P] [US1] Add agent run spans in `recommendation-service/app/agents/recommendation_agent.py`
+- [X] T047 [P] [US1] Add tool execution spans and structured logs in `recommendation-service/app/tools/registry.py`
+- [X] T048 [P] [US1] Add vector search timing logs in `recommendation-service/app/retrieval/vector_store.py`
+- [X] T049 [P] [US3] Add clustering job metrics and logs in `recommendation-service/app/clustering/jobs.py`
+- [X] T050 [US2] Add reasoning trace storage for explanation endpoint in `recommendation-service/app/services/recommendation_engine.py`
 
 ## Phase 9: Testing
 
