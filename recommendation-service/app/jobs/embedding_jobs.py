@@ -5,6 +5,7 @@ from typing import List
 from app.config import settings
 from app.retrieval.course_indexer import build_course_embedding_text
 from app.retrieval.embedding_service import embedding_service
+from app.retrieval.vector_store import vector_store
 
 logger = logging.getLogger(__name__)
 
@@ -34,12 +35,22 @@ async def refresh_user_embeddings(user_id: str, user_profile: dict) -> dict:
 
     text = build_user_behavior_summary(user_id, user_profile)
     vector = await embedding_service.embed_text(text, normalize=True)
-    return {
+    document = {
         "entity_type": "user",
         "entity_id": str(user_id),
         "vector": vector,
         "metadata": user_profile,
     }
+    await vector_store.upsert_user_vector(
+        str(user_id),
+        vector,
+        {
+            "entity_type": "user",
+            "entity_id": str(user_id),
+            "summary": text[:1000],
+        },
+    )
+    return document
 
 
 async def refresh_embeddings_background(courses: List[dict]) -> None:
@@ -48,4 +59,3 @@ async def refresh_embeddings_background(courses: List[dict]) -> None:
         logger.info("Embedding refresh job completed for courses")
     except Exception as exc:
         logger.error(f"Embedding refresh job failed: {exc}")
-

@@ -120,6 +120,16 @@
 - [X] T061 [US4] Validate rollback by disabling feature flag and confirming v1 cache path still works
 - [X] T062 [US4] Update `specs/001-agentic-recommendations/progress.md` with rollout validation results
 
+## Phase 11: Conformance Remediation
+
+**Purpose**: Close contract, validation, and observability gaps surfaced during analysis.
+
+- [X] T063 [US4] Add shared response envelope helpers and machine-readable error handling for recommendation and cluster APIs in `recommendation-service/app/utils/api_response.py` and `recommendation-service/app/main.py`
+- [X] T064 [US4] Add dependency-aware health check coverage for database, Redis, and Qdrant in `recommendation-service/app/main.py`
+- [X] T065 [US1] Add user embedding upsert coverage in `recommendation-service/app/jobs/embedding_jobs.py`
+- [X] T066 [US1] Add prompt-injection sanitization regression coverage in `recommendation-service/tests/test_tool_security.py`
+- [X] T067 [US3] Add migration rollback notes and validation coverage for clustering tables in `recommendation-service/alembic/versions/20260521_01_create_user_clusters.sql` and `recommendation-service/tests/test_migration_script.py`
+
 ## Dependencies & Execution Order
 
 - Phase 1 blocks all later phases.
@@ -132,6 +142,7 @@
 - Phase 8 can begin after each subsystem exists.
 - Phase 9 should be added alongside each phase, with final full validation before migration.
 - Phase 10 depends on Phases 1-9.
+- Phase 11 closes analysis-driven conformance gaps and does not introduce new feature behavior.
 
 ## Parallel Opportunities
 
@@ -140,6 +151,7 @@
 - Phase 5 user, course, and cluster tools can run in parallel after registry schemas are stable.
 - Phase 8 observability tasks can run in parallel by subsystem.
 - Phase 9 tests can run in parallel by test file.
+- Phase 11 remediation tasks can run independently by concern.
 
 ## Implementation Strategy
 

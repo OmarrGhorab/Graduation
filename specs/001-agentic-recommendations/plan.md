@@ -18,6 +18,7 @@ Runtime request path:
 6. Retrieved candidates are hybrid-ranked before LLM reranking.
 7. The LLM receives only compact retrieved context, not the full catalog.
 8. Output is validated, hydrated, cached, traced, and returned.
+9. Public recommendation and cluster endpoints use a shared `{ success, data, error, message }` envelope with machine-readable error codes.
 
 Fallback behavior:
 
@@ -216,6 +217,11 @@ Add spans:
 
 Structured logs include user ID, request ID, tool name, duration, result counts, cache hit, cluster ID, and fallback reason.
 
+Health behavior:
+
+- `/health` verifies database, Redis, and Qdrant connectivity and returns degraded status if any dependency fails.
+- `/debug-sentry` remains available for error-tracing validation in non-production environments.
+
 ## Migration Strategy
 
 1. Add infrastructure and configuration.
@@ -227,6 +233,7 @@ Structured logs include user ID, request ID, tool name, duration, result counts,
 7. Validate v1/v2 coexistence.
 8. Gradually enable and monitor.
 9. Keep rollback by disabling the flag.
+10. Document the 200ms p95 exception for fresh agentic generation and preserve the shared response envelope across all recommendation-family APIs.
 
 ## Phase 1 Scope
 

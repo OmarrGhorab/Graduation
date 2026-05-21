@@ -1,7 +1,6 @@
 from typing import Any, Dict, List
 
 from app.retrieval.hybrid_search import search_relevant_courses
-from app.services.recommendation_engine import get_trending_recommendations
 
 
 async def search_relevant_courses_tool(
@@ -20,5 +19,7 @@ async def search_relevant_courses_tool(
 
 
 async def get_trending_courses_tool(limit: int = 10) -> Dict[str, Any]:
+    from app.services.recommendation_engine import get_trending_recommendations
+
     courses = await get_trending_recommendations()
     return {"courses": (courses or [])[:limit]}

@@ -1,10 +1,12 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from app.api.routes import recommendations
 from app.api.routes import chat
 from app.api.routes import reports
 from app.config import settings
 from app.observability import setup_observability
+from app.utils.api_response import success_response
 import logging
 
 logger = logging.getLogger(__name__)
@@ -30,7 +32,63 @@ app.include_router(reports.router, prefix="/api/v1/reports", tags=["reports"])
 
 @app.get("/health")
 async def health_check():
-    return {"status": "healthy", "service": settings.APP_NAME}
+    dependency_status = {"database": "unknown", "redis": "unknown", "vector_db": "unknown"}
+    overall_healthy = True
+
+    try:
+        from sqlalchemy import text
+        from app.models.database import engine
+
+        with engine.connect() as connection:
+            connection.execute(text("SELECT 1"))
+        dependency_status["database"] = "healthy"
+    except Exception as exc:
+        dependency_status["database"] = f"unhealthy: {exc}"
+        overall_healthy = False
+
+    try:
+        from app.services.recommendation_engine import redis_conn
+
+        await redis_conn.ping()
+        dependency_status["redis"] = "healthy"
+    except Exception as exc:
+        dependency_status["redis"] = f"unhealthy: {exc}"
+        overall_healthy = False
+
+    try:
+        from app.retrieval.vector_store import vector_store
+
+        await vector_store.client.collection_exists(collection_name=vector_store.courses_collection)
+        dependency_status["vector_db"] = "healthy"
+    except Exception as exc:
+        dependency_status["vector_db"] = f"unhealthy: {exc}"
+        overall_healthy = False
+
+    return success_response(
+        data={
+            "status": "healthy" if overall_healthy else "degraded",
+            "service": settings.APP_NAME,
+            "dependencies": dependency_status,
+        }
+    )
+
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    if isinstance(exc.detail, dict) and {"success", "data", "error", "message"}.issubset(exc.detail.keys()):
+        return JSONResponse(status_code=exc.status_code, content=exc.detail)
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "success": False,
+            "data": None,
+            "error": {
+                "code": "HTTP_ERROR",
+                "message": str(exc.detail),
+            },
+            "message": str(exc.detail),
+        },
+    )
 
 @app.get("/debug-sentry")
 async def debug_sentry():

@@ -2,7 +2,7 @@
 
 **Feature**: `001-agentic-recommendations`
 
-**Current Phase**: Phase 10 - Migration complete
+**Current Phase**: Phase 11 - Conformance remediation complete
 
 ## Completed
 
@@ -47,13 +47,21 @@
 - Added recommendation explanation endpoint in `recommendation-service/app/api/routes/recommendations.py`.
 - Added explanation and v2 recommendation schemas in `recommendation-service/app/schemas/recommendation.py`.
 - Kept legacy prompt-builder path active with explicit v1 fallback note in `recommendation-service/app/utils/prompt_builder.py`.
+- Added shared API response envelope helpers in `recommendation-service/app/utils/api_response.py`.
+- Added dependency-aware `/health` checks for database, Redis, and Qdrant in `recommendation-service/app/main.py`.
+- Added explicit user vector upsert in `recommendation-service/app/jobs/embedding_jobs.py`.
+- Added prompt-injection payload sanitization alias in `recommendation-service/app/tools/registry.py`.
+- Added migration rollback notes for clustering tables in `recommendation-service/alembic/versions/20260521_01_create_user_clusters.sql`.
 - Added `recommendation.agent.run` span and structured completion logs in `recommendation-service/app/agents/recommendation_agent.py`.
 - Added `recommendation.tool.execute` span and structured tool execution logs in `recommendation-service/app/tools/registry.py`.
 - Added `recommendation.vector.search` span and timing logs in `recommendation-service/app/retrieval/vector_store.py`.
+- Added `recommendation.embedding.generate` spans in `recommendation-service/app/retrieval/embedding_service.py`.
 - Added `recommendation.cluster.assign` span and clustering job metrics/logs in `recommendation-service/app/clustering/jobs.py`.
+- Added `recommendation.llm.rank` span in `recommendation-service/app/agents/graph.py`.
 - Added reasoning-trace cache logs and trace-read spans for `/explain` in `recommendation-service/app/services/recommendation_engine.py`.
 - Added Phase 9 test modules under `recommendation-service/tests/` for tool schemas, vector store, clustering features/service, agent behavior, and v2 recommendation engine flow.
 - Added `tests/conftest.py` to make the test root importable and stub unavailable runtime dependencies in this workspace.
+- Added conformance remediation tests for API envelope, tool sanitization, embedding upsert, and migration rollback in `recommendation-service/tests/`.
 - Added rollout decision ADR for feature-flagged v2 migration in `specs/001-agentic-recommendations/decisions.md`.
 
 ## In Progress
@@ -78,9 +86,11 @@
 - New Phase 6 agent modules compile successfully with `python -m py_compile`.
 - New Phase 7 API integration modules compile successfully with `python -m py_compile`.
 - New Phase 8 observability-instrumented modules compile successfully with `python -m py_compile`.
-- Targeted pytest run is currently blocked at collection by missing local packages in this workspace (`qdrant_client`, `sqlalchemy`, `google.genai`), so the full Phase 9 suite could not complete here.
+- Full recommendation-service pytest suite now passes locally: 14 tests passed.
+- The original missing-package collection blockers were addressed with local test stubs in `tests/conftest.py` for offline validation.
 - Container build and dependency installation were not run because they would require network/package downloads.
-- Phase 10 rollout validation was completed as a documentation and configuration review because the agentic v2 path is already guarded by `AGENT_RECOMMENDATIONS_ENABLED`, v1 cache keys remain intact, and rollback is a simple feature-flag disable. No destructive or environment-changing deployment action was required in this workspace.
+- Phase 10 rollout validation remains valid: the agentic v2 path is guarded by `AGENT_RECOMMENDATIONS_ENABLED`, v1 cache keys remain intact, and rollback is a simple feature-flag disable.
+- The fresh-agentic-generation latency exception is now explicitly documented in `spec.md`, `plan.md`, and `decisions.md`.
 
 ## Notes
 

@@ -63,3 +63,19 @@
 **Reasoning**: The existing recommendation path works and provides a safe rollback path if the agentic flow needs to be disabled.
 
 **Tradeoff**: Operates both paths during migration, but avoids user-visible regression risk.
+
+## ADR-009: Fresh Agentic Generation Is A Documented Latency Exception
+
+**Decision**: Treat fresh agentic recommendation generation as an explicit exception to the general 200ms p95 API guidance because it performs bounded retrieval and LLM reasoning.
+
+**Reasoning**: The workflow is intentionally more expensive than cached reads and is measured separately from the cached path.
+
+**Tradeoff**: Adds one documented exception, but keeps the performance model honest and aligned with the constitution.
+
+## ADR-010: Standardize Recommendation-Family Response Envelopes
+
+**Decision**: Use the shared `{ success, data, error, message }` envelope for recommendation and cluster endpoints, with machine-readable error codes.
+
+**Reasoning**: This aligns the service with the platform API contract and avoids client-side branching on inconsistent error shapes.
+
+**Tradeoff**: Requires shared helper functions and explicit tests, but simplifies integration and debugging.

@@ -11,9 +11,13 @@ class RecommendationItem(BaseModel):
 class RecommendationResponse(BaseModel):
     success: bool
     data: List[RecommendationItem]
+    error: Optional[Dict[str, Any]] = None
+    message: Optional[str] = None
     
 class RefreshResponse(BaseModel):
     success: bool
+    data: Optional[Dict[str, Any]] = None
+    error: Optional[Dict[str, Any]] = None
     message: str
 
 
@@ -32,3 +36,5 @@ class RecommendationV2Item(BaseModel):
 class RecommendationExplainResponse(BaseModel):
     success: bool
     data: Dict[str, Any]
+    error: Optional[Dict[str, Any]] = None
+    message: Optional[str] = None

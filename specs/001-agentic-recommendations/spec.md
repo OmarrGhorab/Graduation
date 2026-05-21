@@ -96,6 +96,7 @@ As an engineering team, I want the new recommendation path behind a feature flag
 - **FR-011**: System MUST preserve the current recommendation path until the agentic path is explicitly enabled.
 - **FR-012**: System MUST record reasoning logs, tool execution logs, retrieval timing, and fallback events for observability.
 - **FR-013**: System MUST validate tool inputs, bound tool output sizes, sanitize retrieved text, and prevent model output from invoking arbitrary operations.
+- **FR-014**: All recommendation and cluster endpoints MUST return the platform response envelope `{ success, data, error, message }` with machine-readable error codes on failure.
 
 ### Key Entities
 
@@ -117,6 +118,7 @@ As an engineering team, I want the new recommendation path behind a feature flag
 - **SC-005**: The system can safely fall back to non-agentic ranking when the LLM, vector store, or cluster data is unavailable.
 - **SC-006**: Every eligible user processed by the clustering job receives one active cluster assignment.
 - **SC-007**: Engineering can disable the new path with a feature flag without removing deployed code.
+- **SC-008**: Public recommendation and cluster APIs conform to the shared response envelope and error-code contract on every success and failure path.
 
 ## Assumptions
 
@@ -124,5 +126,6 @@ As an engineering team, I want the new recommendation path behind a feature flag
 - Qdrant is introduced as a separate vector database rather than replacing the existing Postgres image.
 - The initial embedding model is `BAAI/bge-small-en-v1.5`.
 - KMeans is the first clustering algorithm, with the clustering service structured so DBSCAN can be added later.
+- Fresh agentic recommendation generation is an explicit latency exception to the platform-wide 200ms p95 rule because it performs bounded retrieval and LLM reasoning; cached recommendation responses and dependency health checks remain optimized and monitored.
 - The current endpoint prefix under `/api/v1/recommendations` remains the public API surface.
 - The initial release prioritizes service-side behavior and API compatibility over frontend changes.

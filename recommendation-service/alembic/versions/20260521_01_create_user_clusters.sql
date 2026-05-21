@@ -28,3 +28,10 @@ CREATE TABLE IF NOT EXISTS cluster_metadata (
 );
 
 CREATE INDEX IF NOT EXISTS idx_cluster_metadata_cluster_id ON cluster_metadata(cluster_id);
+
+-- Rollback:
+-- DROP INDEX IF EXISTS idx_cluster_metadata_cluster_id;
+-- DROP TABLE IF EXISTS cluster_metadata;
+-- DROP INDEX IF EXISTS idx_user_clusters_cluster_id;
+-- DROP INDEX IF EXISTS idx_user_clusters_user_id;
+-- DROP TABLE IF EXISTS user_clusters;

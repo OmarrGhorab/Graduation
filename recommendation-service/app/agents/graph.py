@@ -2,6 +2,7 @@ import logging
 from typing import Any, Dict, List
 
 from langgraph.graph import END, StateGraph
+from opentelemetry import trace
 
 from app.agents.prompts import RANKER_SYSTEM_PROMPT, TOOL_PLANNER_SYSTEM_PROMPT
 from app.agents.state import RecommendationState
@@ -10,6 +11,7 @@ from app.services.gemma_client import gemma_client
 from app.tools.registry import tool_registry
 
 logger = logging.getLogger(__name__)
+tracer = trace.get_tracer(__name__)
 
 
 def _initial_state(user_id: str) -> RecommendationState:
@@ -119,44 +121,51 @@ def _merge_candidates(existing: List[Dict[str, Any]], incoming: List[Dict[str, A
 
 
 async def rank_candidates(state: RecommendationState) -> RecommendationState:
-    candidates = sorted(state["candidates"], key=lambda x: x.get("hybridScore", 0), reverse=True)
-    candidates = candidates[: settings.AGENT_TOP_K_CANDIDATES]
-    if not candidates:
-        state["recommendations"] = []
+    with tracer.start_as_current_span("recommendation.llm.rank") as span:
+        candidates = sorted(state["candidates"], key=lambda x: x.get("hybridScore", 0), reverse=True)
+        candidates = candidates[: settings.AGENT_TOP_K_CANDIDATES]
+        span.set_attribute("recommendation.candidate_count", len(candidates))
+        if not candidates:
+            state["recommendations"] = []
+            span.set_attribute("recommendation.result_count", 0)
+            return state
+
+        payload = {
+            "user_id": state["user_id"],
+            "context": state["context"],
+            "tool_trace": state["tool_trace"][-5:],
+            "candidates": candidates,
+            "top_n": settings.AGENT_FINAL_RECOMMENDATION_COUNT,
+        }
+
+        ranked = await gemma_client.rank_recommendation_candidates(
+            system_prompt=RANKER_SYSTEM_PROMPT,
+            payload=payload,
+        )
+
+        if not isinstance(ranked, list):
+            state["errors"].append("LLM ranking returned non-list output")
+            span.set_attribute("recommendation.fallback", True)
+            return fallback_ranker(state)
+
+        by_id = {str(c.get("courseId")): c for c in candidates if c.get("courseId")}
+        result = []
+        for item in ranked:
+            course_id = str(item.get("courseId", ""))
+            if course_id not in by_id:
+                continue
+            merged = {**by_id[course_id], **item}
+            result.append(merged)
+            if len(result) >= settings.AGENT_FINAL_RECOMMENDATION_COUNT:
+                break
+
+        state["recommendations"] = result
+        span.set_attribute("recommendation.result_count", len(result))
+        if not state["recommendations"]:
+            span.set_attribute("recommendation.fallback", True)
+            return fallback_ranker(state)
+        span.set_attribute("recommendation.fallback", False)
         return state
-
-    payload = {
-        "user_id": state["user_id"],
-        "context": state["context"],
-        "tool_trace": state["tool_trace"][-5:],
-        "candidates": candidates,
-        "top_n": settings.AGENT_FINAL_RECOMMENDATION_COUNT,
-    }
-
-    ranked = await gemma_client.rank_recommendation_candidates(
-        system_prompt=RANKER_SYSTEM_PROMPT,
-        payload=payload,
-    )
-
-    if not isinstance(ranked, list):
-        state["errors"].append("LLM ranking returned non-list output")
-        return fallback_ranker(state)
-
-    by_id = {str(c.get("courseId")): c for c in candidates if c.get("courseId")}
-    result = []
-    for item in ranked:
-        course_id = str(item.get("courseId", ""))
-        if course_id not in by_id:
-            continue
-        merged = {**by_id[course_id], **item}
-        result.append(merged)
-        if len(result) >= settings.AGENT_FINAL_RECOMMENDATION_COUNT:
-            break
-
-    state["recommendations"] = result
-    if not state["recommendations"]:
-        return fallback_ranker(state)
-    return state
 
 
 def validate_output(state: RecommendationState) -> RecommendationState:

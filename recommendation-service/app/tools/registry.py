@@ -62,6 +62,10 @@ def _truncate_obj(value: Any, max_items: int = 25) -> Any:
     return value
 
 
+def _sanitize_payload(value: Any, max_items: int = 25) -> Any:
+    return _truncate_obj(value, max_items=max_items)
+
+
 class ToolRegistry:
     def __init__(self) -> None:
         self._definitions: Dict[str, ToolDefinition] = {}

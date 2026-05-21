@@ -1,6 +1,6 @@
 from typing import Dict, List
 
-from app.agents.graph import run_recommendation_graph
+from app.agents import graph as graph_module
 from opentelemetry import trace
 import logging
 
@@ -12,7 +12,7 @@ class RecommendationAgent:
     async def recommend(self, user_id: str) -> Dict:
         with tracer.start_as_current_span("recommendation.agent.run") as span:
             span.set_attribute("recommendation.user_id", str(user_id))
-            state = await run_recommendation_graph(user_id)
+            state = await graph_module.run_recommendation_graph(user_id)
             recommendations = state.get("recommendations", [])
             tool_trace = state.get("tool_trace", [])
             errors = state.get("errors", [])
