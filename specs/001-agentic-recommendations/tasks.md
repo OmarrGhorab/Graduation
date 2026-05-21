@@ -12,12 +12,12 @@
 
 **Purpose**: Add safe runtime prerequisites without changing recommendation behavior.
 
-- [ ] T001 Add agentic recommendation dependencies to `recommendation-service/requirements.txt`
-- [ ] T002 Add Qdrant service and `qdrant_data` volume to `docker-compose.yml`
-- [ ] T003 Add Qdrant dependency and environment variables to `recommendation-service` in `docker-compose.yml`
-- [ ] T004 Add agent, embedding, vector, clustering, retrieval, and cache settings to `recommendation-service/app/config.py`
-- [ ] T005 Verify `recommendation-service/Dockerfile` can install sentence-transformers and scikit-learn dependencies
-- [ ] T006 Update `specs/001-agentic-recommendations/progress.md` with Phase 1 validation results
+- [X] T001 Add agentic recommendation dependencies to `recommendation-service/requirements.txt`
+- [X] T002 Add Qdrant service and `qdrant_data` volume to `docker-compose.yml`
+- [X] T003 Add Qdrant dependency and environment variables to `recommendation-service` in `docker-compose.yml`
+- [X] T004 Add agent, embedding, vector, clustering, retrieval, and cache settings to `recommendation-service/app/config.py`
+- [X] T005 Verify `recommendation-service/Dockerfile` can install sentence-transformers and scikit-learn dependencies
+- [X] T006 Update `specs/001-agentic-recommendations/progress.md` with Phase 1 validation results
 
 ## Phase 2: Embeddings
 

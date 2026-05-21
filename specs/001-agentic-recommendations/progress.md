@@ -27,6 +27,8 @@
 - Spec Kit task setup discovery succeeds for `specs/001-agentic-recommendations`.
 - `recommendation-service/app/config.py` compiles with `python -m py_compile`.
 - `git diff --check` passed after whitespace cleanup.
+- `.gitignore` and `recommendation-service/.dockerignore` added for phase-1 setup hygiene.
+- `recommendation-service/Dockerfile` already includes `build-essential` and `libpq-dev`, which satisfy native dependency build prerequisites for the newly added Python packages.
 - Container build and dependency installation were not run because they would require network/package downloads.
 
 ## Notes
