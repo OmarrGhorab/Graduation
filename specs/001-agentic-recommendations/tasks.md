@@ -45,13 +45,13 @@
 
 **Purpose**: Persist user clusters and expose cluster behavior signals.
 
-- [ ] T019 [P] [US3] Create cluster SQLAlchemy models in `recommendation-service/app/models/cluster.py`
-- [ ] T020 [US3] Create Alembic migration for `user_clusters` and `cluster_metadata` in `recommendation-service/alembic/versions/`
-- [ ] T021 [P] [US3] Implement behavioral feature extraction in `recommendation-service/app/clustering/feature_builder.py`
-- [ ] T022 [US3] Implement KMeans clustering pipeline in `recommendation-service/app/clustering/cluster_service.py`
-- [ ] T023 [US3] Persist cluster assignments and metadata in `recommendation-service/app/clustering/cluster_service.py`
-- [ ] T024 [US3] Upsert cluster vectors after clustering in `recommendation-service/app/clustering/jobs.py`
-- [ ] T025 [US3] Add cluster routes in `recommendation-service/app/api/routes/recommendations.py`
+- [X] T019 [P] [US3] Create cluster SQLAlchemy models in `recommendation-service/app/models/cluster.py`
+- [X] T020 [US3] Create Alembic migration for `user_clusters` and `cluster_metadata` in `recommendation-service/alembic/versions/`
+- [X] T021 [P] [US3] Implement behavioral feature extraction in `recommendation-service/app/clustering/feature_builder.py`
+- [X] T022 [US3] Implement KMeans clustering pipeline in `recommendation-service/app/clustering/cluster_service.py`
+- [X] T023 [US3] Persist cluster assignments and metadata in `recommendation-service/app/clustering/cluster_service.py`
+- [X] T024 [US3] Upsert cluster vectors after clustering in `recommendation-service/app/clustering/jobs.py`
+- [X] T025 [US3] Add cluster routes in `recommendation-service/app/api/routes/recommendations.py`
 
 ## Phase 5: MCP Tools
 

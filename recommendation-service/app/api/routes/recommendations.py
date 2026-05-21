@@ -3,6 +3,8 @@ from app.services.recommendation_engine import get_personalized_recommendations
 from app.api.dependencies import get_current_user
 from typing import List, Dict
 import logging
+from app.models.database import SessionLocal
+from app.clustering.cluster_service import ClusterService
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -91,3 +93,41 @@ async def get_trending_courses():
             "success": False,
             "message": "Error fetching trending courses"
         }
+
+
+@router.get("/clusters/{user_id}")
+async def get_user_cluster(user_id: str):
+    db = SessionLocal()
+    try:
+        service = ClusterService(db)
+        cluster = service.get_user_cluster(user_id)
+        if not cluster:
+            raise HTTPException(status_code=404, detail="Cluster assignment not found for user")
+        return {
+            "success": True,
+            "data": {
+                "userId": cluster.user_id,
+                "clusterId": cluster.cluster_id,
+                "distanceToCentroid": cluster.distance_to_centroid,
+                "assignedAt": cluster.assigned_at.isoformat() if cluster.assigned_at else None,
+            },
+        }
+    finally:
+        db.close()
+
+
+@router.get("/clusters/{cluster_id}/top-courses")
+async def get_cluster_top_courses(cluster_id: int):
+    db = SessionLocal()
+    try:
+        service = ClusterService(db)
+        top_courses = service.list_top_courses_for_cluster(cluster_id)
+        return {
+            "success": True,
+            "data": {
+                "clusterId": cluster_id,
+                "topCourses": top_courses,
+            },
+        }
+    finally:
+        db.close()
