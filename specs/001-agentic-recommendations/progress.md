@@ -2,7 +2,7 @@
 
 **Feature**: `001-agentic-recommendations`
 
-**Current Phase**: Phase 4 - Clustering complete
+**Current Phase**: Phase 5 - MCP Tools complete
 
 ## Completed
 
@@ -30,10 +30,16 @@
 - Added clustering background job orchestrator in `recommendation-service/app/clustering/jobs.py`.
 - Added cluster endpoints in `recommendation-service/app/api/routes/recommendations.py`.
 - Added cluster model registration during app startup in `recommendation-service/app/main.py`.
+- Added MCP tool schemas in `recommendation-service/app/tools/schemas.py`.
+- Added allowlisted tool registry and dispatcher with input/output validation in `recommendation-service/app/tools/registry.py`.
+- Added user tools in `recommendation-service/app/tools/user_tools.py`.
+- Added course retrieval/trending tools in `recommendation-service/app/tools/course_tools.py`.
+- Added cluster tools in `recommendation-service/app/tools/cluster_tools.py`.
+- Added registry-level output truncation and prompt-injection text sanitization in `recommendation-service/app/tools/registry.py`.
 
 ## In Progress
 
-- Awaiting explicit approval to begin Phase 5 - MCP Tools.
+- Awaiting explicit approval to begin Phase 6 - LangGraph Agent.
 
 ## Blockers
 
@@ -49,6 +55,7 @@
 - New Phase 2 modules compile successfully with `python -m py_compile`.
 - New Phase 3 retrieval modules compile successfully with `python -m py_compile`.
 - New Phase 4 clustering modules compile successfully with `python -m py_compile`.
+- New Phase 5 tool modules compile successfully with `python -m py_compile`.
 - Container build and dependency installation were not run because they would require network/package downloads.
 
 ## Notes

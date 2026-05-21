@@ -57,12 +57,12 @@
 
 **Purpose**: Add validated, allowlisted tool execution for the agent.
 
-- [ ] T026 [P] [US1] Create tool input and output schemas in `recommendation-service/app/tools/schemas.py`
-- [ ] T027 [US1] Implement tool registry and dispatcher in `recommendation-service/app/tools/registry.py`
-- [ ] T028 [P] [US1] Implement user profile, history, and cart tools in `recommendation-service/app/tools/user_tools.py`
-- [ ] T029 [P] [US1] Implement relevant course search and trending tools in `recommendation-service/app/tools/course_tools.py`
-- [ ] T030 [P] [US3] Implement cluster lookup, similar users, and cluster top course tools in `recommendation-service/app/tools/cluster_tools.py`
-- [ ] T031 [US1] Add output truncation and sanitization in `recommendation-service/app/tools/registry.py`
+- [X] T026 [P] [US1] Create tool input and output schemas in `recommendation-service/app/tools/schemas.py`
+- [X] T027 [US1] Implement tool registry and dispatcher in `recommendation-service/app/tools/registry.py`
+- [X] T028 [P] [US1] Implement user profile, history, and cart tools in `recommendation-service/app/tools/user_tools.py`
+- [X] T029 [P] [US1] Implement relevant course search and trending tools in `recommendation-service/app/tools/course_tools.py`
+- [X] T030 [P] [US3] Implement cluster lookup, similar users, and cluster top course tools in `recommendation-service/app/tools/cluster_tools.py`
+- [X] T031 [US1] Add output truncation and sanitization in `recommendation-service/app/tools/registry.py`
 
 ## Phase 6: LangGraph Agent
 
