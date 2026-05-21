@@ -23,23 +23,23 @@
 
 **Purpose**: Build reusable embedding generation and refresh foundations.
 
-- [ ] T007 [P] [US1] Create embedding schemas in `recommendation-service/app/schemas/agent.py`
-- [ ] T008 [P] [US1] Create embedding service in `recommendation-service/app/retrieval/embedding_service.py`
-- [ ] T009 [US1] Add Redis-backed embedding cache in `recommendation-service/app/retrieval/embedding_service.py`
-- [ ] T010 [P] [US1] Create course embedding text builder in `recommendation-service/app/retrieval/course_indexer.py`
-- [ ] T011 [P] [US3] Create user behavior summary builder in `recommendation-service/app/clustering/feature_builder.py`
-- [ ] T012 [US1] Create async embedding refresh job in `recommendation-service/app/jobs/embedding_jobs.py`
+- [X] T007 [P] [US1] Create embedding schemas in `recommendation-service/app/schemas/agent.py`
+- [X] T008 [P] [US1] Create embedding service in `recommendation-service/app/retrieval/embedding_service.py`
+- [X] T009 [US1] Add Redis-backed embedding cache in `recommendation-service/app/retrieval/embedding_service.py`
+- [X] T010 [P] [US1] Create course embedding text builder in `recommendation-service/app/retrieval/course_indexer.py`
+- [X] T011 [P] [US3] Create user behavior summary builder in `recommendation-service/app/clustering/feature_builder.py`
+- [X] T012 [US1] Create async embedding refresh job in `recommendation-service/app/jobs/embedding_jobs.py`
 
 ## Phase 3: Retrieval
 
 **Purpose**: Add vector search and hybrid candidate ranking.
 
-- [ ] T013 [P] [US1] Create Qdrant vector store client in `recommendation-service/app/retrieval/vector_store.py`
-- [ ] T014 [US1] Add Qdrant collection initialization for courses, users, and clusters in `recommendation-service/app/retrieval/vector_store.py`
-- [ ] T015 [US1] Implement course upsert and search methods in `recommendation-service/app/retrieval/vector_store.py`
-- [ ] T016 [P] [US1] Implement hybrid scoring in `recommendation-service/app/retrieval/hybrid_search.py`
-- [ ] T017 [US1] Add retrieval cache keys and cache handling in `recommendation-service/app/retrieval/hybrid_search.py`
-- [ ] T018 [US1] Add enrolled-course exclusion to retrieval candidate merging in `recommendation-service/app/retrieval/hybrid_search.py`
+- [X] T013 [P] [US1] Create Qdrant vector store client in `recommendation-service/app/retrieval/vector_store.py`
+- [X] T014 [US1] Add Qdrant collection initialization for courses, users, and clusters in `recommendation-service/app/retrieval/vector_store.py`
+- [X] T015 [US1] Implement course upsert and search methods in `recommendation-service/app/retrieval/vector_store.py`
+- [X] T016 [P] [US1] Implement hybrid scoring in `recommendation-service/app/retrieval/hybrid_search.py`
+- [X] T017 [US1] Add retrieval cache keys and cache handling in `recommendation-service/app/retrieval/hybrid_search.py`
+- [X] T018 [US1] Add enrolled-course exclusion to retrieval candidate merging in `recommendation-service/app/retrieval/hybrid_search.py`
 
 ## Phase 4: Clustering
 

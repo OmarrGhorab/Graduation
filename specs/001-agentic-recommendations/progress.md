@@ -2,7 +2,7 @@
 
 **Feature**: `001-agentic-recommendations`
 
-**Current Phase**: Phase 1 - Infrastructure complete
+**Current Phase**: Phase 3 - Retrieval complete
 
 ## Completed
 
@@ -13,10 +13,21 @@
 - Added Qdrant service and persistent volume to `docker-compose.yml`.
 - Added recommendation-service Qdrant, feature flag, retrieval, embedding, and clustering environment variables.
 - Added matching settings to `recommendation-service/app/config.py`.
+- Added embedding schemas in `recommendation-service/app/schemas/agent.py`.
+- Added embedding generation service with Redis-backed embedding cache in `recommendation-service/app/retrieval/embedding_service.py`.
+- Added course embedding text/payload builders in `recommendation-service/app/retrieval/course_indexer.py`.
+- Added user behavior summary and numeric feature builder in `recommendation-service/app/clustering/feature_builder.py`.
+- Added async embedding refresh job helpers in `recommendation-service/app/jobs/embedding_jobs.py`.
+- Added Qdrant async vector client and collection management in `recommendation-service/app/retrieval/vector_store.py`.
+- Added course/user/cluster vector upsert helpers and semantic course search in `recommendation-service/app/retrieval/vector_store.py`.
+- Added hybrid retrieval module with semantic + popularity + teacher scoring in `recommendation-service/app/retrieval/hybrid_search.py`.
+- Added retrieval result caching with Redis keys in `recommendation-service/app/retrieval/hybrid_search.py`.
+- Added enrolled-course exclusion in retrieval post-processing in `recommendation-service/app/retrieval/hybrid_search.py`.
+- Extended course embedding payload fields to include display metadata for retrieval hydration in `recommendation-service/app/retrieval/course_indexer.py`.
 
 ## In Progress
 
-- Awaiting explicit approval to begin Phase 2 - Embeddings.
+- Awaiting explicit approval to begin Phase 4 - Clustering.
 
 ## Blockers
 
@@ -29,6 +40,8 @@
 - `git diff --check` passed after whitespace cleanup.
 - `.gitignore` and `recommendation-service/.dockerignore` added for phase-1 setup hygiene.
 - `recommendation-service/Dockerfile` already includes `build-essential` and `libpq-dev`, which satisfy native dependency build prerequisites for the newly added Python packages.
+- New Phase 2 modules compile successfully with `python -m py_compile`.
+- New Phase 3 retrieval modules compile successfully with `python -m py_compile`.
 - Container build and dependency installation were not run because they would require network/package downloads.
 
 ## Notes
