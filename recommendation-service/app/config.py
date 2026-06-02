@@ -8,7 +8,13 @@ class Settings(BaseSettings):
     
     # AI Config
     AI_API_KEY: str
-    AI_MODEL: str = "gemma-4-26b"
+    AI_MODEL: str = "moonshotai/kimi-k2.6:free"
+    AI_BASE_URL: str = "https://openrouter.ai/api/v1"
+    AI_WIRE_API: str = "chat_completions"
+    AI_REASONING_EFFORT: str = "medium"
+    DISABLE_RESPONSE_STORAGE: bool = True
+    OPENROUTER_SITE_URL: str = "http://localhost:3000"
+    OPENROUTER_APP_NAME: str = "Graduation Platform"
     
     # Databases
     DATABASE_URL: str

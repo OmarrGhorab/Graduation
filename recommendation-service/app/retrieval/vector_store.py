@@ -80,7 +80,7 @@ class VectorStore:
             collection_name=self.clusters_collection,
             points=[
                 models.PointStruct(
-                    id=str(cluster_id),
+                    id=int(cluster_id),
                     vector=vector,
                     payload=payload,
                 )

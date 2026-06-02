@@ -51,16 +51,45 @@ async def refresh_recommendations(background_tasks: BackgroundTasks, user = Depe
     Invalidates the cache and triggers a fresh recommendation generation in the background.
     """
     from app.services.recommendation_engine import clear_cache, get_personalized_recommendations
+    from app.clustering.jobs import gather_known_user_ids, run_clustering_job_for_users
     user_id = user["user_id"]
-    
+
     # 1. Clear current cache
     await clear_cache(user_id)
-    
-    # 2. Trigger fresh generation in background
-    background_tasks.add_task(get_personalized_recommendations, user_id)
-    
+
+    # 2. Rebuild clusters (so the collaborative-filtering signal is fresh), then regenerate
+    async def _rebuild_and_recommend():
+        try:
+            user_ids = set(gather_known_user_ids())
+            user_ids.add(str(user_id))
+            await run_clustering_job_for_users(list(user_ids))
+        except Exception as exc:
+            logger.warning(f"Cluster rebuild during refresh failed for {user_id}: {exc}")
+        await get_personalized_recommendations(user_id)
+
+    background_tasks.add_task(_rebuild_and_recommend)
+
     logger.info(f"Public background refresh requested for user {user_id}")
     return success_response(message="Recommendations cache cleared and refresh started in background")
+
+
+@router.post("/clusters/rebuild")
+async def rebuild_clusters(background_tasks: BackgroundTasks, user = Depends(get_current_user)):
+    """
+    Recomputes user clusters from current analytics for all known users
+    (plus the caller) so recommendations carry an up-to-date cluster signal.
+    """
+    from app.clustering.jobs import gather_known_user_ids, run_clustering_job_for_users
+    user_id = user["user_id"]
+
+    async def _rebuild():
+        user_ids = set(gather_known_user_ids())
+        user_ids.add(str(user_id))
+        result = await run_clustering_job_for_users(list(user_ids))
+        logger.info(f"Manual cluster rebuild result: {result}")
+
+    background_tasks.add_task(_rebuild)
+    return success_response(message="Cluster rebuild started in background")
 
 @router.delete("/cache/{user_id}")
 async def invalidate_cache(user_id: str, background_tasks: BackgroundTasks):

@@ -3,7 +3,7 @@ import logging
 from typing import List
 
 from app.config import settings
-from app.retrieval.course_indexer import build_course_embedding_text
+from app.retrieval.course_indexer import build_course_embedding_text, build_course_embedding_payload
 from app.retrieval.embedding_service import embedding_service
 from app.retrieval.vector_store import vector_store
 
@@ -19,14 +19,22 @@ async def refresh_course_embeddings(courses: List[dict]) -> List[dict]:
 
     results: List[dict] = []
     for course, vector in zip(courses, vectors):
-        results.append(
-            {
-                "entity_type": "course",
-                "entity_id": str(course.get("id")),
-                "vector": vector,
-                "metadata": course,
-            }
-        )
+        if not vector:
+            continue
+        course_id = str(course.get("id"))
+        payload = build_course_embedding_payload(course)
+        try:
+            await vector_store.upsert_course_vector(course_id, vector, payload)
+        except Exception as exc:
+            logger.warning(f"Failed to upsert vector for course {course_id}: {exc}")
+            continue
+        results.append({
+            "entity_type": "course",
+            "entity_id": course_id,
+            "vector": vector,
+            "metadata": course,
+        })
+    logger.info(f"Indexed {len(results)}/{len(courses)} course vectors into Qdrant")
     return results
 
 

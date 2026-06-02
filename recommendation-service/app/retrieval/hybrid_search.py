@@ -19,6 +19,25 @@ def _cache_key(user_id: str, query: str, exclude_ids: List[str]) -> str:
     return f"retrieval:v1:{hashlib.sha256(raw).hexdigest()}"
 
 
+def _get_cluster_affinity(user_id: str) -> Dict[str, float]:
+    """Best-effort lookup of the user's cluster course-affinity map.
+
+    Never raises — clustering is an optional enrichment signal, so any failure
+    (no assignment, DB error) degrades gracefully to "no cluster boost".
+    """
+    from app.models.database import SessionLocal
+    from app.clustering.cluster_service import ClusterService
+
+    db = SessionLocal()
+    try:
+        return ClusterService(db).get_course_affinity_for_user(str(user_id))
+    except Exception as exc:
+        logger.warning(f"Cluster affinity lookup failed for {user_id}: {exc}")
+        return {}
+    finally:
+        db.close()
+
+
 def _hybrid_score(similarity: float, popularity: float, teacher_score: float, cluster_score: float = 0.0) -> float:
     return (
         0.60 * similarity
@@ -71,6 +90,8 @@ async def search_relevant_courses(
                 "currency": payload.get("currency"),
                 "enrolledCount": payload.get("popularity_score", 0),
                 "teacherScore": payload.get("teacher_score", 0),
+                "teacherName": payload.get("teacherName"),
+                "teacherProfileImg": payload.get("teacherProfileImg"),
                 "source": ["semantic_similarity"],
             }
         )
@@ -84,16 +105,24 @@ async def search_relevant_courses(
     if user_profile and "AllAnalytics" in user_profile:
         enrolled_ids = {str(a.get("CourseID")) for a in user_profile.get("AllAnalytics", []) if a.get("CourseID")}
 
+    cluster_affinity = _get_cluster_affinity(user_id)
+
     final = []
     for item in filtered:
         if item["courseId"] in enrolled_ids:
             continue
+        cluster_score = cluster_affinity.get(item["courseId"], 0.0)
         score = _hybrid_score(
             similarity=float(item.get("similarityScore", 0.0)),
             popularity=float(item.get("enrolledCount", 0) or 0),
             teacher_score=float(item.get("teacherScore", 0) or 0),
+            cluster_score=cluster_score,
         )
         item["hybridScore"] = score
+        # 0.10 is the cluster weight in _hybrid_score — surface its contribution
+        item["clusterContribution"] = round(0.10 * cluster_score, 4)
+        if cluster_score > 0 and "cluster_affinity" not in item["source"]:
+            item["source"].append("cluster_affinity")
         final.append(item)
 
     final.sort(key=lambda x: x.get("hybridScore", 0.0), reverse=True)

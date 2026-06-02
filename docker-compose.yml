@@ -182,7 +182,7 @@ services:
       payment-service:
         condition: service_healthy
       recommendation-service:
-        condition: service_started
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:3000/health"]
       interval: 10s
@@ -501,16 +501,23 @@ services:
       - "8095:8095"
     environment:
       - SERVER_PORT=8095
+      - PORT=8095
       - DATABASE_URL=postgresql://graduation:graduation_secret@postgres:5432/graduation
       - REDIS_URL=redis://redis:6379
       - VECTOR_DB_URL=http://qdrant:6333
-      - AGENT_RECOMMENDATIONS_ENABLED=false
+      - AGENT_RECOMMENDATIONS_ENABLED=true
       - EMBEDDING_MODEL_NAME=BAAI/bge-small-en-v1.5
       - RETRIEVAL_TOP_K=20
       - AGENT_MAX_TOOL_CALLS=8
       - CLUSTER_COUNT=8
       - AI_API_KEY=${AI_API_KEY}
-      - AI_MODEL=${AI_MODEL}
+      - AI_MODEL=${AI_MODEL:-claude-haiku-4-5-20251001}
+      - AI_BASE_URL=${AI_BASE_URL:-https://api.freemodel.dev}
+      - AI_WIRE_API=${AI_WIRE_API:-responses}
+      - AI_REASONING_EFFORT=${AI_REASONING_EFFORT:-xhigh}
+      - DISABLE_RESPONSE_STORAGE=${DISABLE_RESPONSE_STORAGE:-true}
+      - OPENROUTER_SITE_URL=${OPENROUTER_SITE_URL:-http://localhost:3000}
+      - OPENROUTER_APP_NAME=${OPENROUTER_APP_NAME:-Graduation Platform}
       - COURSES_SERVICE_URL=http://courses-service-1:8085
       - AUTH_SERVICE_URL=http://auth-service:6001
       - INTERNAL_SERVICE_SECRET=graduation-mega-secret-2026
@@ -535,6 +542,13 @@ services:
         condition: service_healthy
       auth-service:
         condition: service_healthy
+      notification-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8095/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
   # ============ OBSERVABILITY STACK ============
   otel-collector:
     image: otel/opentelemetry-collector-contrib:0.96.0

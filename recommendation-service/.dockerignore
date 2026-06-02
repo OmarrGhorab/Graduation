@@ -18,3 +18,9 @@ venv/
 # Tooling/editor
 .vscode/
 .idea/
+
+# Dev utilities and test directories
+tests/
+alembic/
+fix_db.py
+*.md

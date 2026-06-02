@@ -4,11 +4,12 @@ from typing import Any, Dict, List
 from langgraph.graph import END, StateGraph
 from opentelemetry import trace
 
-from app.agents.prompts import RANKER_SYSTEM_PROMPT, TOOL_PLANNER_SYSTEM_PROMPT
+from app.agents.prompts import RANKER_SYSTEM_PROMPT
 from app.agents.state import RecommendationState
 from app.config import settings
 from app.services.gemma_client import gemma_client
 from app.tools.registry import tool_registry
+from app.retrieval.hybrid_search import search_relevant_courses
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer(__name__)
@@ -35,24 +36,40 @@ async def plan_next_tool(state: RecommendationState) -> RecommendationState:
         state["done"] = True
         return state
 
-    tool_specs = tool_registry.list_tools()
-    planner_input = {
-        "user_id": state["user_id"],
-        "tool_calls": state["tool_calls"],
-        "context_keys": list(state["context"].keys()),
-        "available_tools": tool_specs,
-        "last_tool_result": state["tool_trace"][-1] if state["tool_trace"] else None,
-    }
+    context = state["context"]
+    has_user_history = "get_user_history" in context
+    has_candidates = bool(state["candidates"])
 
-    plan = await gemma_client.plan_next_tool(
-        system_prompt=TOOL_PLANNER_SYSTEM_PROMPT,
-        payload=planner_input,
-    )
+    # Step 1: always fetch user history first
+    if not has_user_history:
+        state["done"] = False
+        state["next_tool"] = "get_user_history"
+        state["next_tool_args"] = {"user_id": state["user_id"]}
+        state["reasoning_summary"] = "Fetching user enrollment history and interests."
+        return state
 
-    state["done"] = bool(plan.get("done", False))
-    state["next_tool"] = plan.get("tool_name")
-    state["next_tool_args"] = plan.get("arguments") or {}
-    state["reasoning_summary"] = plan.get("reasoning_summary", state["reasoning_summary"])
+    # Step 2: search with interests as query (only once)
+    already_searched = any(t.get("tool") == "search_relevant_courses" for t in state["tool_trace"])
+    if not has_candidates and not already_searched:
+        user_history = context.get("get_user_history", {})
+        interests = user_history.get("interests") or []
+        enrolled_ids = user_history.get("enrolled_course_ids") or []
+        query = ", ".join(interests) if interests else "popular courses"
+        state["done"] = False
+        state["next_tool"] = "search_relevant_courses"
+        state["next_tool_args"] = {
+            "user_id": state["user_id"],
+            "query": query,
+            "exclude_course_ids": enrolled_ids,
+        }
+        state["reasoning_summary"] = f"Searching with interests: {query[:80]}"
+        return state
+
+    # Step 3: enough context — let the ranker take over
+    state["done"] = True
+    state["next_tool"] = None
+    state["next_tool_args"] = {}
+    state["reasoning_summary"] = "Collected user history and search candidates. Ready to rank."
     return state
 
 
@@ -126,15 +143,26 @@ async def rank_candidates(state: RecommendationState) -> RecommendationState:
         candidates = candidates[: settings.AGENT_TOP_K_CANDIDATES]
         span.set_attribute("recommendation.candidate_count", len(candidates))
         if not candidates:
-            state["recommendations"] = []
-            span.set_attribute("recommendation.result_count", 0)
-            return state
+            span.set_attribute("recommendation.fallback", True)
+            return await fallback_retrieval(state)
 
+        user_history = state["context"].get("get_user_history", {})
+
+        # Pass candidates by index so the LLM never has to copy UUIDs
+        indexed = [
+            {
+                "idx": i,
+                "title": c.get("title"),
+                "subject": c.get("subjectName"),
+                "hybridScore": round(c.get("hybridScore", 0), 3),
+            }
+            for i, c in enumerate(candidates)
+        ]
         payload = {
             "user_id": state["user_id"],
-            "context": state["context"],
-            "tool_trace": state["tool_trace"][-5:],
-            "candidates": candidates,
+            "interests": user_history.get("interests") or [],
+            "cart_subjects": user_history.get("cart_subjects") or [],
+            "candidates": indexed,
             "top_n": settings.AGENT_FINAL_RECOMMENDATION_COUNT,
         }
 
@@ -143,18 +171,21 @@ async def rank_candidates(state: RecommendationState) -> RecommendationState:
             payload=payload,
         )
 
-        if not isinstance(ranked, list):
-            state["errors"].append("LLM ranking returned non-list output")
+        if not isinstance(ranked, list) or not ranked:
+            state["errors"].append("LLM ranking returned invalid output")
             span.set_attribute("recommendation.fallback", True)
             return fallback_ranker(state)
 
-        by_id = {str(c.get("courseId")): c for c in candidates if c.get("courseId")}
         result = []
         for item in ranked:
-            course_id = str(item.get("courseId", ""))
-            if course_id not in by_id:
+            idx = item.get("idx")
+            if idx is None or not isinstance(idx, int) or idx >= len(candidates):
                 continue
-            merged = {**by_id[course_id], **item}
+            merged = {
+                **candidates[idx],
+                "matchReason": item.get("matchReason", ""),
+                "priority": item.get("priority", "MEDIUM"),
+            }
             result.append(merged)
             if len(result) >= settings.AGENT_FINAL_RECOMMENDATION_COUNT:
                 break
@@ -163,7 +194,7 @@ async def rank_candidates(state: RecommendationState) -> RecommendationState:
         span.set_attribute("recommendation.result_count", len(result))
         if not state["recommendations"]:
             span.set_attribute("recommendation.fallback", True)
-            return fallback_ranker(state)
+            return await fallback_retrieval(state)
         span.set_attribute("recommendation.fallback", False)
         return state
 
@@ -190,16 +221,75 @@ def fallback_ranker(state: RecommendationState) -> RecommendationState:
     ranked = sorted(state["candidates"], key=lambda x: x.get("hybridScore", 0), reverse=True)
     fallback = []
     for item in ranked[: settings.AGENT_FINAL_RECOMMENDATION_COUNT]:
+        hybrid = item.get("hybridScore", 0)
+        score = int(max(0, min(100, hybrid * 100))) if hybrid else item.get("score", 0)
         fallback.append(
             {
                 **item,
-                "score": int(max(0, min(100, item.get("hybridScore", 0) * 100))),
+                "score": score,
                 "matchReason": item.get("matchReason", "Matched by semantic similarity and popularity."),
                 "priority": "MEDIUM",
                 "source": item.get("source", ["semantic_similarity"]),
             }
         )
     state["recommendations"] = fallback
+    return state
+
+
+async def fallback_retrieval(state: RecommendationState) -> RecommendationState:
+    from app.services.recommendation_engine import get_trending_recommendations
+    from app.retrieval.hybrid_search import get_enrolled_course_ids
+
+    user_history = next(
+        (
+            item.get("data", {})
+            for item in reversed(state["tool_trace"])
+            if item.get("tool") == "get_user_history" and item.get("success")
+        ),
+        {},
+    )
+    exclude_course_ids = [str(cid) for cid in user_history.get("enrolled_course_ids", []) if cid]
+
+    # Always fetch enrolled IDs directly if the tool trace didn't have them
+    if not exclude_course_ids:
+        try:
+            exclude_course_ids = await get_enrolled_course_ids(state["user_id"])
+        except Exception as exc:
+            logger.warning(f"Could not fetch enrolled IDs for fallback filter: {exc}")
+
+    interests = user_history.get("interests", []) or []
+    query = ", ".join(interests) if interests else "recommended courses"
+    exclude_set = set(exclude_course_ids)
+
+    try:
+        semantic = await search_relevant_courses(
+            user_id=state["user_id"],
+            query=query,
+            top_k=settings.AGENT_TOP_K_CANDIDATES,
+            exclude_course_ids=exclude_course_ids,
+        )
+    except Exception as exc:
+        logger.warning(f"Agent fallback semantic retrieval failed: {exc}")
+        semantic = []
+
+    if not semantic:
+        try:
+            trending = await get_trending_recommendations()
+            for item in trending:
+                if "hybridScore" not in item:
+                    item["hybridScore"] = min(item.get("score", 0) / 100.0, 1.0)
+            semantic = [c for c in trending if str(c.get("courseId", "")) not in exclude_set]
+        except Exception as exc:
+            logger.warning(f"Agent fallback trending retrieval failed: {exc}")
+            semantic = []
+
+    state["candidates"] = _merge_candidates(state["candidates"], semantic)
+    if state["candidates"]:
+        state = fallback_ranker(state)
+    else:
+        state["recommendations"] = []
+    if not state["recommendations"] and semantic:
+        state["recommendations"] = semantic[: settings.AGENT_FINAL_RECOMMENDATION_COUNT]
     return state
 
 
@@ -225,5 +315,6 @@ def build_recommendation_graph():
 async def run_recommendation_graph(user_id: str) -> RecommendationState:
     app = build_recommendation_graph()
     state = _initial_state(user_id)
-    final_state = await app.ainvoke(state)
+    recursion_limit = settings.AGENT_MAX_TOOL_CALLS * 3 + 10
+    final_state = await app.ainvoke(state, config={"recursion_limit": recursion_limit})
     return final_state

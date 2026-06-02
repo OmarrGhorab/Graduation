@@ -250,6 +250,14 @@ async def clear_cache(user_id: str):
     await redis_conn.delete(f"recommendation:v1:{user_id}")
     await redis_conn.delete(f"recommendation:v2:{user_id}")
     await redis_conn.delete(f"recommendation:v2:explain:{user_id}")
+    # Retrieval results bake in the hybrid (incl. cluster) score, so drop them too
+    # — otherwise a fresh agent run replays stale candidates without the boost.
+    try:
+        keys = await redis_conn.keys("retrieval:v1:*")
+        if keys:
+            await redis_conn.delete(*keys)
+    except Exception as exc:
+        logger.warning(f"Failed to flush retrieval cache: {exc}")
     logger.info(f"Cache cleared for user: {user_id}")
 
 async def get_trending_recommendations():

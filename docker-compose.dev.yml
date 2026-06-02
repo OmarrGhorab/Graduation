@@ -1,8 +1,6 @@
 # Docker Compose for Local Development
 # Single instance per service for easier debugging
 
-version: "3.8"
-
 services:
   # Databases
   postgres:
@@ -22,6 +20,13 @@ services:
       - "6379:6379"
     volumes:
       - redis_data:/data
+
+  qdrant:
+    image: qdrant/qdrant:v1.13.2
+    ports:
+      - "6333:6333"
+    volumes:
+      - qdrant_data:/qdrant/storage
 
   # Kafka
   zookeeper:
@@ -58,11 +63,13 @@ services:
       - AUTH_SERVICE_URLS=http://auth-service:6001
       - NOTIFICATION_SERVICE_URLS=http://notification-service:6003
       - CHAT_SERVICE_URLS=http://chat-service:6004
+      - RECOMMENDATION_SERVICE_URLS=http://recommendation-service:8095
       - INTERNAL_SERVICE_SECRET=graduation-mega-secret-2026
     depends_on:
       - auth-service
       - notification-service
       - chat-service
+      - recommendation-service
 
   auth-service:
     build: ./auth-service
@@ -126,6 +133,50 @@ services:
       - kafka
       - chat-service
 
+  recommendation-service:
+    build: ./recommendation-service
+    ports:
+      - "8095:8095"
+    environment:
+      - SERVER_PORT=8095
+      - PORT=8095
+      - DATABASE_URL=postgresql://graduation:graduation_secret@postgres:5432/graduation
+      - REDIS_URL=redis://redis:6379
+      - VECTOR_DB_URL=http://qdrant:6333
+      - AGENT_RECOMMENDATIONS_ENABLED=true
+      - EMBEDDING_MODEL_NAME=BAAI/bge-small-en-v1.5
+      - RETRIEVAL_TOP_K=20
+      - AGENT_MAX_TOOL_CALLS=8
+      - CLUSTER_COUNT=8
+      - AI_API_KEY=${AI_API_KEY}
+      - AI_MODEL=${AI_MODEL:-gpt-5.2}
+      - AI_BASE_URL=${AI_BASE_URL:-https://api.freemodel.dev}
+      - AI_WIRE_API=${AI_WIRE_API:-responses}
+      - AI_REASONING_EFFORT=${AI_REASONING_EFFORT:-xhigh}
+      - DISABLE_RESPONSE_STORAGE=${DISABLE_RESPONSE_STORAGE:-true}
+      - OPENROUTER_SITE_URL=${OPENROUTER_SITE_URL:-http://localhost:3000}
+      - OPENROUTER_APP_NAME=${OPENROUTER_APP_NAME:-Graduation Platform}
+      - COURSES_SERVICE_URL=http://courses-service:8085
+      - AUTH_SERVICE_URL=http://auth-service:6001
+      - INTERNAL_SERVICE_SECRET=graduation-mega-secret-2026
+      - CLOUDINARY_CLOUD_NAME=${CLOUDINARY_CLOUD_NAME}
+      - CLOUDINARY_API_KEY=${CLOUDINARY_API_KEY}
+      - CLOUDINARY_API_SECRET=${CLOUDINARY_API_SECRET}
+      - CLOUDINARY_FOLDER=chatbot-media
+      - NOTIFICATION_SERVICE_URL=http://notification-service:6003
+    depends_on:
+      - postgres
+      - redis
+      - qdrant
+      - auth-service
+      - notification-service
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8095/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
 volumes:
   postgres_data:
   redis_data:
+  qdrant_data:
