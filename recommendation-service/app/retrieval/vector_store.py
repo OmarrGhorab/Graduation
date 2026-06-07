@@ -36,6 +36,20 @@ class VectorStore:
             )
             logger.info(f"Created Qdrant collection: {collection_name}")
 
+    async def recreate_course_collection(self, vector_size: int) -> None:
+        exists = await self.client.collection_exists(collection_name=self.courses_collection)
+        if exists:
+            await self.client.delete_collection(collection_name=self.courses_collection)
+            logger.info(f"Deleted stale Qdrant collection: {self.courses_collection}")
+        await self.client.create_collection(
+            collection_name=self.courses_collection,
+            vectors_config=models.VectorParams(
+                size=vector_size,
+                distance=models.Distance.COSINE,
+            ),
+        )
+        logger.info(f"Recreated Qdrant collection: {self.courses_collection}")
+
     async def upsert_course_vector(
         self,
         course_id: str,

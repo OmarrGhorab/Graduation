@@ -511,10 +511,10 @@ services:
       - AGENT_MAX_TOOL_CALLS=8
       - CLUSTER_COUNT=8
       - AI_API_KEY=${AI_API_KEY}
-      - AI_MODEL=${AI_MODEL:-claude-haiku-4-5-20251001}
+      - AI_MODEL=${AI_MODEL:-gpt-5.4-mini}
       - AI_BASE_URL=${AI_BASE_URL:-https://api.freemodel.dev}
       - AI_WIRE_API=${AI_WIRE_API:-responses}
-      - AI_REASONING_EFFORT=${AI_REASONING_EFFORT:-xhigh}
+      - AI_REASONING_EFFORT=${AI_REASONING_EFFORT:-medium}
       - DISABLE_RESPONSE_STORAGE=${DISABLE_RESPONSE_STORAGE:-true}
       - OPENROUTER_SITE_URL=${OPENROUTER_SITE_URL:-http://localhost:3000}
       - OPENROUTER_APP_NAME=${OPENROUTER_APP_NAME:-Graduation Platform}

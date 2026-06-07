@@ -8,9 +8,9 @@ class Settings(BaseSettings):
     
     # AI Config
     AI_API_KEY: str
-    AI_MODEL: str = "moonshotai/kimi-k2.6:free"
-    AI_BASE_URL: str = "https://openrouter.ai/api/v1"
-    AI_WIRE_API: str = "chat_completions"
+    AI_MODEL: str = "gpt-5.4-mini"
+    AI_BASE_URL: str = "https://api.freemodel.dev"
+    AI_WIRE_API: str = "responses"
     AI_REASONING_EFFORT: str = "medium"
     DISABLE_RESPONSE_STORAGE: bool = True
     OPENROUTER_SITE_URL: str = "http://localhost:3000"

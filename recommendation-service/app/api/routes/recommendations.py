@@ -45,6 +45,25 @@ async def get_recommendations_explain(user = Depends(get_current_user)):
             detail=error_response("RECOMMENDATION_EXPLANATION_FAILED", "Could not fetch recommendation explanation"),
         )
 
+
+@router.get("/debug")
+@router.get("/debug/")
+async def get_recommendations_debug(user = Depends(get_current_user)):
+    """
+    Returns scoring inputs for the authenticated user's current recommendation run.
+    """
+    from app.services.recommendation_engine import get_recommendation_debug
+    user_id = user["user_id"]
+    try:
+        debug = await get_recommendation_debug(user_id)
+        return success_response(data=debug)
+    except Exception as e:
+        logger.error(f"Failed to get recommendation debug for {user_id}: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=error_response("RECOMMENDATION_DEBUG_FAILED", "Could not fetch recommendation debug data"),
+        )
+
 @router.post("/refresh")
 async def refresh_recommendations(background_tasks: BackgroundTasks, user = Depends(get_current_user)):
     """

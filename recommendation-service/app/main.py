@@ -125,18 +125,21 @@ async def _index_courses_on_startup():
             logger.warning("Startup indexing: no courses returned from courses-service")
             return
         logger.info(f"Startup indexing: fetched {len(courses)} courses, building embeddings...")
+        await vector_store.recreate_course_collection(384)
         await refresh_course_embeddings(courses)
 
         # Flush stale retrieval caches so searches see the freshly indexed vectors
         try:
             r = aioredis.from_url(settings.REDIS_URL, decode_responses=True)
-            keys = await r.keys("retrieval:v1:*")
+            keys = []
+            for pattern in ("retrieval:v1:*", "recommendation:v2:*"):
+                keys.extend(await r.keys(pattern))
             if keys:
                 await r.delete(*keys)
-                logger.info(f"Flushed {len(keys)} stale retrieval cache entries")
+                logger.info(f"Flushed {len(keys)} stale recommendation cache entries")
             await r.aclose()
         except Exception as exc:
-            logger.warning(f"Retrieval cache flush failed: {exc}")
+            logger.warning(f"Recommendation cache flush failed: {exc}")
     except Exception as exc:
         logger.error(f"Startup course indexing failed: {exc}", exc_info=True)
 

@@ -2,7 +2,7 @@
 
 ## Overview
 
-The recommendation service is an **agentic RAG system** that generates personalized course recommendations for students by combining semantic retrieval, hybrid scoring, LLM ranking, and collaborative filtering. It runs on **Claude Haiku 4.5** (via freemodel's Responses API), replacing an earlier Gemma-based approach.
+The recommendation service is an **agentic RAG system** that generates personalized course recommendations for students by combining semantic retrieval, hybrid scoring, LLM ranking, and collaborative filtering. It runs on **GPT-5.4 Mini** via FreeModel's Responses API, replacing an earlier Gemma-based approach.
 
 **Core Pipeline:** `plan → execute → merge → rank → validate`
 
@@ -132,13 +132,13 @@ hybrid_score += 0.10 * cluster_score
 
 #### freemodel Responses API (Exclusive)
 - **Endpoint:** `https://api.freemodel.dev/v1/responses`
-- **Model:** `claude-haiku-4-5-20251001`
+- **Model:** `gpt-5.4-mini`
 - **API Key:** `fe_oa_cb7b75ad7c172331297a9d8d69dff4e6c0edfd4062a4b637`
 
 #### Payload Structure
 ```json
 {
-  "model": "claude-haiku-4-5-20251001",
+  "model": "gpt-5.4-mini",
   "input": [{
     "type": "text",
     "text": "system_prompt"
@@ -152,8 +152,8 @@ hybrid_score += 0.10 * cluster_score
 ```
 
 #### No Unsupported Fields
-❌ `reasoning.effort` (not supported for Haiku on Responses API)
-❌ `text.format.type: json_object` (not supported; JSON enforced via system prompt instead)
+`reasoning.effort` is supported and should stay in the `low` to `medium` range for this deployment.
+`text.format.type: json_object` is not used; JSON is enforced via system prompt and output parsing instead.
 
 #### Retry Logic
 - **Strategy:** Exponential backoff (2s → 4s → 8s → 16s) for up to 4 attempts
@@ -217,11 +217,11 @@ hybrid_score += 0.10 * cluster_score
   - No collaborative filtering initially
   - Single student cohort (no per-persona clustering possible)
 
-### **Current: Claude Haiku 4.5 via freemodel**
+### **Current: GPT-5.4 Mini via FreeModel**
 
 | Aspect | Before (Gemma) | Now (Haiku) |
 |--------|---|---|
-| **Model** | Gemma 2/7B | Claude Haiku 4.5 |
+| **Model** | Gemma 2/7B | GPT-5.4 Mini |
 | **API** | Chat completions | freemodel Responses API |
 | **Planner** | LLM-driven (unreliable) | **Rule-based (deterministic)** |
 | **Ranker** | UUID copy (hallucinations) | **Index-based (no UUIDs)** |
@@ -248,10 +248,10 @@ hybrid_score += 0.10 * cluster_score
 ### Environment Variables (`.env`)
 ```bash
 AI_API_KEY=
-AI_MODEL=claude-haiku-4-5-20251001
-AI_BASE_URL=
+AI_MODEL=gpt-5.4-mini
+AI_BASE_URL=https://api.freemodel.dev
 AI_WIRE_API=responses
-AI_REASONING_EFFORT=xhigh
+AI_REASONING_EFFORT=medium
 DISABLE_RESPONSE_STORAGE=true
 
 # Service URLs

@@ -9,7 +9,11 @@ from app.config import settings
 from app.retrieval.embedding_service import embedding_service
 from app.retrieval.vector_store import vector_store
 from app.services.course_client import course_client
-from app.utils.profile_utils import get_enrolled_ids_from_profile
+from app.utils.profile_utils import (
+    get_enrolled_ids_from_profile,
+    get_subject_name,
+    list_subject_preferences,
+)
 
 logger = logging.getLogger(__name__)
 redis_conn = redis.from_url(settings.REDIS_URL, decode_responses=True)
@@ -46,6 +50,19 @@ def _hybrid_score(similarity: float, popularity: float, teacher_score: float, cl
         + 0.10 * min(teacher_score / 5.0, 1.0)
         + 0.10 * cluster_score
     )
+
+
+def _profile_subject_boost(course_subject: str, user_profile: Dict) -> float:
+    if not course_subject:
+        return 0.0
+    watched_subjects = {
+        get_subject_name(item).lower()
+        for item in list_subject_preferences(user_profile)
+        if get_subject_name(item)
+    }
+    if course_subject.lower() in watched_subjects:
+        return 0.08
+    return 0.0
 
 
 async def search_relevant_courses(
@@ -100,11 +117,11 @@ async def search_relevant_courses(
 
     user_profile = {}
     enrolled_ids = set()
+    try:
+        user_profile = await course_client.get_user_analytics_profile(user_id)
+    except Exception:
+        user_profile = {}
     if filter_enrolled:
-        try:
-            user_profile = await course_client.get_user_analytics_profile(user_id)
-        except Exception:
-            user_profile = {}
         enrolled_ids = set(get_enrolled_ids_from_profile(user_profile))
 
     cluster_affinity = _get_cluster_affinity(user_id)
@@ -120,7 +137,10 @@ async def search_relevant_courses(
             teacher_score=float(item.get("teacherScore", 0) or 0),
             cluster_score=cluster_score,
         )
+        subject_boost = _profile_subject_boost(str(item.get("subjectName") or ""), user_profile)
+        score += subject_boost
         item["hybridScore"] = score
+        item["profileSubjectBoost"] = round(subject_boost, 4)
         # 0.10 is the cluster weight in _hybrid_score — surface its contribution
         item["clusterContribution"] = round(0.10 * cluster_score, 4)
         if cluster_score > 0 and "cluster_affinity" not in item["source"]:

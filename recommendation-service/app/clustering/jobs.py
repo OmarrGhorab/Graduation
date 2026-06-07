@@ -2,6 +2,7 @@ import logging
 from typing import Dict, List
 
 from app.clustering.cluster_service import ClusterService
+from app.jobs.embedding_jobs import refresh_user_embeddings
 from app.models.database import SessionLocal
 from app.models.recommendation import RecommendationHistory
 from app.services.course_client import course_client
@@ -50,6 +51,10 @@ async def run_clustering_job_for_users(user_ids: list[str]) -> Dict:
                 profile = await course_client.get_user_analytics_profile(user_id)
                 if profile:
                     user_profiles[user_id] = profile
+                    try:
+                        await refresh_user_embeddings(user_id, profile)
+                    except Exception as exc:
+                        logger.warning(f"User vector refresh failed for {user_id}: {exc}")
 
             service = ClusterService(db)
             assignments = await service.cluster_users(user_profiles)

@@ -118,6 +118,8 @@ class GemmaClient:
         }
         if instructions:
             payload["instructions"] = instructions
+        if self.reasoning_effort:
+            payload["reasoning"] = {"effort": self.reasoning_effort}
 
         async def _request():
             async with httpx.AsyncClient(timeout=90.0) as client:

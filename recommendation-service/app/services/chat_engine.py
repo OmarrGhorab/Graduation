@@ -319,6 +319,19 @@ class ChatEngine:
 
         return await self._get_course_context()
 
+    @staticmethod
+    def _retrieval_summary(courses: List[dict]) -> List[dict]:
+        summary = []
+        for course in courses[:8]:
+            summary.append({
+                "courseId": course.get("courseId") or course.get("id"),
+                "title": course.get("title"),
+                "subjectName": course.get("subjectName") or course.get("subject"),
+                "similarityScore": course.get("similarityScore"),
+                "source": course.get("source"),
+            })
+        return summary
+
     def _load_history(self, chat_id: str) -> List[dict]:
         """Loads the last N messages for the AI context window (sync)."""
         db = SessionLocal()
@@ -446,6 +459,7 @@ class ChatEngine:
                 asyncio.to_thread(self._load_history, chat_id),
                 self._get_retrieved_course_context(user_id, message),
             )
+            yield self._sse("retrieval", {"courses": self._retrieval_summary(courses)})
 
             # ── 4. Build prompt ─────────────────────────────────────────
             system_prompt = build_chat_system_prompt(courses)

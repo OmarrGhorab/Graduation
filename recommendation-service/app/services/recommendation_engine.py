@@ -5,11 +5,19 @@ from app.config import settings
 from app.agents.recommendation_agent import recommendation_agent
 from app.models.database import SessionLocal
 from app.models.recommendation import RecommendationHistory
-from app.utils.profile_utils import get_enrolled_ids_from_profile
+from app.utils.profile_utils import (
+    build_behavior_query,
+    get_enrolled_ids_from_profile,
+    list_cart_subjects,
+    list_preview_interests,
+    list_subject_preferences,
+    list_user_interests,
+)
 import logging
 import json
 import redis.asyncio as redis
 import uuid
+import inspect
 from opentelemetry import trace
 
 logger = logging.getLogger(__name__)
@@ -77,7 +85,9 @@ async def _get_agentic_recommendations(user_id: str):
     except Exception as e:
         logger.warning(f"Failed to cache v2 recommendations/explanation: {str(e)}")
 
-    _persist_v2_recommendation_history(user_id, recommendations)
+    persist_result = _persist_v2_recommendation_history(user_id, recommendations)
+    if inspect.isawaitable(persist_result):
+        await persist_result
     return recommendations
 
 
@@ -185,7 +195,7 @@ async def _get_legacy_recommendations(user_id: str):
         raise
 
 
-def _persist_v2_recommendation_history(user_id: str, recommendations: list):
+async def _persist_v2_recommendation_history(user_id: str, recommendations: list):
     db = SessionLocal()
     try:
         try:
@@ -193,12 +203,26 @@ def _persist_v2_recommendation_history(user_id: str, recommendations: list):
         except Exception:
             user_uuid = None
 
+        live_course_ids = set()
+        try:
+            # Recommendation history may have a DB-level FK in deployed schemas.
+            # Skip stale vector/cache IDs instead of failing the whole batch.
+            all_courses = await course_client.get_all_courses()
+            live_course_ids = {str(c.get("id")) for c in all_courses if c.get("id")}
+        except Exception as exc:
+            logger.warning(f"Could not validate course IDs before history insert: {exc}")
+
         for rec in recommendations:
             try:
                 course_id_raw = rec.get("courseId")
                 course_uuid = uuid.UUID(str(course_id_raw)) if course_id_raw else None
             except Exception:
                 course_uuid = None
+            if live_course_ids and str(course_id_raw) not in live_course_ids:
+                logger.warning(f"Skipping stale recommendation history course ID: {course_id_raw}")
+                continue
+            if course_uuid is None:
+                continue
 
             row = RecommendationHistory(
                 user_id=user_uuid,
@@ -229,11 +253,13 @@ async def get_recommendation_explanation(user_id: str):
                 "reasoningSummary": "",
                 "toolTrace": [],
                 "errors": [],
+                "cluster": _get_cluster_explain(user_id),
             }
         try:
             parsed = json.loads(data)
             span.set_attribute("recommendation.trace_found", True)
             span.set_attribute("recommendation.tool_calls", len(parsed.get("toolTrace", [])))
+            parsed["cluster"] = _get_cluster_explain(user_id)
             return parsed
         except Exception:
             logger.warning("recommendation_reasoning_trace_parse_failed", extra={"user_id": str(user_id)})
@@ -243,7 +269,78 @@ async def get_recommendation_explanation(user_id: str):
                 "reasoningSummary": "",
                 "toolTrace": [],
                 "errors": ["failed_to_parse_explanation"],
+                "cluster": _get_cluster_explain(user_id),
             }
+
+
+def _get_cluster_explain(user_id: str) -> dict:
+    from app.clustering.cluster_service import ClusterService
+
+    db = SessionLocal()
+    try:
+        if db is None:
+            return {"assigned": False, "clusterId": None, "topCourses": [], "topSubjects": []}
+        service = ClusterService(db)
+        cluster = service.get_user_cluster(str(user_id))
+        if not cluster:
+            return {"assigned": False, "clusterId": None, "topCourses": [], "topSubjects": []}
+        meta = service.get_cluster_metadata(cluster.cluster_id)
+        return {
+            "assigned": True,
+            "clusterId": cluster.cluster_id,
+            "distanceToCentroid": cluster.distance_to_centroid,
+            "assignedAt": cluster.assigned_at.isoformat() if cluster.assigned_at else None,
+            "topCourses": (meta.top_courses if meta and meta.top_courses else [])[:10],
+            "topSubjects": (meta.top_subjects if meta and meta.top_subjects else [])[:10],
+        }
+    except Exception as exc:
+        logger.warning(f"Cluster explanation lookup failed for {user_id}: {exc}")
+        return {"assigned": False, "clusterId": None, "topCourses": [], "topSubjects": []}
+    finally:
+        if db is not None:
+            db.close()
+
+
+async def get_recommendation_debug(user_id: str) -> dict:
+    from app.retrieval.hybrid_search import search_relevant_courses
+
+    profile = await course_client.get_user_analytics_profile(user_id)
+    profile = profile or {}
+    enrolled_ids = get_enrolled_ids_from_profile(profile)
+    behavior_query = build_behavior_query(profile)
+    candidates = await search_relevant_courses(
+        user_id=user_id,
+        query=behavior_query,
+        top_k=settings.AGENT_TOP_K_CANDIDATES,
+        exclude_course_ids=enrolled_ids,
+        filter_enrolled=True,
+    )
+    return {
+        "userId": str(user_id),
+        "behaviorQuery": behavior_query,
+        "watchedSubjects": list_subject_preferences(profile),
+        "previewInterests": list_preview_interests(profile),
+        "cartSubjects": list_cart_subjects(profile),
+        "userInterests": list_user_interests(profile),
+        "excludedCourses": {
+            "count": len(enrolled_ids),
+            "courseIds": enrolled_ids,
+        },
+        "cluster": _get_cluster_explain(user_id),
+        "topCandidates": [
+            {
+                "courseId": item.get("courseId"),
+                "title": item.get("title"),
+                "subjectName": item.get("subjectName"),
+                "similarityScore": round(float(item.get("similarityScore", 0) or 0), 4),
+                "profileSubjectBoost": round(float(item.get("profileSubjectBoost", 0) or 0), 4),
+                "clusterContribution": round(float(item.get("clusterContribution", 0) or 0), 4),
+                "hybridScore": round(float(item.get("hybridScore", 0) or 0), 4),
+                "source": item.get("source", []),
+            }
+            for item in candidates
+        ],
+    }
 
 async def clear_cache(user_id: str):
     """Removes the cached recommendations for a specific user."""
