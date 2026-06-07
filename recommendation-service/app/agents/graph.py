@@ -4,10 +4,8 @@ from typing import Any, Dict, List
 from langgraph.graph import END, StateGraph
 from opentelemetry import trace
 
-from app.agents.prompts import RANKER_SYSTEM_PROMPT
 from app.agents.state import RecommendationState
 from app.config import settings
-from app.services.gemma_client import gemma_client
 from app.tools.registry import tool_registry
 from app.retrieval.hybrid_search import search_relevant_courses
 
@@ -145,55 +143,8 @@ async def rank_candidates(state: RecommendationState) -> RecommendationState:
         if not candidates:
             span.set_attribute("recommendation.fallback", True)
             return await fallback_retrieval(state)
-
-        user_history = state["context"].get("get_user_history", {})
-
-        # Pass candidates by index so the LLM never has to copy UUIDs
-        indexed = [
-            {
-                "idx": i,
-                "title": c.get("title"),
-                "subject": c.get("subjectName"),
-                "hybridScore": round(c.get("hybridScore", 0), 3),
-            }
-            for i, c in enumerate(candidates)
-        ]
-        payload = {
-            "user_id": state["user_id"],
-            "interests": user_history.get("interests") or [],
-            "cart_subjects": user_history.get("cart_subjects") or [],
-            "subject_preferences": user_history.get("subject_preferences") or [],
-            "candidates": indexed,
-            "top_n": settings.AGENT_FINAL_RECOMMENDATION_COUNT,
-        }
-
-        ranked = await gemma_client.rank_recommendation_candidates(
-            system_prompt=RANKER_SYSTEM_PROMPT,
-            payload=payload,
-        )
-
-        if not isinstance(ranked, list) or not ranked:
-            state["errors"].append("LLM ranking returned invalid output")
-            span.set_attribute("recommendation.fallback", True)
-            return fallback_ranker(state)
-
-        result = []
-        for item in ranked:
-            idx = item.get("idx")
-            if idx is None or not isinstance(idx, int) or idx >= len(candidates):
-                continue
-            merged = {
-                **candidates[idx],
-                "matchReason": item.get("matchReason", ""),
-                "priority": item.get("priority", "MEDIUM"),
-            }
-            merged["score"] = _display_score(merged)
-            result.append(merged)
-            if len(result) >= settings.AGENT_FINAL_RECOMMENDATION_COUNT:
-                break
-
-        state["recommendations"] = result
-        span.set_attribute("recommendation.result_count", len(result))
+        state = fallback_ranker(state)
+        span.set_attribute("recommendation.result_count", len(state["recommendations"]))
         if not state["recommendations"]:
             span.set_attribute("recommendation.fallback", True)
             return await fallback_retrieval(state)
@@ -234,17 +185,39 @@ def fallback_ranker(state: RecommendationState) -> RecommendationState:
     ranked = sorted(state["candidates"], key=lambda x: x.get("hybridScore", 0), reverse=True)
     fallback = []
     for item in ranked[: settings.AGENT_FINAL_RECOMMENDATION_COUNT]:
-        hybrid = item.get("hybridScore", 0)
+        reason = _build_deterministic_reason(item)
         fallback_item = {
             **item,
-            "matchReason": item.get("matchReason", "Matched by semantic similarity and popularity."),
-            "priority": item.get("priority", "MEDIUM"),
+            "matchReason": item.get("matchReason", reason),
+            "priority": item.get("priority", _priority_from_score(float(item.get("hybridScore", 0) or 0))),
             "source": item.get("source", ["semantic_similarity"]),
         }
         fallback_item["score"] = _display_score(fallback_item)
         fallback.append(fallback_item)
     state["recommendations"] = fallback
     return state
+
+
+def _priority_from_score(hybrid_score: float) -> str:
+    if hybrid_score >= 0.78:
+        return "HIGH"
+    if hybrid_score >= 0.52:
+        return "MEDIUM"
+    return "LOW"
+
+
+def _build_deterministic_reason(item: Dict[str, Any]) -> str:
+    reasons: List[str] = []
+    subject = item.get("subjectName")
+    if subject and float(item.get("profileSubjectBoost", 0) or 0) > 0:
+        reasons.append(f"Strong match with your watched interest in {subject}.")
+    if float(item.get("clusterContribution", 0) or 0) > 0:
+        reasons.append("Popular among learners with similar watch patterns.")
+    if float(item.get("similarityScore", 0) or 0) >= 0.75:
+        reasons.append("Close semantic match to your recent learning behavior.")
+    if not reasons:
+        reasons.append("Ranks well based on relevance, popularity, and instructor quality.")
+    return " ".join(reasons)
 
 
 async def fallback_retrieval(state: RecommendationState) -> RecommendationState:

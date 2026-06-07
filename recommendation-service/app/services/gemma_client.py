@@ -15,21 +15,21 @@ _BASE_DELAY = 2.0
 _JSON_BLOCK_RE = re.compile(r"```(?:json)?\s*([\s\S]*?)```", re.IGNORECASE)
 
 
-async def _with_retry(fn, *args, **kwargs):
-    for attempt in range(_MAX_RETRIES):
+async def _with_retry(fn, *args, max_retries: int = _MAX_RETRIES, base_delay: float = _BASE_DELAY, **kwargs):
+    for attempt in range(max_retries):
         try:
             return await fn(*args, **kwargs)
         except httpx.HTTPStatusError as exc:
             status_code = exc.response.status_code
-            if status_code not in _RETRYABLE_CODES or attempt == _MAX_RETRIES - 1:
+            if status_code not in _RETRYABLE_CODES or attempt == max_retries - 1:
                 raise
-            delay = _BASE_DELAY * (2 ** attempt)
+            delay = base_delay * (2 ** attempt)
             logger.warning(f"AI API {status_code} on attempt {attempt + 1}, retrying in {delay:.0f}s...")
             await asyncio.sleep(delay)
         except (httpx.ConnectError, httpx.ReadTimeout) as exc:
-            if attempt == _MAX_RETRIES - 1:
+            if attempt == max_retries - 1:
                 raise
-            delay = _BASE_DELAY * (2 ** attempt)
+            delay = base_delay * (2 ** attempt)
             logger.warning(f"AI API connection error on attempt {attempt + 1}: {exc}. Retrying in {delay:.0f}s...")
             await asyncio.sleep(delay)
     raise RuntimeError("unreachable")
@@ -76,8 +76,25 @@ class GemmaClient:
             "Content-Type": "application/json",
         }
 
-    async def _chat_completion(self, messages: list, *, response_format: dict | None = None, stream: bool = False):
-        return await self._responses_completion(messages, response_format=response_format)
+    async def _chat_completion(
+        self,
+        messages: list,
+        *,
+        response_format: dict | None = None,
+        stream: bool = False,
+        timeout_seconds: float = 90.0,
+        reasoning_effort: str | None = None,
+        max_retries: int = _MAX_RETRIES,
+        base_delay: float = _BASE_DELAY,
+    ):
+        return await self._responses_completion(
+            messages,
+            response_format=response_format,
+            timeout_seconds=timeout_seconds,
+            reasoning_effort=reasoning_effort,
+            max_retries=max_retries,
+            base_delay=base_delay,
+        )
 
     def _responses_url(self):
         if self.base_url.endswith("/v1"):
@@ -109,7 +126,16 @@ class GemmaClient:
                 input_messages.append({"role": role, "content": converted})
         return instructions, input_messages
 
-    async def _responses_completion(self, messages: list, *, response_format: dict | None = None):
+    async def _responses_completion(
+        self,
+        messages: list,
+        *,
+        response_format: dict | None = None,
+        timeout_seconds: float = 90.0,
+        reasoning_effort: str | None = None,
+        max_retries: int = _MAX_RETRIES,
+        base_delay: float = _BASE_DELAY,
+    ):
         instructions, input_messages = self._responses_input(messages)
         payload = {
             "model": self.model_id,
@@ -118,11 +144,12 @@ class GemmaClient:
         }
         if instructions:
             payload["instructions"] = instructions
-        if self.reasoning_effort:
-            payload["reasoning"] = {"effort": self.reasoning_effort}
+        selected_effort = reasoning_effort if reasoning_effort is not None else self.reasoning_effort
+        if selected_effort:
+            payload["reasoning"] = {"effort": selected_effort}
 
         async def _request():
-            async with httpx.AsyncClient(timeout=90.0) as client:
+            async with httpx.AsyncClient(timeout=timeout_seconds) as client:
                 response = await client.post(
                     self._responses_url(),
                     headers=self._headers(),
@@ -131,7 +158,7 @@ class GemmaClient:
                 response.raise_for_status()
                 return response.json()
 
-        return await _with_retry(_request)
+        return await _with_retry(_request, max_retries=max_retries, base_delay=base_delay)
 
     @staticmethod
     def _text_from_response(response: dict) -> str:
@@ -201,7 +228,16 @@ class GemmaClient:
             logger.error(f"Chat error: {exc}")
             return f"Error: {exc}"
 
-    async def _generate_json(self, system_prompt: str, payload: dict):
+    async def _generate_json(
+        self,
+        system_prompt: str,
+        payload: dict,
+        *,
+        timeout_seconds: float = 90.0,
+        reasoning_effort: str | None = None,
+        max_retries: int = _MAX_RETRIES,
+        base_delay: float = _BASE_DELAY,
+    ):
         try:
             response = await self._chat_completion(
                 [
@@ -212,6 +248,10 @@ class GemmaClient:
                     {"role": "user", "content": json.dumps(payload)},
                 ],
                 response_format={"type": "json_object"},
+                timeout_seconds=timeout_seconds,
+                reasoning_effort=reasoning_effort,
+                max_retries=max_retries,
+                base_delay=base_delay,
             )
             text = self._text_from_response(response)
             if not text:
@@ -237,7 +277,14 @@ class GemmaClient:
         }
 
     async def rank_recommendation_candidates(self, system_prompt: str, payload: dict):
-        result = await self._generate_json(system_prompt, payload)
+        result = await self._generate_json(
+            system_prompt,
+            payload,
+            timeout_seconds=20.0,
+            reasoning_effort="low",
+            max_retries=2,
+            base_delay=1.0,
+        )
         if isinstance(result, list):
             return result
         if isinstance(result, dict):
