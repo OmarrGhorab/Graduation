@@ -3,7 +3,8 @@ from typing import Dict, List
 
 def build_course_embedding_text(course: Dict) -> str:
     subject = course.get("subject", {})
-    subject_name = subject.get("name") if isinstance(subject, dict) else course.get("subjectName", "Unknown")
+    subject_name = subject.get("name") if isinstance(subject, dict) else None
+    subject_name = subject_name or course.get("subjectName", "Unknown")
     categories = course.get("categories") or course.get("tags") or []
     if isinstance(categories, list):
         categories_text = ", ".join([str(x) for x in categories if x])
@@ -23,7 +24,8 @@ def build_course_embedding_text(course: Dict) -> str:
 
 def build_course_embedding_payload(course: Dict) -> Dict:
     subject = course.get("subject", {})
-    subject_name = subject.get("name") if isinstance(subject, dict) else course.get("subjectName")
+    subject_name = subject.get("name") if isinstance(subject, dict) else None
+    subject_name = subject_name or course.get("subjectName")
     categories = course.get("categories") or course.get("tags") or []
     if not isinstance(categories, list):
         categories = [str(categories)] if categories else []

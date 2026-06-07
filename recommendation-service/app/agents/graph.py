@@ -52,9 +52,9 @@ async def plan_next_tool(state: RecommendationState) -> RecommendationState:
     already_searched = any(t.get("tool") == "search_relevant_courses" for t in state["tool_trace"])
     if not has_candidates and not already_searched:
         user_history = context.get("get_user_history", {})
-        interests = user_history.get("interests") or []
         enrolled_ids = user_history.get("enrolled_course_ids") or []
-        query = ", ".join(interests) if interests else "popular courses"
+        interests = user_history.get("interests") or []
+        query = user_history.get("behavior_query") or ", ".join(interests) or "popular courses"
         state["done"] = False
         state["next_tool"] = "search_relevant_courses"
         state["next_tool_args"] = {
@@ -162,6 +162,7 @@ async def rank_candidates(state: RecommendationState) -> RecommendationState:
             "user_id": state["user_id"],
             "interests": user_history.get("interests") or [],
             "cart_subjects": user_history.get("cart_subjects") or [],
+            "subject_preferences": user_history.get("subject_preferences") or [],
             "candidates": indexed,
             "top_n": settings.AGENT_FINAL_RECOMMENDATION_COUNT,
         }
@@ -186,6 +187,7 @@ async def rank_candidates(state: RecommendationState) -> RecommendationState:
                 "matchReason": item.get("matchReason", ""),
                 "priority": item.get("priority", "MEDIUM"),
             }
+            merged["score"] = _display_score(merged)
             result.append(merged)
             if len(result) >= settings.AGENT_FINAL_RECOMMENDATION_COUNT:
                 break
@@ -204,8 +206,7 @@ def validate_output(state: RecommendationState) -> RecommendationState:
     for item in state["recommendations"]:
         if not item.get("courseId"):
             continue
-        if "score" not in item:
-            item["score"] = int(max(0, min(100, item.get("hybridScore", 0) * 100)))
+        item["score"] = _display_score(item)
         if "matchReason" not in item:
             item["matchReason"] = "Recommended based on retrieval and ranking signals."
         if "priority" not in item:
@@ -217,21 +218,31 @@ def validate_output(state: RecommendationState) -> RecommendationState:
     return state
 
 
+def _display_score(item: Dict[str, Any]) -> int:
+    hybrid = float(item.get("hybridScore", 0) or 0)
+    priority = str(item.get("priority", "MEDIUM")).upper()
+    priority_adjustment = {
+        "HIGH": 0.10,
+        "MEDIUM": 0.0,
+        "LOW": -0.25,
+    }.get(priority, 0.0)
+    adjusted = max(0.0, min(1.0, hybrid + priority_adjustment))
+    return int(adjusted * 100)
+
+
 def fallback_ranker(state: RecommendationState) -> RecommendationState:
     ranked = sorted(state["candidates"], key=lambda x: x.get("hybridScore", 0), reverse=True)
     fallback = []
     for item in ranked[: settings.AGENT_FINAL_RECOMMENDATION_COUNT]:
         hybrid = item.get("hybridScore", 0)
-        score = int(max(0, min(100, hybrid * 100))) if hybrid else item.get("score", 0)
-        fallback.append(
-            {
-                **item,
-                "score": score,
-                "matchReason": item.get("matchReason", "Matched by semantic similarity and popularity."),
-                "priority": "MEDIUM",
-                "source": item.get("source", ["semantic_similarity"]),
-            }
-        )
+        fallback_item = {
+            **item,
+            "matchReason": item.get("matchReason", "Matched by semantic similarity and popularity."),
+            "priority": item.get("priority", "MEDIUM"),
+            "source": item.get("source", ["semantic_similarity"]),
+        }
+        fallback_item["score"] = _display_score(fallback_item)
+        fallback.append(fallback_item)
     state["recommendations"] = fallback
     return state
 
@@ -258,7 +269,7 @@ async def fallback_retrieval(state: RecommendationState) -> RecommendationState:
             logger.warning(f"Could not fetch enrolled IDs for fallback filter: {exc}")
 
     interests = user_history.get("interests", []) or []
-    query = ", ".join(interests) if interests else "recommended courses"
+    query = user_history.get("behavior_query") or ", ".join(interests) or "recommended courses"
     exclude_set = set(exclude_course_ids)
 
     try:

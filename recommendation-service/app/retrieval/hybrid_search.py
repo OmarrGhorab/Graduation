@@ -9,13 +9,14 @@ from app.config import settings
 from app.retrieval.embedding_service import embedding_service
 from app.retrieval.vector_store import vector_store
 from app.services.course_client import course_client
+from app.utils.profile_utils import get_enrolled_ids_from_profile
 
 logger = logging.getLogger(__name__)
 redis_conn = redis.from_url(settings.REDIS_URL, decode_responses=True)
 
 
-def _cache_key(user_id: str, query: str, exclude_ids: List[str]) -> str:
-    raw = f"{user_id}:{query}:{','.join(sorted(exclude_ids))}".encode("utf-8")
+def _cache_key(user_id: str, query: str, exclude_ids: List[str], filter_enrolled: bool) -> str:
+    raw = f"{user_id}:{query}:{','.join(sorted(exclude_ids))}:{filter_enrolled}".encode("utf-8")
     return f"retrieval:v1:{hashlib.sha256(raw).hexdigest()}"
 
 
@@ -52,10 +53,11 @@ async def search_relevant_courses(
     query: str,
     top_k: Optional[int] = None,
     exclude_course_ids: Optional[List[str]] = None,
+    filter_enrolled: bool = True,
 ) -> List[Dict]:
     exclude_course_ids = exclude_course_ids or []
     limit = top_k or settings.RETRIEVAL_TOP_K
-    cache_key = _cache_key(user_id, query, exclude_course_ids)
+    cache_key = _cache_key(user_id, query, exclude_course_ids, filter_enrolled)
 
     try:
         cached = await redis_conn.get(cache_key)
@@ -96,20 +98,20 @@ async def search_relevant_courses(
             }
         )
 
-    try:
-        user_profile = await course_client.get_user_analytics_profile(user_id)
-    except Exception:
-        user_profile = {}
-
+    user_profile = {}
     enrolled_ids = set()
-    if user_profile and "AllAnalytics" in user_profile:
-        enrolled_ids = {str(a.get("CourseID")) for a in user_profile.get("AllAnalytics", []) if a.get("CourseID")}
+    if filter_enrolled:
+        try:
+            user_profile = await course_client.get_user_analytics_profile(user_id)
+        except Exception:
+            user_profile = {}
+        enrolled_ids = set(get_enrolled_ids_from_profile(user_profile))
 
     cluster_affinity = _get_cluster_affinity(user_id)
 
     final = []
     for item in filtered:
-        if item["courseId"] in enrolled_ids:
+        if filter_enrolled and item["courseId"] in enrolled_ids:
             continue
         cluster_score = cluster_affinity.get(item["courseId"], 0.0)
         score = _hybrid_score(
@@ -138,6 +140,4 @@ async def search_relevant_courses(
 
 async def get_enrolled_course_ids(user_id: str) -> List[str]:
     profile = await course_client.get_user_analytics_profile(user_id)
-    if not profile or "AllAnalytics" not in profile:
-        return []
-    return [str(a.get("CourseID")) for a in profile.get("AllAnalytics", []) if a.get("CourseID")]
+    return get_enrolled_ids_from_profile(profile)

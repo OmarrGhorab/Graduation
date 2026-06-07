@@ -19,6 +19,7 @@ from app.models.chat import ChatMessage, ChatSession
 from app.models.database import SessionLocal
 from app.services.course_client import course_client
 from app.services.gemma_client import gemma_client
+from app.retrieval.hybrid_search import search_relevant_courses
 from app.utils.chat_prompt_builder import (
     build_chat_system_prompt,
     build_conversation_messages,
@@ -301,6 +302,23 @@ class ChatEngine:
 
         return courses
 
+    async def _get_retrieved_course_context(self, user_id: str, message: str) -> List[dict]:
+        """Retrieves the most relevant course context for the current chat turn."""
+        try:
+            retrieved = await search_relevant_courses(
+                user_id=user_id,
+                query=message,
+                top_k=8,
+                exclude_course_ids=[],
+                filter_enrolled=False,
+            )
+            if retrieved:
+                return retrieved
+        except Exception as e:
+            logger.warning(f"Chat RAG retrieval failed, falling back to catalog context: {e}")
+
+        return await self._get_course_context()
+
     def _load_history(self, chat_id: str) -> List[dict]:
         """Loads the last N messages for the AI context window (sync)."""
         db = SessionLocal()
@@ -426,7 +444,7 @@ class ChatEngine:
         try:
             history, courses = await asyncio.gather(
                 asyncio.to_thread(self._load_history, chat_id),
-                self._get_course_context(),
+                self._get_retrieved_course_context(user_id, message),
             )
 
             # ── 4. Build prompt ─────────────────────────────────────────
@@ -438,7 +456,7 @@ class ChatEngine:
             else:
                 message_with_media = message
             
-            conversation = build_conversation_messages(history, message)
+            conversation = build_conversation_messages(history, message_with_media)
 
             # ── 5. Stream from Gemma 4 (Passing media) ──────────────────
             full_response = ""

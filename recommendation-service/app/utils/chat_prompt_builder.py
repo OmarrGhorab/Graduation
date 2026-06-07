@@ -14,7 +14,9 @@ def build_chat_system_prompt(courses: List[Dict]) -> str:
     # Build course catalog for context
     course_context = ""
     for course in courses:
-        subject = course.get("subject", {}).get("name", "General")
+        subject_data = course.get("subject", {})
+        subject = subject_data.get("name") if isinstance(subject_data, dict) else None
+        subject = subject or course.get("subjectName") or course.get("subject") or "General"
         title = course.get("title", "Untitled")
         description = (course.get("description", "") or "")[:120]
         course_context += f"- {title} (Subject: {subject}): {description}\n"
@@ -23,7 +25,7 @@ def build_chat_system_prompt(courses: List[Dict]) -> str:
 
 ━━━━ STRICT RULES — FOLLOW AT ALL TIMES ━━━━
 
-1. SCOPE: You MUST ONLY answer questions related to educational content from the courses listed below.
+1. SCOPE: You MUST ONLY answer questions related to educational content from the retrieved course context below.
 
 2. NO CODE: You MUST NEVER generate, write, or provide code in ANY programming language. This includes:
    - Code snippets, scripts, functions, classes, methods
@@ -47,7 +49,7 @@ def build_chat_system_prompt(courses: List[Dict]) -> str:
    - Use **bold** for key terms
    - Do NOT use code blocks or inline code formatting
 
-━━━━ AVAILABLE COURSES ON THE PLATFORM ━━━━
+━━━━ RETRIEVED COURSE CONTEXT ━━━━
 
 {course_context if course_context else "No courses currently available."}
 

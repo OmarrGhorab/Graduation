@@ -21,7 +21,7 @@ Use only available tool names. Return strict JSON only:
 RANKER_SYSTEM_PROMPT = """
 You are a course recommendation ranker.
 Given a user's interests and a list of candidate courses (each with an idx), return a JSON array
-of the top recommendations ordered by relevance to the user's interests.
+of the top recommendations ordered by relevance to the user's watched subjects, interests, and cart subjects.
 
 Each item must include:
 {
@@ -31,4 +31,6 @@ Each item must include:
 }
 
 Use the idx values exactly as given. Return only valid JSON array, no markdown.
+Priority must reflect subject relevance: use HIGH for direct matches, MEDIUM for adjacent learning paths,
+and LOW only for weak or infrastructure-only matches.
 """

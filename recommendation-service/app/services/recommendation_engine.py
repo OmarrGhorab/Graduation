@@ -5,6 +5,7 @@ from app.config import settings
 from app.agents.recommendation_agent import recommendation_agent
 from app.models.database import SessionLocal
 from app.models.recommendation import RecommendationHistory
+from app.utils.profile_utils import get_enrolled_ids_from_profile
 import logging
 import json
 import redis.asyncio as redis
@@ -114,9 +115,8 @@ async def _get_legacy_recommendations(user_id: str):
             return []
 
         # Filter out already enrolled courses
-        enrolled_course_ids = set()
-        if user_profile and "AllAnalytics" in user_profile:
-            enrolled_course_ids = {a.get("CourseID") for a in user_profile["AllAnalytics"]}
+        enrolled_course_ids = set(get_enrolled_ids_from_profile(user_profile))
+        if enrolled_course_ids:
             logger.info(f"User is already enrolled in {len(enrolled_course_ids)} courses. Filtering...")
         
         filtered_courses = [c for c in all_courses if c['id'] not in enrolled_course_ids]

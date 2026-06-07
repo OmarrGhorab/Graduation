@@ -12,6 +12,7 @@ from app.config import settings
 from app.models.cluster import ClusterMetadata, UserCluster
 from app.retrieval.embedding_service import embedding_service
 from app.retrieval.vector_store import vector_store
+from app.utils.profile_utils import list_course_analytics
 
 logger = logging.getLogger(__name__)
 
@@ -130,19 +131,19 @@ class ClusterService:
         for idx, user_id in enumerate(user_ids):
             cluster_id = int(labels[idx])
             profile = user_profiles.get(user_id, {}) or {}
-            for item in profile.get("AllAnalytics", []) or []:
+            for item in list_course_analytics(profile):
                 if not isinstance(item, dict):
                     continue
-                course_id = item.get("CourseID")
-                completion = float(item.get("CompletionPct", 0) or 0)
-                engagement = float(item.get("EngagementScore", 0) or 0)
+                course_id = item.get("CourseID") or item.get("courseId")
+                completion = float(item.get("CompletionPct", item.get("completionPct", 0)) or 0)
+                engagement = float(item.get("EngagementScore", item.get("engagementScore", 0)) or 0)
                 # Weight an interaction by how strongly the user engaged with it
                 weight = 1.0 + (completion / 100.0) + min(engagement / 100.0, 1.0)
                 if course_id:
                     cid = str(course_id)
                     per_cluster_courses[cluster_id][cid] += weight
                     per_cluster_course_members[cluster_id][cid].add(user_id)
-                subject_name = item.get("SubjectName")
+                subject_name = item.get("SubjectName") or item.get("subjectName")
                 if subject_name:
                     per_cluster_subjects[cluster_id][str(subject_name)] += weight
 
