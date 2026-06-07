@@ -4,6 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.routes import recommendations
 from app.api.routes import chat
 from app.api.routes import reports
+from app.api.routes import courses
 from app.config import settings
 from app.observability import setup_observability
 from app.utils.api_response import success_response
@@ -30,6 +31,7 @@ app.add_middleware(
 app.include_router(recommendations.router, prefix="/api/v1/recommendations", tags=["recommendations"])
 app.include_router(chat.router, prefix="/api/v1/chatbot", tags=["chatbot"])
 app.include_router(reports.router, prefix="/api/v1/reports", tags=["reports"])
+app.include_router(courses.router, prefix="/api/v1/courses", tags=["courses"])
 
 @app.get("/health")
 async def health_check():

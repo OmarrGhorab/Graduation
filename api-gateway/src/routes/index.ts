@@ -177,9 +177,34 @@ export function setupRoutes(app: Express, config: AppConfig): { wsProxy: any } {
     res.send("WS Path is reachable");
   });
 
+  const recommendationCoursesProxy = proxy(() => getNextServiceUrl(config.services.recommendation, "recommendation"), {
+    proxyReqPathResolver: (req) => req.originalUrl,
+    parseReqBody: false,
+    limit: "2gb"
+  });
+
+  const coursesServiceProxy = proxy(() => getNextServiceUrl(config.services.courses, "courses"), {
+    proxyReqPathResolver: (req) => req.originalUrl,
+    parseReqBody: false,
+    limit: "2gb"
+  });
+
+  app.use("/api/v1/courses", (req, res, next) => {
+    const rawSearch = typeof req.query.search === "string" ? req.query.search.trim() : "";
+    const isAutocomplete = req.path === "/autocomplete" || req.path.startsWith("/autocomplete/");
+    const isSemanticSearch = req.method === "GET" && rawSearch.length > 0;
+
+    if (isAutocomplete || isSemanticSearch) {
+      console.log(`[Proxy] Routing ${req.method} ${req.originalUrl} to Recommendation Service`);
+      return recommendationCoursesProxy(req, res, next);
+    }
+
+    console.log(`[Proxy] Routing ${req.method} ${req.originalUrl} to Courses Service`);
+    return coursesServiceProxy(req, res, next);
+  });
+
   // Courses & Attendance service routes
   const coursePaths = [
-    "/api/v1/courses",
     "/api/v1/subjects",
     "/api/v1/lessons",
     "/api/v1/attendance",
