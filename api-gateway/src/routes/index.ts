@@ -192,9 +192,11 @@ export function setupRoutes(app: Express, config: AppConfig): { wsProxy: any } {
   app.use("/api/v1/courses", (req, res, next) => {
     const rawSearch = typeof req.query.search === "string" ? req.query.search.trim() : "";
     const isAutocomplete = req.path === "/autocomplete" || req.path.startsWith("/autocomplete/");
+    const isAnalytics = req.path === "/analytics" || req.path.startsWith("/analytics/");
+    const isFeedback = req.path === "/feedback" || req.path.startsWith("/feedback/");
     const isSemanticSearch = req.method === "GET" && rawSearch.length > 0;
 
-    if (isAutocomplete || isSemanticSearch) {
+    if (isAutocomplete || isAnalytics || isFeedback || isSemanticSearch) {
       console.log(`[Proxy] Routing ${req.method} ${req.originalUrl} to Recommendation Service`);
       return recommendationCoursesProxy(req, res, next);
     }

@@ -2,10 +2,10 @@
 Reset and seed a coherent recommendation testbed.
 
 Creates:
-- 8 subjects/interests
+- 18 subjects/interests across tech and school domains
 - 1 teacher account
 - 10 student accounts with clear personas
-- 100 courses with titles that match their subjects
+- 200 courses with titles that match their subjects and learning stages
 - lessons, enrollments, watch events, lesson progress, and course analytics
 
 Run from repo root:
@@ -53,6 +53,16 @@ SUBJECTS = [
     ("Mobile Development", "React Native, Flutter, and mobile product delivery", "smartphone"),
     ("UI/UX Design", "Research, wireframes, visual systems, and product design", "layout"),
     ("Data Engineering", "Pipelines, warehouses, orchestration, and big data systems", "database"),
+    ("Mathematics", "Arithmetic, algebra, geometry, and school math practice", "calculator"),
+    ("Physics", "School physics, mechanics, electricity, and motion", "atom"),
+    ("Chemistry", "Atoms, reactions, equations, and lab problem solving", "flask"),
+    ("Biology", "Cells, ecosystems, genetics, and life sciences", "dna"),
+    ("Arabic", "Reading, grammar, writing, and literature in Arabic", "book-open"),
+    ("English", "Grammar, vocabulary, reading, and writing in English", "languages"),
+    ("French", "French communication, grammar, and school language practice", "languages"),
+    ("History", "Civilizations, timelines, and historical analysis", "landmark"),
+    ("Geography", "Maps, climate, regions, and geographic systems", "map"),
+    ("Primary Skills", "Foundational primary-stage numeracy, literacy, and science", "school"),
 ]
 
 COURSE_TOPICS = {
@@ -97,6 +107,70 @@ COURSE_TOPICS = {
         "Spark Fundamentals", "Streaming Data", "dbt Analytics Engineering", "Data Modeling",
         "Lakehouse Architecture", "Pipeline Monitoring", "Big Data Systems", "Data Quality",
     ],
+    "Mathematics": [
+        "Primary Arithmetic Builder", "Fractions and Decimals", "Pre-Algebra Foundations",
+        "Secondary Algebra Essentials", "Geometry Problem Solving", "Trigonometry Starter",
+        "Exam Math Revision", "Statistics Basics", "Mental Math Practice", "Word Problems Workshop",
+    ],
+    "Physics": [
+        "Primary Forces and Motion", "Middle School Energy Concepts", "Secondary Mechanics Essentials",
+        "Electricity and Circuits", "Waves and Sound", "Light and Optics", "Physics Exam Revision",
+        "Thermal Physics Basics", "Motion Graphs Workshop", "Lab Skills for Physics",
+    ],
+    "Chemistry": [
+        "Primary Matter Explorer", "Atoms and Molecules", "Chemical Reactions Essentials",
+        "Acids Bases and Salts", "Periodic Table Mastery", "Stoichiometry Fundamentals",
+        "Organic Chemistry Starter", "Chemistry Exam Revision", "Lab Safety and Measurement",
+        "Equations and Balancing Workshop",
+    ],
+    "Biology": [
+        "Living Things Basics", "Cells and Microscopes", "Human Body Systems",
+        "Plant Biology Essentials", "Genetics Foundations", "Ecosystems and Food Chains",
+        "Biology Exam Revision", "Microbiology Starter", "Evolution and Adaptation", "Lab Biology Practice",
+    ],
+    "Arabic": [
+        "Primary Arabic Reading", "Arabic Grammar Foundations", "Creative Writing in Arabic",
+        "Arabic Literature Essentials", "Secondary Arabic Exam Prep", "بلاغة and Expression Basics",
+        "Reading Comprehension Workshop", "Spelling and Dictation Practice", "Grammar Review Bootcamp", "Poetry Appreciation",
+    ],
+    "English": [
+        "Primary English Reading", "Grammar Foundations", "Vocabulary Builder",
+        "Writing Paragraphs and Essays", "Reading Comprehension Practice", "Secondary English Exam Prep",
+        "Speaking and Presentation Skills", "Listening Skills Workshop", "English for School Projects", "Grammar Review Essentials",
+    ],
+    "French": [
+        "French Alphabet and Sounds", "French Grammar Basics", "Everyday French Conversation",
+        "French Reading Practice", "Secondary French Exam Prep", "Verbs and Tenses Workshop",
+        "French Vocabulary Builder", "Listening in French", "Writing in French Basics", "French School Revision",
+    ],
+    "History": [
+        "Ancient Civilizations", "Islamic History Essentials", "Modern World History",
+        "Egyptian History Revision", "Historical Thinking Skills", "Timelines and Key Events",
+        "Secondary History Exam Prep", "Leaders and Revolutions", "Source Analysis Workshop", "History Project Lab",
+    ],
+    "Geography": [
+        "Maps and Landforms", "Climate and Weather", "Population and Settlement",
+        "Economic Geography Basics", "Africa and the Arab World", "Environmental Geography",
+        "Secondary Geography Exam Prep", "GIS Concepts Starter", "Earth Systems Workshop", "Map Skills Practice",
+    ],
+    "Primary Skills": [
+        "Primary Math Confidence", "Primary Reading Fluency", "Primary Science Discovery",
+        "Primary Writing Workshop", "Primary Problem Solving", "Primary English Starter",
+        "Primary Arabic Literacy", "Primary STEM Projects", "Primary Homework Support", "Primary Learning Skills",
+    ],
+}
+
+SUBJECT_LEVEL_PREFIXES = {
+    "Mathematics": ["Primary", "Preparatory", "Secondary"],
+    "Physics": ["Primary", "Preparatory", "Secondary"],
+    "Chemistry": ["Preparatory", "Secondary"],
+    "Biology": ["Primary", "Preparatory", "Secondary"],
+    "Arabic": ["Primary", "Preparatory", "Secondary"],
+    "English": ["Primary", "Preparatory", "Secondary"],
+    "French": ["Preparatory", "Secondary"],
+    "History": ["Preparatory", "Secondary"],
+    "Geography": ["Preparatory", "Secondary"],
+    "Primary Skills": ["Primary"],
 }
 
 PERSONAS = [
@@ -232,7 +306,7 @@ def create_users(cur, now: datetime, subject_ids: Dict[str, str]) -> Tuple[str, 
 
 
 def create_courses(cur, now: datetime, teacher_id: str, subject_ids: Dict[str, str]) -> Dict[str, Dict]:
-    print("Creating 100 coherent courses...")
+    print("Creating 200 coherent courses...")
     course_columns = table_columns(cur, "public", "courses")
     course_rows = []
     course_meta = {}
@@ -240,11 +314,13 @@ def create_courses(cur, now: datetime, teacher_id: str, subject_ids: Dict[str, s
     suffixes = ["Bootcamp", "Masterclass", "Workshop", "Essentials", "Project Lab", "Handbook"]
 
     subjects_cycle = [name for name, _, _ in SUBJECTS]
-    for idx in range(100):
+    for idx in range(200):
         subject = subjects_cycle[idx % len(subjects_cycle)]
         topics = COURSE_TOPICS[subject]
         topic = topics[(idx // len(subjects_cycle)) % len(topics)]
-        title = f"{random.choice(prefixes)} {topic} {random.choice(suffixes)}"
+        level_prefixes = SUBJECT_LEVEL_PREFIXES.get(subject, [])
+        level_prefix = f"{random.choice(level_prefixes)} " if level_prefixes else ""
+        title = f"{level_prefix}{random.choice(prefixes)} {topic} {random.choice(suffixes)}".strip()
         course_id = str(uuid.uuid4())
         total_lessons = random.randint(6, 14)
         is_paid = idx % 4 != 0
@@ -252,7 +328,7 @@ def create_courses(cur, now: datetime, teacher_id: str, subject_ids: Dict[str, s
         row = {
             "id": course_id,
             "title": title,
-            "description": f"{title} teaches {topic.lower()} as part of the {subject} learning path.",
+            "description": f"{title} teaches {topic.lower()} as part of the {subject} learning path with practical lessons and guided revision.",
             "subject_id": subject_ids[subject],
             "teacher_id": teacher_id,
             "delivery_type": delivery,

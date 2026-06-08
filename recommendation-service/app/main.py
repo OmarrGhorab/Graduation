@@ -1,6 +1,8 @@
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+import hashlib
+import json
 from app.api.routes import recommendations
 from app.api.routes import chat
 from app.api.routes import reports
@@ -12,6 +14,9 @@ import asyncio
 import logging
 
 logger = logging.getLogger(__name__)
+
+_COURSE_INDEX_FINGERPRINT_KEY = "startup:course-index:fingerprint"
+_CLUSTERING_FINGERPRINT_KEY = "startup:clustering:fingerprint"
 
 app = FastAPI(title=settings.APP_NAME)
 
@@ -107,6 +112,7 @@ async def startup_event():
     from app.models.chat import ChatSession, ChatMessage  # noqa: F401
     from app.models.report import StudentReport # noqa: F401
     from app.models.cluster import UserCluster, ClusterMetadata  # noqa: F401
+    from app.models.search import SearchFeedbackAggregate, SearchFeedbackEvent, SearchQueryAnalytics  # noqa: F401
     Base.metadata.create_all(bind=engine)
     logger.info("Database tables verified/created.")
 
@@ -117,6 +123,7 @@ async def _index_courses_on_startup():
     try:
         from app.services.course_client import course_client
         from app.jobs.embedding_jobs import refresh_course_embeddings
+        from app.retrieval.embedding_service import embedding_service
         from app.retrieval.vector_store import vector_store
         import redis.asyncio as aioredis
 
@@ -126,22 +133,39 @@ async def _index_courses_on_startup():
         if not courses:
             logger.warning("Startup indexing: no courses returned from courses-service")
             return
-        logger.info(f"Startup indexing: fetched {len(courses)} courses, building embeddings...")
-        await vector_store.recreate_course_collection(384)
-        await refresh_course_embeddings(courses)
+        logger.info(f"Startup indexing: fetched {len(courses)} courses")
+
+        r = aioredis.from_url(settings.REDIS_URL, decode_responses=True)
+        catalog_fingerprint = _build_course_catalog_fingerprint(courses)
+        course_client.set_cached_courses(courses, catalog_fingerprint)
+        previous_fingerprint = await r.get(_COURSE_INDEX_FINGERPRINT_KEY)
+
+        if previous_fingerprint == catalog_fingerprint:
+            logger.info("Startup indexing: course catalog unchanged, skipping full reindex")
+        else:
+            logger.info("Startup indexing: course catalog changed, refreshing embeddings incrementally...")
+            await refresh_course_embeddings(courses)
+            await r.set(_COURSE_INDEX_FINGERPRINT_KEY, catalog_fingerprint)
 
         # Flush stale retrieval caches so searches see the freshly indexed vectors
         try:
-            r = aioredis.from_url(settings.REDIS_URL, decode_responses=True)
-            keys = []
-            for pattern in ("retrieval:v1:*", "recommendation:v2:*"):
-                keys.extend(await r.keys(pattern))
-            if keys:
-                await r.delete(*keys)
-                logger.info(f"Flushed {len(keys)} stale recommendation cache entries")
-            await r.aclose()
+            if previous_fingerprint != catalog_fingerprint:
+                keys = []
+                for pattern in ("retrieval:v1:*", "recommendation:v2:*", "course-search:v1:*", "course-autocomplete:v1:*"):
+                    keys.extend(await r.keys(pattern))
+                if keys:
+                    await r.delete(*keys)
+                    logger.info(f"Flushed {len(keys)} stale recommendation/search cache entries")
         except Exception as exc:
             logger.warning(f"Recommendation cache flush failed: {exc}")
+        finally:
+            await r.aclose()
+
+        try:
+            embedding_service._load_model()
+            logger.info("Startup indexing: embedding model warmed")
+        except Exception as exc:
+            logger.warning(f"Embedding warm-up failed: {exc}")
     except Exception as exc:
         logger.error(f"Startup course indexing failed: {exc}", exc_info=True)
 
@@ -152,16 +176,50 @@ async def _index_courses_on_startup():
 async def _run_clustering_on_startup():
     try:
         from app.clustering.jobs import gather_known_user_ids, run_clustering_job_for_users
+        import redis.asyncio as aioredis
 
         user_ids = gather_known_user_ids()
         if not user_ids:
             logger.info("Startup clustering: no known users yet, skipping")
             return
+        fingerprint = _build_user_id_fingerprint(user_ids)
+        r = aioredis.from_url(settings.REDIS_URL, decode_responses=True)
+        previous_fingerprint = await r.get(_CLUSTERING_FINGERPRINT_KEY)
+        if previous_fingerprint == fingerprint:
+            logger.info("Startup clustering: known user set unchanged, skipping reclustering")
+            await r.aclose()
+            return
+
         logger.info(f"Startup clustering: clustering {len(user_ids)} known users...")
         result = await run_clustering_job_for_users(user_ids)
+        await r.set(_CLUSTERING_FINGERPRINT_KEY, fingerprint)
+        await r.aclose()
         logger.info(f"Startup clustering result: {result}")
     except Exception as exc:
         logger.error(f"Startup clustering failed: {exc}", exc_info=True)
+
+
+def _build_course_catalog_fingerprint(courses: list[dict]) -> str:
+    minimal_rows = []
+    for course in sorted(courses, key=lambda item: str(item.get("id"))):
+        minimal_rows.append(
+            {
+                "id": str(course.get("id")),
+                "title": course.get("title"),
+                "description": course.get("description"),
+                "subjectName": course.get("subjectName"),
+                "teacherName": course.get("teacherName"),
+                "enrollmentCount": course.get("enrollmentCount"),
+                "updatedAt": course.get("updatedAt"),
+            }
+        )
+    raw = json.dumps(minimal_rows, sort_keys=True, default=str).encode("utf-8")
+    return hashlib.sha256(raw).hexdigest()
+
+
+def _build_user_id_fingerprint(user_ids: list[str]) -> str:
+    raw = json.dumps(sorted(str(user_id) for user_id in user_ids)).encode("utf-8")
+    return hashlib.sha256(raw).hexdigest()
 
 if __name__ == "__main__":
     import uvicorn
