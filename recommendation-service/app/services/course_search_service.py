@@ -1,9 +1,11 @@
 import hashlib
 import json
 import logging
+import os
 from datetime import datetime
 from difflib import SequenceMatcher
-from typing import Any, Dict, List, Optional, Tuple
+from functools import lru_cache
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from app.clustering.cluster_service import ClusterService
 from app.config import settings
@@ -24,7 +26,14 @@ _DEFAULT_AUTOCOMPLETE_LIMIT = 8
 _MAX_AUTOCOMPLETE_LIMIT = 20
 _MIN_AUTOCOMPLETE_SEARCH_LENGTH = 2
 _SEMANTIC_MIN_SCORE = 0.15
+_SEMANTIC_ONLY_MIN_CONFIDENCE = 0.72
+_SEMANTIC_ONLY_TOP_GAP_MIN = 0.06
 _SHORT_QUERY_LEN = 4
+_MIN_CATALOG_TOKEN_LEN = 3
+_MAX_CATALOG_CORRECTION_DISTANCE = 2
+_CATALOG_TOKEN_SIMILARITY_MIN = 0.84
+_CATALOG_PREFIX_SIMILARITY_MIN = 0.74
+_CATALOG_PREFIX_EDIT_DISTANCE_MAX = 2
 _RECENT_SEARCH_TTL = 7 * 24 * 60 * 60
 _RECENT_SEARCH_LIMIT = 12
 _SEARCH_FEEDBACK_TTL = 30 * 24 * 60 * 60
@@ -85,7 +94,7 @@ def _search_cache_key(
         "limit": limit,
     }
     raw = json.dumps(payload, sort_keys=True, default=str).encode("utf-8")
-    return f"course-search:v1:{hashlib.sha256(raw).hexdigest()}"
+    return f"course-search:v2:{hashlib.sha256(raw).hexdigest()}"
 
 
 def _autocomplete_cache_key(user_id: str, search: str, limit: int) -> str:
@@ -93,7 +102,7 @@ def _autocomplete_cache_key(user_id: str, search: str, limit: int) -> str:
         {"user_id": user_id, "search": search.strip(), "limit": limit},
         sort_keys=True,
     ).encode("utf-8")
-    return f"course-autocomplete:v1:{hashlib.sha256(raw).hexdigest()}"
+    return f"course-autocomplete:v2:{hashlib.sha256(raw).hexdigest()}"
 
 
 def _recent_searches_key(user_id: str) -> str:
@@ -132,6 +141,18 @@ def _course_catalog_index(courses: List[Dict[str, Any]]) -> Dict[str, Dict[str, 
         if course_id is not None:
             indexed[str(course_id)] = course
     return indexed
+
+
+def _dedupe_preserve_order(items: List[str]) -> List[str]:
+    ordered: List[str] = []
+    seen = set()
+    for item in items:
+        clean = _normalize_text(item)
+        if not clean or clean in seen:
+            continue
+        seen.add(clean)
+        ordered.append(clean)
+    return ordered
 
 
 def _matches_filters(course: Dict[str, Any], filters: Dict[str, Any]) -> bool:
@@ -209,29 +230,286 @@ def _query_variants(search: str) -> List[str]:
         return []
 
     variants: List[str] = [normalized]
-    tokens = _tokenize(normalized)
 
     for key, expansions in _QUERY_EXPANSIONS.items():
         if key in normalized:
             variants.extend(expansions)
 
+    tokens = _tokenize(normalized)
     for token in tokens:
         variants.extend(_QUERY_EXPANSIONS.get(token, []))
 
-    deduped: List[str] = []
-    seen = set()
-    for variant in variants:
-        clean = _normalize_text(variant)
-        if not clean or clean in seen:
+    return _dedupe_preserve_order(variants)
+
+
+@lru_cache(maxsize=8192)
+def _levenshtein_distance(left: str, right: str) -> int:
+    if left == right:
+        return 0
+    if not left:
+        return len(right)
+    if not right:
+        return len(left)
+
+    previous = list(range(len(right) + 1))
+    for i, left_char in enumerate(left, start=1):
+        current = [i]
+        for j, right_char in enumerate(right, start=1):
+            cost = 0 if left_char == right_char else 1
+            current.append(
+                min(
+                    previous[j] + 1,
+                    current[j - 1] + 1,
+                    previous[j - 1] + cost,
+                )
+            )
+        previous = current
+    return previous[-1]
+
+
+@lru_cache(maxsize=8192)
+def _damerau_levenshtein_distance(left: str, right: str) -> int:
+    if left == right:
+        return 0
+    if not left:
+        return len(right)
+    if not right:
+        return len(left)
+
+    rows = len(left) + 1
+    cols = len(right) + 1
+    dp = [[0] * cols for _ in range(rows)]
+
+    for i in range(rows):
+        dp[i][0] = i
+    for j in range(cols):
+        dp[0][j] = j
+
+    for i in range(1, rows):
+        for j in range(1, cols):
+            cost = 0 if left[i - 1] == right[j - 1] else 1
+            dp[i][j] = min(
+                dp[i - 1][j] + 1,
+                dp[i][j - 1] + 1,
+                dp[i - 1][j - 1] + cost,
+            )
+
+            if (
+                i > 1
+                and j > 1
+                and left[i - 1] == right[j - 2]
+                and left[i - 2] == right[j - 1]
+            ):
+                dp[i][j] = min(dp[i][j], dp[i - 2][j - 2] + 1)
+
+    return dp[-1][-1]
+
+
+def _collect_catalog_terms(courses: List[Dict[str, Any]]) -> Set[str]:
+    terms: Set[str] = set()
+    for course in courses:
+        for field in (
+            course.get("title"),
+            course.get("subjectName"),
+            course.get("description"),
+            course.get("teacherName"),
+        ):
+            for token in _tokenize(field):
+                if len(token) >= _MIN_CATALOG_TOKEN_LEN:
+                    terms.add(token)
+    return terms
+
+
+def _catalog_phrase_aliases(courses: List[Dict[str, Any]]) -> Dict[str, str]:
+    aliases: Dict[str, str] = {}
+    phrase_fields = ("subjectName", "title")
+
+    for course in courses:
+        for field_name in phrase_fields:
+            phrase = _normalize_text(course.get(field_name))
+            tokens = [token for token in _tokenize(phrase) if len(token) >= 2]
+            if len(tokens) < 2:
+                continue
+
+            initials = "".join(token[0] for token in tokens)
+            if len(initials) >= 2:
+                aliases.setdefault(initials, phrase)
+
+            compact = "".join(tokens)
+            if len(compact) >= 6:
+                aliases.setdefault(compact, phrase)
+
+            for size in range(2, min(4, len(tokens)) + 1):
+                partial_tokens = tokens[:size]
+                partial_phrase = " ".join(partial_tokens)
+                partial_initials = "".join(token[0] for token in partial_tokens)
+                if len(partial_initials) >= 2:
+                    aliases.setdefault(partial_initials, partial_phrase)
+
+    return aliases
+
+
+def _catalog_token_aliases(catalog_terms: Set[str]) -> Dict[str, str]:
+    aliases: Dict[str, str] = {}
+    for term in sorted(catalog_terms):
+        if len(term) < _MIN_CATALOG_TOKEN_LEN:
             continue
-        seen.add(clean)
-        deduped.append(clean)
-    return deduped
+
+        prefix_len = min(max(_MIN_CATALOG_TOKEN_LEN, len(term) - 2), len(term) - 1)
+        if prefix_len >= _MIN_CATALOG_TOKEN_LEN:
+            aliases.setdefault(term[:prefix_len], term)
+
+        if len(term) >= 5:
+            aliases.setdefault(term[:-1], term)
+
+    return aliases
 
 
-def _semantic_query_text(search: str) -> str:
-    variants = _query_variants(search)
-    return ", ".join(variants) if variants else _normalize_text(search)
+def _catalog_aliases(courses: List[Dict[str, Any]], catalog_terms: Set[str]) -> Dict[str, str]:
+    aliases = _catalog_phrase_aliases(courses)
+    aliases.update({key: value for key, value in _catalog_token_aliases(catalog_terms).items() if key not in aliases})
+    return aliases
+
+
+def _prefix_windows(candidate: str, token_len: int) -> List[str]:
+    if not candidate or token_len <= 0:
+        return []
+    windows: List[str] = []
+    min_len = max(_MIN_CATALOG_TOKEN_LEN, token_len - 1)
+    max_len = min(len(candidate), token_len + 2)
+    for size in range(min_len, max_len + 1):
+        windows.append(candidate[:size])
+    return _dedupe_preserve_order(windows)
+
+
+def _best_catalog_term(token: str, catalog_terms: Optional[Set[str]]) -> str:
+    normalized_token = _normalize_text(token)
+    if not normalized_token or not catalog_terms or len(normalized_token) < _MIN_CATALOG_TOKEN_LEN:
+        return normalized_token
+    if normalized_token in catalog_terms:
+        return normalized_token
+
+    best_term = normalized_token
+    best_similarity = 0.0
+    best_distance: Optional[int] = None
+
+    for candidate in catalog_terms:
+        distance = _levenshtein_distance(normalized_token, candidate)
+        damerau_distance = _damerau_levenshtein_distance(normalized_token, candidate)
+
+        similarity = _fuzzy_similarity(normalized_token, candidate)
+        if candidate.startswith(normalized_token) or normalized_token.startswith(candidate):
+            similarity = max(similarity, 0.96)
+
+        common_prefix_len = len(os.path.commonprefix([normalized_token, candidate]))
+        prefix_similarity = 0.0
+        prefix_distance: Optional[int] = None
+        if len(normalized_token) >= 4:
+            for prefix_window in _prefix_windows(candidate, len(normalized_token)):
+                window_similarity = _fuzzy_similarity(normalized_token, prefix_window)
+                window_distance = _levenshtein_distance(normalized_token, prefix_window)
+                window_damerau_distance = _damerau_levenshtein_distance(normalized_token, prefix_window)
+                if (
+                    window_similarity > prefix_similarity
+                    or (
+                        window_similarity == prefix_similarity
+                        and (
+                            prefix_distance is None
+                            or min(window_distance, window_damerau_distance) < prefix_distance
+                        )
+                    )
+                ):
+                    prefix_similarity = window_similarity
+                    prefix_distance = min(window_distance, window_damerau_distance)
+
+        allow_standard_match = min(distance, damerau_distance) <= _MAX_CATALOG_CORRECTION_DISTANCE and similarity >= _CATALOG_TOKEN_SIMILARITY_MIN
+        allow_close_edit_match = (
+            len(normalized_token) >= 5
+            and len(candidate) >= 5
+            and min(distance, damerau_distance) <= _MAX_CATALOG_CORRECTION_DISTANCE
+            and normalized_token[0] == candidate[0]
+            and similarity >= 0.66
+        )
+        allow_prefix_match = (
+            common_prefix_len >= 2
+            and prefix_similarity >= _CATALOG_PREFIX_SIMILARITY_MIN
+            and (prefix_distance is not None and prefix_distance <= _CATALOG_PREFIX_EDIT_DISTANCE_MAX)
+        )
+
+        if not allow_standard_match and not allow_close_edit_match and not allow_prefix_match:
+            continue
+
+        if (
+            best_distance is None
+            or min(distance, damerau_distance) < best_distance
+            or (
+                min(distance, damerau_distance) == best_distance
+                and max(similarity, prefix_similarity) > best_similarity
+            )
+            or (
+                min(distance, damerau_distance) == best_distance
+                and max(similarity, prefix_similarity) == best_similarity
+                and abs(len(candidate) - len(normalized_token)) < abs(len(best_term) - len(normalized_token))
+            )
+        ):
+            best_term = candidate
+            best_similarity = max(similarity, prefix_similarity)
+            best_distance = min(distance, damerau_distance)
+
+    return best_term
+
+
+def _canonicalize_query_token_with_catalog(
+    token: str,
+    catalog_terms: Optional[Set[str]] = None,
+    catalog_aliases: Optional[Dict[str, str]] = None,
+) -> str:
+    normalized_token = _normalize_text(token)
+    if not normalized_token:
+        return normalized_token
+
+    if catalog_aliases:
+        alias = catalog_aliases.get(normalized_token)
+        if alias:
+            return alias
+
+    if " " in normalized_token:
+        return normalized_token
+    return _best_catalog_term(normalized_token, catalog_terms)
+
+
+def _normalized_query_forms(
+    search: str,
+    catalog_terms: Optional[Set[str]] = None,
+    catalog_aliases: Optional[Dict[str, str]] = None,
+) -> Dict[str, Any]:
+    normalized = _normalize_text(search)
+    raw_tokens = _tokenize(normalized)
+    canonical_tokens = [
+        _canonicalize_query_token_with_catalog(token, catalog_terms, catalog_aliases)
+        for token in raw_tokens
+    ]
+    corrected = " ".join(canonical_tokens) if canonical_tokens else normalized
+    base_text = corrected or normalized
+    variants = _query_variants(base_text)
+    variants = _dedupe_preserve_order(([normalized] if normalized else []) + ([corrected] if corrected else []) + variants)
+    return {
+        "normalized": normalized,
+        "corrected": corrected or normalized,
+        "tokens": raw_tokens,
+        "canonical_tokens": canonical_tokens,
+        "variants": variants,
+    }
+
+
+def _semantic_query_text(
+    search: str,
+    catalog_terms: Optional[Set[str]] = None,
+    catalog_aliases: Optional[Dict[str, str]] = None,
+) -> str:
+    forms = _normalized_query_forms(search, catalog_terms, catalog_aliases)
+    variants = forms["variants"]
+    return ", ".join(variants) if variants else forms["normalized"]
 
 
 def _tokenize(value: Any) -> List[str]:
@@ -312,8 +590,14 @@ def _autocomplete_subject_score(subject_name: str, search: str) -> float:
     return 0.0
 
 
-def _best_lexical_score(course: Dict[str, Any], search: str) -> Tuple[float, str]:
-    variants = _query_variants(search) or [_normalize_text(search)]
+def _best_lexical_score(
+    course: Dict[str, Any],
+    search: str,
+    catalog_terms: Optional[Set[str]] = None,
+    catalog_aliases: Optional[Dict[str, str]] = None,
+) -> Tuple[float, str]:
+    forms = _normalized_query_forms(search, catalog_terms, catalog_aliases)
+    variants = forms["variants"] or [forms["normalized"]]
     best_score = 0.0
     best_source = "none"
 
@@ -327,8 +611,14 @@ def _best_lexical_score(course: Dict[str, Any], search: str) -> Tuple[float, str
     return best_score, best_source
 
 
-def _best_keyword_score(course: Dict[str, Any], search: str) -> float:
-    variants = _query_variants(search) or [_normalize_text(search)]
+def _best_keyword_score(
+    course: Dict[str, Any],
+    search: str,
+    catalog_terms: Optional[Set[str]] = None,
+    catalog_aliases: Optional[Dict[str, str]] = None,
+) -> float:
+    forms = _normalized_query_forms(search, catalog_terms, catalog_aliases)
+    variants = forms["variants"] or [forms["normalized"]]
     best = 0.0
     for index, variant in enumerate(variants):
         score = _keyword_match_score(course, variant)
@@ -336,6 +626,77 @@ def _best_keyword_score(course: Dict[str, Any], search: str) -> float:
             score *= 0.72
         best = max(best, score)
     return best
+
+
+def _best_query_token_match(query_token: str, searchable_tokens: List[str]) -> float:
+    best = 0.0
+    for token in searchable_tokens:
+        if not token:
+            continue
+        if token.startswith(query_token):
+            best = max(best, 1.0)
+            continue
+        if query_token in token:
+            best = max(best, 0.95)
+            continue
+        best = max(best, _fuzzy_similarity(query_token, token))
+    return best
+
+
+def _token_coverage_metrics(
+    course: Dict[str, Any],
+    search: str,
+    catalog_terms: Optional[Set[str]] = None,
+    catalog_aliases: Optional[Dict[str, str]] = None,
+) -> Tuple[int, int, float]:
+    query_tokens = _normalized_query_forms(search, catalog_terms, catalog_aliases)["canonical_tokens"]
+    if not query_tokens:
+        return 0, 0, 0.0
+
+    title = _normalize_text(course.get("title"))
+    description = _normalize_text(course.get("description"))
+    subject_name = _normalize_text(course.get("subjectName"))
+    teacher_name = _normalize_text(course.get("teacherName"))
+    searchable_tokens = _tokenize(f"{title} {subject_name} {teacher_name} {description}")
+
+    matched_tokens = 0
+    strong_matches = 0
+    seen_query_tokens = set()
+
+    for query_token in query_tokens:
+        if query_token in seen_query_tokens:
+            continue
+        seen_query_tokens.add(query_token)
+
+        best_similarity = _best_query_token_match(query_token, searchable_tokens)
+        if best_similarity >= 0.82:
+            matched_tokens += 1
+        if best_similarity >= 0.92:
+            strong_matches += 1
+
+    coverage_ratio = matched_tokens / max(len(seen_query_tokens), 1)
+    return matched_tokens, strong_matches, coverage_ratio
+
+
+def _token_coverage_adjustment(
+    course: Dict[str, Any],
+    search: str,
+    catalog_terms: Optional[Set[str]] = None,
+    catalog_aliases: Optional[Dict[str, str]] = None,
+) -> float:
+    query_tokens = _normalized_query_forms(search, catalog_terms, catalog_aliases)["canonical_tokens"]
+    unique_query_tokens = list(dict.fromkeys(query_tokens))
+    if len(unique_query_tokens) < 2:
+        return 0.0
+
+    matched_tokens, strong_matches, coverage_ratio = _token_coverage_metrics(course, search, catalog_terms, catalog_aliases)
+    if matched_tokens == 0:
+        return -0.08
+    if coverage_ratio >= 1.0:
+        return 0.28 + (0.05 * strong_matches)
+    if coverage_ratio >= 0.5:
+        return -0.08 if strong_matches == 0 else 0.03 * strong_matches
+    return -0.06
 
 
 def _rank_course(
@@ -619,6 +980,34 @@ def _query_feedback_boost(course: Dict[str, Any], feedback_boosts: Dict[str, flo
     return 0.18 * min(max(score, 0.0), 1.0)
 
 
+def _is_low_confidence_semantic_only_query(
+    ranked: List[Dict[str, Any]],
+    search: str,
+    catalog_terms: Optional[Set[str]] = None,
+    catalog_aliases: Optional[Dict[str, str]] = None,
+) -> bool:
+    normalized_query = _normalize_text(search)
+    if not normalized_query or not ranked:
+        return False
+
+    lexical_signals = []
+    keyword_signals = []
+    for item in ranked[:5]:
+        lexical_score, _ = _best_lexical_score(item, normalized_query, catalog_terms, catalog_aliases)
+        keyword_score = _best_keyword_score(item, normalized_query, catalog_terms, catalog_aliases)
+        lexical_signals.append(lexical_score)
+        keyword_signals.append(keyword_score)
+
+    if max(lexical_signals, default=0.0) > 0 or max(keyword_signals, default=0.0) > 0:
+        return False
+
+    top_similarity = _safe_float(ranked[0].get("similarityScore"))
+    second_similarity = _safe_float(ranked[1].get("similarityScore")) if len(ranked) > 1 else 0.0
+    similarity_gap = top_similarity - second_similarity
+
+    return top_similarity < _SEMANTIC_ONLY_MIN_CONFIDENCE or similarity_gap < _SEMANTIC_ONLY_TOP_GAP_MIN
+
+
 def _semantic_match_source(lexical_score: float, search_boost: float, cluster_boost: float) -> str:
     sources = ["semantic"]
     if lexical_score > 0:
@@ -708,6 +1097,8 @@ async def semantic_course_search(
 
     courses = await course_client.get_all_courses()
     catalog = _course_catalog_index(courses)
+    catalog_terms = _collect_catalog_terms(courses)
+    catalog_aliases = _catalog_aliases(courses, catalog_terms)
     user_profile = await course_client.get_user_analytics_profile(user_id)
     watched_subjects = _extract_subject_preferences(user_profile)
     cluster_affinity = _get_cluster_affinity(user_id)
@@ -718,7 +1109,7 @@ async def semantic_course_search(
     hydrated_candidates: Dict[str, Dict[str, Any]] = {}
 
     try:
-        query_vector = await embedding_service.embed_text(_semantic_query_text(search), normalize=True)
+        query_vector = await embedding_service.embed_text(_semantic_query_text(search, catalog_terms, catalog_aliases), normalize=True)
         if query_vector:
             await vector_store.ensure_collections(len(query_vector))
             semantic_hits = await vector_store.search_courses(query_vector, top_k=candidate_limit)
@@ -729,11 +1120,12 @@ async def semantic_course_search(
                 course = catalog.get(str(hit.get("courseId")))
                 if not course or not _matches_filters(course, normalized_filters):
                     continue
-                lexical_score, _ = _best_lexical_score(course, search)
+                lexical_score, _ = _best_lexical_score(course, search, catalog_terms, catalog_aliases)
                 search_score, _, cluster_boost, _ = _rank_course(course, similarity, watched_subjects, cluster_affinity)
                 recent_boost = _recent_search_boost(course, recent_searches)
                 feedback_boost = _query_feedback_boost(course, query_feedback_boosts)
-                search_score += min(lexical_score / 20.0, 0.08) + recent_boost + feedback_boost
+                token_coverage_boost = _token_coverage_adjustment(course, search, catalog_terms, catalog_aliases)
+                search_score += min(lexical_score / 20.0, 0.08) + recent_boost + feedback_boost + token_coverage_boost
                 result = _project_course_result(
                     course,
                     search_score,
@@ -750,8 +1142,8 @@ async def semantic_course_search(
     for course in courses:
         if not _matches_filters(course, normalized_filters):
             continue
-        lexical_score, lexical_source = _best_lexical_score(course, search)
-        keyword_score = _best_keyword_score(course, search)
+        lexical_score, lexical_source = _best_lexical_score(course, search, catalog_terms, catalog_aliases)
+        keyword_score = _best_keyword_score(course, search, catalog_terms, catalog_aliases)
         if lexical_score <= 0 and keyword_score <= 0:
             continue
         course_id = str(course.get("id"))
@@ -759,7 +1151,8 @@ async def semantic_course_search(
         similarity = _safe_float(existing.get("similarityScore") if existing else 0.0)
         recent_boost = _recent_search_boost(course, recent_searches)
         feedback_boost = _query_feedback_boost(course, query_feedback_boosts)
-        lexical_total = max(lexical_score, keyword_score) + (0.25 * similarity) + recent_boost + feedback_boost
+        token_coverage_boost = _token_coverage_adjustment(course, search, catalog_terms, catalog_aliases)
+        lexical_total = max(lexical_score, keyword_score) + (0.25 * similarity) + recent_boost + feedback_boost + token_coverage_boost
         candidate = _project_course_result(course, lexical_total, similarity, f"lexical:{lexical_source}")
         if not existing or candidate["searchScore"] > existing["searchScore"]:
             hydrated_candidates[course_id] = candidate
@@ -776,6 +1169,9 @@ async def semantic_course_search(
             reverse=True,
         )
     else:
+        ranked = []
+
+    if ranked and _is_low_confidence_semantic_only_query(ranked, search, catalog_terms, catalog_aliases):
         ranked = []
 
     if not ranked:
@@ -828,6 +1224,10 @@ async def course_autocomplete(user_id: str, search: str, limit: int = _DEFAULT_A
 
     courses = await course_client.get_all_courses()
     catalog = _course_catalog_index(courses)
+    catalog_terms = _collect_catalog_terms(courses)
+    catalog_aliases = _catalog_aliases(courses, catalog_terms)
+    normalized_forms = _normalized_query_forms(search, catalog_terms, catalog_aliases)
+    subject_query = normalized_forms["corrected"]
 
     suggestions_by_course: Dict[str, Dict[str, Any]] = {}
     subject_scores: Dict[str, float] = {}
@@ -835,7 +1235,7 @@ async def course_autocomplete(user_id: str, search: str, limit: int = _DEFAULT_A
     query_feedback_boosts = await get_search_feedback_boosts(search)
 
     try:
-        query_vector = await embedding_service.embed_text(_semantic_query_text(search), normalize=True)
+        query_vector = await embedding_service.embed_text(_semantic_query_text(search, catalog_terms, catalog_aliases), normalize=True)
         if query_vector:
             await vector_store.ensure_collections(len(query_vector))
             hits = await vector_store.search_courses(query_vector, top_k=min(max(limit * 4, 16), 80))
@@ -846,7 +1246,7 @@ async def course_autocomplete(user_id: str, search: str, limit: int = _DEFAULT_A
                 course = catalog.get(str(hit.get("courseId")))
                 if not course:
                     continue
-                lexical_score, lexical_source = _best_lexical_score(course, search)
+                lexical_score, lexical_source = _best_lexical_score(course, search, catalog_terms, catalog_aliases)
                 if lexical_score <= lexical_floor and len(_normalize_text(search)) <= _SHORT_QUERY_LEN:
                     continue
                 feedback_boost = _query_feedback_boost(course, query_feedback_boosts)
@@ -868,7 +1268,7 @@ async def course_autocomplete(user_id: str, search: str, limit: int = _DEFAULT_A
                     suggestions_by_course[course_id] = candidate
                 subject_name = str(course.get("subjectName") or "").strip()
                 if subject_name:
-                    subject_score = _autocomplete_subject_score(subject_name, search)
+                    subject_score = _autocomplete_subject_score(subject_name, subject_query)
                     semantic_subject_score = 0.15 * similarity
                     subject_scores[subject_name] = max(
                         subject_scores.get(subject_name, 0.0),
@@ -879,7 +1279,7 @@ async def course_autocomplete(user_id: str, search: str, limit: int = _DEFAULT_A
 
     if not suggestions_by_course:
         for course in courses:
-            lexical_score, lexical_source = _best_lexical_score(course, search)
+            lexical_score, lexical_source = _best_lexical_score(course, search, catalog_terms, catalog_aliases)
             if lexical_score <= 0:
                 continue
             suggestions_by_course[str(course.get("id"))] = {
@@ -895,7 +1295,7 @@ async def course_autocomplete(user_id: str, search: str, limit: int = _DEFAULT_A
             }
             subject_name = str(course.get("subjectName") or "").strip()
             if subject_name:
-                subject_score = _autocomplete_subject_score(subject_name, search)
+                subject_score = _autocomplete_subject_score(subject_name, subject_query)
                 if subject_score > 0:
                     subject_scores[subject_name] = max(subject_scores.get(subject_name, 0.0), subject_score)
 

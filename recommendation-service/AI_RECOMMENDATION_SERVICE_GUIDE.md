@@ -156,22 +156,26 @@ This is why user-facing endpoints in this service are protected even though some
 
 ## 6. Startup Behavior
 
-On startup, the service does several important things:
+On startup, the service now does several important things:
 
 1. verifies/creates database tables
 2. ensures Qdrant collections exist
-3. fetches all courses
-4. recreates and reindexes the course vector collection
-5. clears stale search/recommendation cache
-6. runs clustering for known users
+3. fetches the full course catalog
+4. stores the catalog in-memory for later search hydration
+5. refreshes course embeddings only if the catalog fingerprint changed
+6. warms the embedding model so the first real search is much faster
+7. clears stale search/recommendation cache when indexing changed
+8. runs clustering for known users
 
 Startup logic:
 
 - [app/main.py](D:/Graduation/recommendation-service/app/main.py)
 
-Important consequence:
+Important consequences:
 
-- after service restart, course embeddings and user clustering are refreshed automatically
+- after service restart, the first semantic search no longer has to pay the full model load cost
+- repeated search requests do not need to refetch the full course catalog from the courses service every time
+- course embeddings and user clustering are refreshed automatically when the underlying data changes
 - persistent search feedback and query analytics remain in Postgres across restarts
 
 ## 7. Vector Database Design
@@ -475,9 +479,9 @@ Search ranking uses:
 
 Search does not exclude enrolled courses.
 
-### 12.4 Query Expansion
+### 12.4 Query Expansion And Catalog-Driven Normalization
 
-The search service expands some common intent phrases into practical alternatives before embedding and lexical matching.
+The search service still expands some common intent phrases into practical alternatives before embedding and lexical matching.
 
 Examples:
 
@@ -487,6 +491,34 @@ Examples:
 - `project based` -> `project`, `capstone`, `lab`
 
 This helps search match the way users phrase intent, even when the exact catalog wording differs.
+
+In addition, the search service now builds normalization hints from the live course catalog itself.
+
+That means search understanding is no longer mainly dependent on a manually maintained shortcut dictionary.
+
+Instead, it derives candidate normalization targets from:
+
+- subject names
+- course title phrases
+- catalog tokens found in titles/descriptions/subjects
+- phrase initials such as `ml` from `machine learning`
+- compact phrase forms derived from real catalog text
+
+Then it applies typo handling against those real catalog terms using:
+
+- standard edit distance
+- Damerau-Levenshtein distance for swapped-letter typos
+- prefix-window similarity for partial words
+- close-edit acceptance rules for near-miss subject tokens
+
+This is why search can now recover better from inputs like:
+
+- `chemstry`
+- `chestr`
+- `phsyi`
+- `pyhten`
+
+without hardcoding each subject or course name individually.
 
 ### 12.5 Search Feedback Learning
 
@@ -517,7 +549,24 @@ The service stores feedback in two places:
 
 That means repeated positive interactions for the same query/course pair can increasingly boost that course for future similar searches.
 
-### 12.6 Search Fallback
+### 12.6 Why This Search Is Better
+
+The current search quality is better than the earlier implementation for a few concrete reasons:
+
+1. It is still deterministic and fast on warm runs.
+2. It does not rely on an LLM for query understanding or ranking.
+3. It learns vocabulary from the live catalog automatically as courses change.
+4. It handles partial words, missing letters, and transposed letters more robustly.
+5. It combines semantic retrieval with lexical safeguards so short or noisy queries do not drift as easily into unrelated courses.
+6. It uses persistent feedback and recent-search signals as tie-breakers instead of overwhelming typed intent.
+
+In practice that gives a better balance:
+
+- more forgiving than plain SQL keyword search
+- more precise than pure vector similarity
+- less maintenance-heavy than a hand-written alias map
+
+### 12.7 Search Fallback
 
 If semantic search yields no useful result:
 
@@ -553,7 +602,7 @@ That feels wrong for a search box.
 
 ### 13.2 Current Autocomplete Strategy
 
-Autocomplete is now lexical-first hybrid ranking.
+Autocomplete is now lexical-first hybrid ranking with the same catalog-driven normalization layer used by full search.
 
 It does:
 
@@ -563,6 +612,13 @@ It does:
 4. apply query-feedback boosts when the same short query has strong positive history
 5. use semantic similarity as a secondary helper
 6. produce course suggestions and deduped subject suggestions
+
+So short search-box queries benefit from:
+
+- semantic candidate retrieval
+- strong lexical gates
+- typo normalization against live catalog vocabulary
+- feedback-aware reranking
 
 ### 13.3 Lexical Signals Used
 
@@ -731,11 +787,11 @@ Redis is used heavily.
 
 ### 16.3 Search Cache
 
-- `course-search:v1:{hash}`
+- `course-search:v2:{hash}`
 
 ### 16.4 Autocomplete Cache
 
-- `course-autocomplete:v1:{hash}`
+- `course-autocomplete:v2:{hash}`
 
 ### 16.5 Search Feedback Cache
 
@@ -753,6 +809,13 @@ Caching keeps:
 - course retrieval reusable
 - chat course catalog fetches lighter
 - recent feedback and recent searches available as low-latency ranking signals
+
+In the current implementation, search is also faster because:
+
+- the embedding model is warmed during startup
+- the service keeps an in-memory copy of the course catalog after startup fetch
+- semantic embeddings are cached in Redis
+- search results and autocomplete results are cached separately
 
 ## 17. Exposed API Surface
 

@@ -1,6 +1,7 @@
 import httpx
 from app.config import settings
 import logging
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -8,9 +9,24 @@ class CourseClient:
     def __init__(self):
         self.base_url = settings.COURSES_SERVICE_URL
         self.secret = settings.INTERNAL_SERVICE_SECRET
+        self._catalog_cache: List[Dict[str, Any]] = []
+        self._catalog_cache_fingerprint: Optional[str] = None
+
+    def get_cached_courses(self) -> List[Dict[str, Any]]:
+        return list(self._catalog_cache)
+
+    def set_cached_courses(self, courses: List[Dict[str, Any]], fingerprint: Optional[str] = None) -> None:
+        self._catalog_cache = list(courses or [])
+        self._catalog_cache_fingerprint = fingerprint
+
+    def clear_cached_courses(self) -> None:
+        self._catalog_cache = []
+        self._catalog_cache_fingerprint = None
 
     async def get_all_courses(self):
         """Fetches the full course catalog from the internal endpoint."""
+        if self._catalog_cache:
+            return list(self._catalog_cache)
         async with httpx.AsyncClient() as client:
             try:
                 response = await client.get(
@@ -20,7 +36,9 @@ class CourseClient:
                 )
                 response.raise_for_status()
                 data = response.json()
-                return data.get("data", [])
+                courses = data.get("data", [])
+                self._catalog_cache = list(courses)
+                return courses
             except Exception as e:
                 logger.error(f"Failed to fetch courses: {str(e)}")
                 return []
