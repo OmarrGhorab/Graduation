@@ -1,12 +1,14 @@
 import hashlib
 import json
 import logging
+from datetime import datetime
 from difflib import SequenceMatcher
 from typing import Any, Dict, List, Optional, Tuple
 
 from app.clustering.cluster_service import ClusterService
 from app.config import settings
 from app.models.database import SessionLocal
+from app.models.search import SearchFeedbackAggregate, SearchFeedbackEvent, SearchQueryAnalytics
 from app.retrieval.embedding_service import embedding_service
 from app.retrieval.hybrid_search import redis_conn
 from app.retrieval.vector_store import vector_store
@@ -23,6 +25,27 @@ _MAX_AUTOCOMPLETE_LIMIT = 20
 _MIN_AUTOCOMPLETE_SEARCH_LENGTH = 2
 _SEMANTIC_MIN_SCORE = 0.15
 _SHORT_QUERY_LEN = 4
+_RECENT_SEARCH_TTL = 7 * 24 * 60 * 60
+_RECENT_SEARCH_LIMIT = 12
+_SEARCH_FEEDBACK_TTL = 30 * 24 * 60 * 60
+
+_QUERY_EXPANSIONS: Dict[str, List[str]] = {
+    "hands-on": ["practical", "workshop", "lab", "bootcamp", "project based", "applied"],
+    "hands on": ["practical", "workshop", "lab", "bootcamp", "project based", "applied"],
+    "beginner": ["intro", "introduction", "fundamentals", "essentials", "starter"],
+    "advanced": ["professional", "masterclass", "deep dive", "expert"],
+    "real world": ["practical", "project based", "applied", "capstone"],
+    "project based": ["project", "capstone", "lab", "workshop", "practical"],
+    "interview prep": ["interview", "practice", "questions", "assessment"],
+    "fast": ["accelerated", "quick start", "essentials", "crash course"],
+}
+
+_SEARCH_FEEDBACK_WEIGHTS: Dict[str, float] = {
+    "click": 1.0,
+    "preview": 1.25,
+    "watch": 1.5,
+    "enroll": 2.5,
+}
 
 
 def _safe_float(value: Any, default: float = 0.0) -> float:
@@ -71,6 +94,16 @@ def _autocomplete_cache_key(user_id: str, search: str, limit: int) -> str:
         sort_keys=True,
     ).encode("utf-8")
     return f"course-autocomplete:v1:{hashlib.sha256(raw).hexdigest()}"
+
+
+def _recent_searches_key(user_id: str) -> str:
+    return f"course-search:recent:{user_id}"
+
+
+def _search_feedback_key(query: str) -> str:
+    normalized = _normalize_text(query)
+    digest = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+    return f"course-search:feedback:{digest}"
 
 
 def _extract_subject_preferences(user_profile: Dict[str, Any]) -> set[str]:
@@ -170,6 +203,37 @@ def _keyword_match_score(course: Dict[str, Any], search: str) -> float:
     return score
 
 
+def _query_variants(search: str) -> List[str]:
+    normalized = _normalize_text(search)
+    if not normalized:
+        return []
+
+    variants: List[str] = [normalized]
+    tokens = _tokenize(normalized)
+
+    for key, expansions in _QUERY_EXPANSIONS.items():
+        if key in normalized:
+            variants.extend(expansions)
+
+    for token in tokens:
+        variants.extend(_QUERY_EXPANSIONS.get(token, []))
+
+    deduped: List[str] = []
+    seen = set()
+    for variant in variants:
+        clean = _normalize_text(variant)
+        if not clean or clean in seen:
+            continue
+        seen.add(clean)
+        deduped.append(clean)
+    return deduped
+
+
+def _semantic_query_text(search: str) -> str:
+    variants = _query_variants(search)
+    return ", ".join(variants) if variants else _normalize_text(search)
+
+
 def _tokenize(value: Any) -> List[str]:
     normalized = _normalize_text(value)
     if not normalized:
@@ -248,6 +312,32 @@ def _autocomplete_subject_score(subject_name: str, search: str) -> float:
     return 0.0
 
 
+def _best_lexical_score(course: Dict[str, Any], search: str) -> Tuple[float, str]:
+    variants = _query_variants(search) or [_normalize_text(search)]
+    best_score = 0.0
+    best_source = "none"
+
+    for index, variant in enumerate(variants):
+        score, source = _autocomplete_lexical_score(course, variant)
+        weight = 1.0 if index == 0 else 0.72
+        adjusted = score * weight
+        if adjusted > best_score:
+            best_score = adjusted
+            best_source = source if index == 0 else f"expanded:{source}"
+    return best_score, best_source
+
+
+def _best_keyword_score(course: Dict[str, Any], search: str) -> float:
+    variants = _query_variants(search) or [_normalize_text(search)]
+    best = 0.0
+    for index, variant in enumerate(variants):
+        score = _keyword_match_score(course, variant)
+        if index > 0:
+            score *= 0.72
+        best = max(best, score)
+    return best
+
+
 def _rank_course(
     course: Dict[str, Any],
     similarity_score: float,
@@ -262,6 +352,311 @@ def _rank_course(
 
     search_score = similarity_score + subject_boost + cluster_boost + (0.005 * popularity_score) + (0.002 * teacher_quality)
     return search_score, subject_boost, cluster_boost, popularity_score
+
+
+async def log_recent_search(user_id: str, search: str) -> None:
+    normalized = _normalize_text(search)
+    if not normalized:
+        return
+    try:
+        existing = await get_recent_searches(user_id)
+        merged = [normalized] + [item for item in existing if item != normalized]
+        await redis_conn.setex(
+            _recent_searches_key(user_id),
+            _RECENT_SEARCH_TTL,
+            json.dumps(merged[:_RECENT_SEARCH_LIMIT]),
+        )
+    except Exception as exc:
+        logger.warning(f"Failed to log recent search for {user_id}: {exc}")
+
+
+def _upsert_query_analytics(
+    normalized_query: str,
+    display_query: str,
+    *,
+    search_increment: int = 0,
+    zero_result_increment: int = 0,
+    event_type: Optional[str] = None,
+) -> None:
+    db = SessionLocal()
+    if db is None:
+        return
+    try:
+        analytics = (
+            db.query(SearchQueryAnalytics)
+            .filter(SearchQueryAnalytics.normalized_query == normalized_query)
+            .first()
+        )
+        now = datetime.utcnow()
+        if not analytics:
+            analytics = SearchQueryAnalytics(
+                normalized_query=normalized_query,
+                display_query=display_query,
+                total_searches=0,
+                zero_result_searches=0,
+                total_clicks=0,
+                total_previews=0,
+                total_watches=0,
+                total_enrolls=0,
+                last_searched_at=now,
+                last_feedback_at=None,
+            )
+            db.add(analytics)
+
+        if search_increment:
+            analytics.total_searches += search_increment
+            analytics.last_searched_at = now
+            if display_query:
+                analytics.display_query = display_query
+
+        if zero_result_increment:
+            analytics.zero_result_searches += zero_result_increment
+
+        if event_type:
+            if event_type == "click":
+                analytics.total_clicks += 1
+            elif event_type == "preview":
+                analytics.total_previews += 1
+            elif event_type == "watch":
+                analytics.total_watches += 1
+            elif event_type == "enroll":
+                analytics.total_enrolls += 1
+            analytics.last_feedback_at = now
+
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        logger.warning(f"Failed to update search query analytics for '{display_query}': {exc}")
+    finally:
+        if hasattr(db, "close"):
+            db.close()
+
+
+async def track_search_analytics(search: str, result_count: int) -> None:
+    normalized_query = _normalize_text(search)
+    if not normalized_query:
+        return
+
+    _upsert_query_analytics(
+        normalized_query,
+        search.strip(),
+        search_increment=1,
+        zero_result_increment=1 if result_count == 0 else 0,
+    )
+
+
+async def get_recent_searches(user_id: str) -> List[str]:
+    try:
+        cached = await redis_conn.get(_recent_searches_key(user_id))
+        if not cached:
+            return []
+        parsed = json.loads(cached)
+        if isinstance(parsed, list):
+            return [str(item).strip().lower() for item in parsed if str(item).strip()]
+    except Exception as exc:
+        logger.warning(f"Failed to read recent searches for {user_id}: {exc}")
+    return []
+
+
+async def record_search_feedback(query: str, course_id: str, event_type: str) -> None:
+    normalized_query = _normalize_text(query)
+    normalized_event = _normalize_text(event_type)
+    if not normalized_query or not course_id or normalized_event not in _SEARCH_FEEDBACK_WEIGHTS:
+        return
+
+    key = _search_feedback_key(normalized_query)
+    try:
+        cached = await redis_conn.get(key)
+        payload = json.loads(cached) if cached else {}
+        if not isinstance(payload, dict):
+            payload = {}
+
+        course_stats = payload.get(str(course_id), {})
+        if not isinstance(course_stats, dict):
+            course_stats = {}
+
+        course_stats["score"] = float(course_stats.get("score", 0.0)) + _SEARCH_FEEDBACK_WEIGHTS[normalized_event]
+        course_stats["events"] = int(course_stats.get("events", 0)) + 1
+        course_stats["lastEvent"] = normalized_event
+        payload[str(course_id)] = course_stats
+
+        await redis_conn.setex(key, _SEARCH_FEEDBACK_TTL, json.dumps(payload))
+    except Exception as exc:
+        logger.warning(f"Failed to record search feedback for '{query}': {exc}")
+
+    db = SessionLocal()
+    if db is None:
+        _upsert_query_analytics(normalized_query, query.strip(), event_type=normalized_event)
+        return
+    try:
+        now = datetime.utcnow()
+        weight = _SEARCH_FEEDBACK_WEIGHTS[normalized_event]
+
+        db.add(
+            SearchFeedbackEvent(
+                user_id=None,
+                query=query.strip(),
+                normalized_query=normalized_query,
+                course_id=str(course_id),
+                event_type=normalized_event,
+                weight=weight,
+                created_at=now,
+            )
+        )
+
+        aggregate = (
+            db.query(SearchFeedbackAggregate)
+            .filter(
+                SearchFeedbackAggregate.normalized_query == normalized_query,
+                SearchFeedbackAggregate.course_id == str(course_id),
+            )
+            .first()
+        )
+        if not aggregate:
+            aggregate = SearchFeedbackAggregate(
+                normalized_query=normalized_query,
+                course_id=str(course_id),
+                total_score=0.0,
+                total_events=0,
+                click_count=0,
+                preview_count=0,
+                watch_count=0,
+                enroll_count=0,
+                last_event_at=now,
+            )
+            db.add(aggregate)
+
+        aggregate.total_score += weight
+        aggregate.total_events += 1
+        aggregate.last_event_at = now
+        if normalized_event == "click":
+            aggregate.click_count += 1
+        elif normalized_event == "preview":
+            aggregate.preview_count += 1
+        elif normalized_event == "watch":
+            aggregate.watch_count += 1
+        elif normalized_event == "enroll":
+            aggregate.enroll_count += 1
+
+        db.commit()
+    except Exception as exc:
+        if hasattr(db, "rollback"):
+            db.rollback()
+        logger.warning(f"Failed to persist search feedback for '{query}': {exc}")
+    finally:
+        if hasattr(db, "close"):
+            db.close()
+
+    _upsert_query_analytics(normalized_query, query.strip(), event_type=normalized_event)
+
+
+async def get_search_feedback_boosts(search: str) -> Dict[str, float]:
+    normalized_query = _normalize_text(search)
+    if not normalized_query:
+        return {}
+
+    key = _search_feedback_key(normalized_query)
+    combined_scores: Dict[str, float] = {}
+    try:
+        cached = await redis_conn.get(key)
+        if cached:
+            payload = json.loads(cached)
+            if isinstance(payload, dict):
+                for course_id, stats in payload.items():
+                    if not isinstance(stats, dict):
+                        continue
+                    combined_scores[str(course_id)] = max(
+                        combined_scores.get(str(course_id), 0.0),
+                        _safe_float(stats.get("score")),
+                    )
+    except Exception as exc:
+        logger.warning(f"Failed to read search feedback boosts for '{search}': {exc}")
+
+    db = SessionLocal()
+    if db is None:
+        max_score = max(combined_scores.values(), default=0.0) or 1.0
+        return {
+            course_id: min(score / max_score, 1.0)
+            for course_id, score in combined_scores.items()
+        }
+    try:
+        rows = (
+            db.query(SearchFeedbackAggregate)
+            .filter(SearchFeedbackAggregate.normalized_query == normalized_query)
+            .all()
+        )
+        for row in rows:
+            course_id = str(row.course_id)
+            combined_scores[course_id] = max(combined_scores.get(course_id, 0.0), _safe_float(row.total_score))
+    except Exception as exc:
+        logger.warning(f"Failed to read persistent search feedback boosts for '{search}': {exc}")
+    finally:
+        if hasattr(db, "close"):
+            db.close()
+
+    max_score = max(combined_scores.values(), default=0.0) or 1.0
+    boosts: Dict[str, float] = {}
+    for course_id, score in combined_scores.items():
+        boosts[course_id] = min(score / max_score, 1.0)
+    return boosts
+
+
+def _recent_search_boost(course: Dict[str, Any], recent_searches: List[str]) -> float:
+    if not recent_searches:
+        return 0.0
+    best = 0.0
+    for recent in recent_searches[:5]:
+        lexical, _ = _best_lexical_score(course, recent)
+        if lexical > 0:
+            best = max(best, min(lexical / 12.0, 1.0))
+    return 0.04 * best
+
+
+def _query_feedback_boost(course: Dict[str, Any], feedback_boosts: Dict[str, float]) -> float:
+    if not feedback_boosts:
+        return 0.0
+    score = feedback_boosts.get(str(course.get("id")), 0.0)
+    return 0.18 * min(max(score, 0.0), 1.0)
+
+
+def _semantic_match_source(lexical_score: float, search_boost: float, cluster_boost: float) -> str:
+    sources = ["semantic"]
+    if lexical_score > 0:
+        sources.append("lexical")
+    if search_boost > 0:
+        sources.append("recent_search")
+    if cluster_boost > 0:
+        sources.append("cluster")
+    return "+".join(sources)
+
+
+def _select_diverse_results(items: List[Dict[str, Any]], limit: int) -> List[Dict[str, Any]]:
+    if len(items) <= limit:
+        return items
+
+    selected: List[Dict[str, Any]] = []
+    subject_counts: Dict[str, int] = {}
+
+    for item in items:
+        if len(selected) >= limit:
+            break
+        subject = _normalize_text(item.get("subjectName")) or "__unknown__"
+        count = subject_counts.get(subject, 0)
+        if count >= 2:
+            continue
+        selected.append(item)
+        subject_counts[subject] = count + 1
+
+    if len(selected) < limit:
+        selected_ids = {str(item.get("id")) for item in selected}
+        for item in items:
+            if len(selected) >= limit:
+                break
+            if str(item.get("id")) in selected_ids:
+                continue
+            selected.append(item)
+
+    return selected
 
 
 def _project_course_result(
@@ -316,12 +711,14 @@ async def semantic_course_search(
     user_profile = await course_client.get_user_analytics_profile(user_id)
     watched_subjects = _extract_subject_preferences(user_profile)
     cluster_affinity = _get_cluster_affinity(user_id)
+    recent_searches = await get_recent_searches(user_id)
+    query_feedback_boosts = await get_search_feedback_boosts(search)
 
     candidate_limit = min(max(limit * 5, 40), 200)
-    hydrated_semantic: List[Dict[str, Any]] = []
+    hydrated_candidates: Dict[str, Dict[str, Any]] = {}
 
     try:
-        query_vector = await embedding_service.embed_text(search, normalize=True)
+        query_vector = await embedding_service.embed_text(_semantic_query_text(search), normalize=True)
         if query_vector:
             await vector_store.ensure_collections(len(query_vector))
             semantic_hits = await vector_store.search_courses(query_vector, top_k=candidate_limit)
@@ -332,21 +729,44 @@ async def semantic_course_search(
                 course = catalog.get(str(hit.get("courseId")))
                 if not course or not _matches_filters(course, normalized_filters):
                     continue
-                search_score, _, _, _ = _rank_course(course, similarity, watched_subjects, cluster_affinity)
-                hydrated_semantic.append(
-                    _project_course_result(course, search_score, similarity, "semantic")
+                lexical_score, _ = _best_lexical_score(course, search)
+                search_score, _, cluster_boost, _ = _rank_course(course, similarity, watched_subjects, cluster_affinity)
+                recent_boost = _recent_search_boost(course, recent_searches)
+                feedback_boost = _query_feedback_boost(course, query_feedback_boosts)
+                search_score += min(lexical_score / 20.0, 0.08) + recent_boost + feedback_boost
+                result = _project_course_result(
+                    course,
+                    search_score,
+                    similarity,
+                    _semantic_match_source(lexical_score, recent_boost + feedback_boost, cluster_boost),
                 )
+                course_id = str(course.get("id"))
+                existing = hydrated_candidates.get(course_id)
+                if not existing or result["searchScore"] > existing["searchScore"]:
+                    hydrated_candidates[course_id] = result
     except Exception as exc:
         logger.warning(f"Semantic course search failed for '{search}': {exc}")
 
-    if hydrated_semantic:
-        deduped: Dict[str, Dict[str, Any]] = {}
-        for item in hydrated_semantic:
-            cid = str(item.get("id"))
-            if cid not in deduped or item["searchScore"] > deduped[cid]["searchScore"]:
-                deduped[cid] = item
+    for course in courses:
+        if not _matches_filters(course, normalized_filters):
+            continue
+        lexical_score, lexical_source = _best_lexical_score(course, search)
+        keyword_score = _best_keyword_score(course, search)
+        if lexical_score <= 0 and keyword_score <= 0:
+            continue
+        course_id = str(course.get("id"))
+        existing = hydrated_candidates.get(course_id)
+        similarity = _safe_float(existing.get("similarityScore") if existing else 0.0)
+        recent_boost = _recent_search_boost(course, recent_searches)
+        feedback_boost = _query_feedback_boost(course, query_feedback_boosts)
+        lexical_total = max(lexical_score, keyword_score) + (0.25 * similarity) + recent_boost + feedback_boost
+        candidate = _project_course_result(course, lexical_total, similarity, f"lexical:{lexical_source}")
+        if not existing or candidate["searchScore"] > existing["searchScore"]:
+            hydrated_candidates[course_id] = candidate
+
+    if hydrated_candidates:
         ranked = sorted(
-            deduped.values(),
+            hydrated_candidates.values(),
             key=lambda item: (
                 item.get("searchScore", 0.0),
                 item.get("similarityScore", 0.0),
@@ -381,7 +801,7 @@ async def semantic_course_search(
 
     total = len(ranked)
     start = (page - 1) * limit
-    paged = ranked[start:start + limit]
+    paged = _select_diverse_results(ranked[start:], limit)
     response = {
         "data": paged,
         "meta": {
@@ -390,6 +810,7 @@ async def semantic_course_search(
             "limit": limit,
         },
     }
+    await track_search_analytics(search, total)
     await _write_cache(cache_key, response)
     return response
 
@@ -411,9 +832,10 @@ async def course_autocomplete(user_id: str, search: str, limit: int = _DEFAULT_A
     suggestions_by_course: Dict[str, Dict[str, Any]] = {}
     subject_scores: Dict[str, float] = {}
     lexical_floor = 0.1 if len(_normalize_text(search)) <= _SHORT_QUERY_LEN else 0.0
+    query_feedback_boosts = await get_search_feedback_boosts(search)
 
     try:
-        query_vector = await embedding_service.embed_text(search, normalize=True)
+        query_vector = await embedding_service.embed_text(_semantic_query_text(search), normalize=True)
         if query_vector:
             await vector_store.ensure_collections(len(query_vector))
             hits = await vector_store.search_courses(query_vector, top_k=min(max(limit * 4, 16), 80))
@@ -424,10 +846,11 @@ async def course_autocomplete(user_id: str, search: str, limit: int = _DEFAULT_A
                 course = catalog.get(str(hit.get("courseId")))
                 if not course:
                     continue
-                lexical_score, lexical_source = _autocomplete_lexical_score(course, search)
+                lexical_score, lexical_source = _best_lexical_score(course, search)
                 if lexical_score <= lexical_floor and len(_normalize_text(search)) <= _SHORT_QUERY_LEN:
                     continue
-                final_score = lexical_score + (0.35 * similarity)
+                feedback_boost = _query_feedback_boost(course, query_feedback_boosts)
+                final_score = lexical_score + (0.35 * similarity) + feedback_boost
                 course_id = str(course.get("id"))
                 existing = suggestions_by_course.get(course_id)
                 candidate = {
@@ -456,7 +879,7 @@ async def course_autocomplete(user_id: str, search: str, limit: int = _DEFAULT_A
 
     if not suggestions_by_course:
         for course in courses:
-            lexical_score, lexical_source = _autocomplete_lexical_score(course, search)
+            lexical_score, lexical_source = _best_lexical_score(course, search)
             if lexical_score <= 0:
                 continue
             suggestions_by_course[str(course.get("id"))] = {
@@ -505,3 +928,106 @@ async def course_autocomplete(user_id: str, search: str, limit: int = _DEFAULT_A
     payload = {"data": combined}
     await _write_cache(cache_key, payload)
     return combined
+
+
+def get_top_clicked_queries(limit: int = 10) -> List[Dict[str, Any]]:
+    db = SessionLocal()
+    if db is None:
+        return []
+    try:
+        query = db.query(SearchQueryAnalytics)
+        if hasattr(SearchQueryAnalytics.total_clicks, "desc"):
+            query = query.order_by(
+                SearchQueryAnalytics.total_clicks.desc(),
+                SearchQueryAnalytics.total_previews.desc(),
+                SearchQueryAnalytics.total_watches.desc(),
+                SearchQueryAnalytics.last_feedback_at.desc().nullslast(),
+            )
+        rows = query.limit(limit).all()
+        return [
+            {
+                "query": row.display_query,
+                "totalSearches": row.total_searches,
+                "zeroResultSearches": row.zero_result_searches,
+                "zeroResultRate": round((row.zero_result_searches / row.total_searches) if row.total_searches else 0.0, 4),
+                "totalClicks": row.total_clicks,
+                "totalPreviews": row.total_previews,
+                "totalWatches": row.total_watches,
+                "totalEnrolls": row.total_enrolls,
+                "lastSearchedAt": row.last_searched_at.isoformat() if row.last_searched_at else None,
+                "lastFeedbackAt": row.last_feedback_at.isoformat() if row.last_feedback_at else None,
+            }
+            for row in rows
+        ]
+    finally:
+        if hasattr(db, "close"):
+            db.close()
+
+
+def get_zero_result_queries(limit: int = 10) -> List[Dict[str, Any]]:
+    db = SessionLocal()
+    if db is None:
+        return []
+    try:
+        query = db.query(SearchQueryAnalytics)
+        if hasattr(SearchQueryAnalytics.zero_result_searches, "__gt__"):
+            try:
+                query = query.filter(SearchQueryAnalytics.zero_result_searches > 0)
+            except TypeError:
+                pass
+        if hasattr(SearchQueryAnalytics.zero_result_searches, "desc"):
+            query = query.order_by(
+                SearchQueryAnalytics.zero_result_searches.desc(),
+                SearchQueryAnalytics.last_searched_at.desc(),
+            )
+        rows = query.limit(limit).all()
+        return [
+            {
+                "query": row.display_query,
+                "totalSearches": row.total_searches,
+                "zeroResultSearches": row.zero_result_searches,
+                "zeroResultRate": round((row.zero_result_searches / row.total_searches) if row.total_searches else 0.0, 4),
+                "totalClicks": row.total_clicks,
+                "totalPreviews": row.total_previews,
+                "totalWatches": row.total_watches,
+                "totalEnrolls": row.total_enrolls,
+                "lastSearchedAt": row.last_searched_at.isoformat() if row.last_searched_at else None,
+                "lastFeedbackAt": row.last_feedback_at.isoformat() if row.last_feedback_at else None,
+            }
+            for row in rows
+        ]
+    finally:
+        if hasattr(db, "close"):
+            db.close()
+
+
+def get_top_query_course_pairs(limit: int = 10) -> List[Dict[str, Any]]:
+    db = SessionLocal()
+    if db is None:
+        return []
+    try:
+        query = db.query(SearchFeedbackAggregate)
+        if hasattr(SearchFeedbackAggregate.total_score, "desc"):
+            query = query.order_by(
+                SearchFeedbackAggregate.total_score.desc(),
+                SearchFeedbackAggregate.total_events.desc(),
+                SearchFeedbackAggregate.last_event_at.desc(),
+            )
+        rows = query.limit(limit).all()
+        return [
+            {
+                "query": row.normalized_query,
+                "courseId": row.course_id,
+                "totalScore": round(_safe_float(row.total_score), 4),
+                "totalEvents": row.total_events,
+                "clickCount": row.click_count,
+                "previewCount": row.preview_count,
+                "watchCount": row.watch_count,
+                "enrollCount": row.enroll_count,
+                "lastEventAt": row.last_event_at.isoformat() if row.last_event_at else None,
+            }
+            for row in rows
+        ]
+    finally:
+        if hasattr(db, "close"):
+            db.close()

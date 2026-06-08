@@ -1,4 +1,5 @@
 import pytest
+from types import SimpleNamespace
 
 from app.services import course_search_service
 
@@ -300,7 +301,273 @@ async def test_fallback_returns_keyword_matches_when_semantic_empty(monkeypatch)
 
     assert result["meta"]["total"] == 1
     assert result["data"][0]["id"] == "course-web-1"
-    assert result["data"][0]["matchSource"] == "keyword_fallback"
+    assert result["data"][0]["matchSource"].startswith("lexical:")
+
+
+@pytest.mark.asyncio
+async def test_recent_searches_boost_related_course(monkeypatch):
+    fake_cache = {}
+
+    async def fake_get(key):
+        return fake_cache.get(key)
+
+    async def fake_setex(key, ttl, value):
+        fake_cache[key] = value
+
+    course_search_service.redis_conn.get = fake_get
+    course_search_service.redis_conn.setex = fake_setex
+
+    await course_search_service.log_recent_search("user-1", "python")
+
+    lexical_courses = [
+        {
+            **COURSES[0],
+            "id": "course-python-2",
+            "title": "Python Automation Essentials",
+        },
+        {
+            **COURSES[1],
+            "id": "course-web-2",
+            "title": "Modern Web Apps",
+        },
+    ]
+
+    monkeypatch.setattr(course_search_service.course_client, "get_all_courses", lambda: _async_value(lexical_courses))
+    monkeypatch.setattr(course_search_service.course_client, "get_user_analytics_profile", lambda _user_id: _async_value({}))
+    monkeypatch.setattr(course_search_service.embedding_service, "embed_text", lambda *_args, **_kwargs: _async_value([0.1, 0.2, 0.3]))
+    monkeypatch.setattr(
+        course_search_service,
+        "vector_store",
+        FakeVectorStore(
+            [
+                {"courseId": "course-web-2", "similarityScore": 0.62, "payload": {}},
+                {"courseId": "course-python-2", "similarityScore": 0.55, "payload": {}},
+            ]
+        ),
+    )
+    monkeypatch.setattr(course_search_service, "_get_cluster_affinity", lambda _user_id: {})
+
+    result = await course_search_service.semantic_course_search("user-1", "automation", {}, page=1, limit=10)
+
+    assert result["data"][0]["id"] == "course-python-2"
+
+
+@pytest.mark.asyncio
+async def test_search_diversifies_top_results_by_subject(monkeypatch):
+    diversified_courses = [
+        {**COURSES[0], "id": "course-python-a", "title": "Python A", "subjectName": "Data Science"},
+        {**COURSES[0], "id": "course-python-b", "title": "Python B", "subjectName": "Data Science"},
+        {**COURSES[0], "id": "course-python-c", "title": "Python C", "subjectName": "Data Science"},
+        {**COURSES[1], "id": "course-web-a", "title": "Web A", "subjectName": "Web Development"},
+    ]
+    monkeypatch.setattr(course_search_service.course_client, "get_all_courses", lambda: _async_value(diversified_courses))
+    monkeypatch.setattr(course_search_service.course_client, "get_user_analytics_profile", lambda _user_id: _async_value({}))
+    monkeypatch.setattr(course_search_service.embedding_service, "embed_text", lambda *_args, **_kwargs: _async_value([0.1, 0.2, 0.3]))
+    monkeypatch.setattr(
+        course_search_service,
+        "vector_store",
+        FakeVectorStore(
+            [
+                {"courseId": "course-python-a", "similarityScore": 0.91, "payload": {}},
+                {"courseId": "course-python-b", "similarityScore": 0.90, "payload": {}},
+                {"courseId": "course-python-c", "similarityScore": 0.89, "payload": {}},
+                {"courseId": "course-web-a", "similarityScore": 0.75, "payload": {}},
+            ]
+        ),
+    )
+    monkeypatch.setattr(course_search_service, "_get_cluster_affinity", lambda _user_id: {})
+
+    result = await course_search_service.semantic_course_search("user-1", "python", {}, page=1, limit=3)
+
+    subjects = [item["subjectName"] for item in result["data"]]
+    assert subjects.count("Data Science") <= 2
+    assert "Web Development" in subjects
+
+
+@pytest.mark.asyncio
+async def test_query_expansion_helps_hands_on_match_practical_course(monkeypatch):
+    expanded_courses = [
+        {
+            **COURSES[1],
+            "id": "course-practical-1",
+            "title": "Practical Backend Workshop",
+            "description": "A project based applied lab for backend systems.",
+            "subjectName": "Web Development",
+        }
+    ]
+    monkeypatch.setattr(course_search_service.course_client, "get_all_courses", lambda: _async_value(expanded_courses))
+    monkeypatch.setattr(course_search_service.course_client, "get_user_analytics_profile", lambda _user_id: _async_value({}))
+    monkeypatch.setattr(course_search_service.embedding_service, "embed_text", lambda text, **_kwargs: _async_value([0.1, 0.2, 0.3] if "practical" in text else [0.1, 0.2, 0.3]))
+    monkeypatch.setattr(
+        course_search_service,
+        "vector_store",
+        FakeVectorStore([]),
+    )
+    monkeypatch.setattr(course_search_service, "_get_cluster_affinity", lambda _user_id: {})
+
+    result = await course_search_service.semantic_course_search("user-1", "hands-on", {}, page=1, limit=10)
+
+    assert result["meta"]["total"] == 1
+    assert result["data"][0]["id"] == "course-practical-1"
+
+
+@pytest.mark.asyncio
+async def test_search_feedback_boosts_clicked_course(monkeypatch):
+    fake_cache = {}
+
+    async def fake_get(key):
+        return fake_cache.get(key)
+
+    async def fake_setex(key, ttl, value):
+        fake_cache[key] = value
+
+    course_search_service.redis_conn.get = fake_get
+    course_search_service.redis_conn.setex = fake_setex
+
+    await course_search_service.record_search_feedback("python", "course-python-1", "click")
+    await course_search_service.record_search_feedback("python", "course-python-1", "enroll")
+
+    monkeypatch.setattr(course_search_service.course_client, "get_all_courses", lambda: _async_value(COURSES))
+    monkeypatch.setattr(course_search_service.course_client, "get_user_analytics_profile", lambda _user_id: _async_value({}))
+    monkeypatch.setattr(course_search_service.embedding_service, "embed_text", lambda *_args, **_kwargs: _async_value([0.1, 0.2, 0.3]))
+    monkeypatch.setattr(
+        course_search_service,
+        "vector_store",
+        FakeVectorStore(
+            [
+                {"courseId": "course-web-1", "similarityScore": 0.73, "payload": {}},
+                {"courseId": "course-python-1", "similarityScore": 0.69, "payload": {}},
+            ]
+        ),
+    )
+    monkeypatch.setattr(course_search_service, "_get_cluster_affinity", lambda _user_id: {})
+
+    result = await course_search_service.semantic_course_search("user-1", "python", {}, page=1, limit=10)
+
+    assert result["data"][0]["id"] == "course-python-1"
+
+
+@pytest.mark.asyncio
+async def test_search_feedback_boosts_include_persistent_aggregate(monkeypatch):
+    fake_cache = {}
+
+    async def fake_get(key):
+        return fake_cache.get(key)
+
+    async def fake_setex(key, ttl, value):
+        fake_cache[key] = value
+
+    class FakeAggregateQuery:
+        def __init__(self, rows):
+            self.rows = rows
+
+        def filter(self, *args, **kwargs):
+            return self
+
+        def all(self):
+            return self.rows
+
+    class FakeDb:
+        def query(self, model):
+            if model is course_search_service.SearchFeedbackAggregate:
+                return FakeAggregateQuery(
+                    [
+                        SimpleNamespace(course_id="course-python-1", total_score=8.0),
+                        SimpleNamespace(course_id="course-web-1", total_score=2.0),
+                    ]
+                )
+            return FakeAggregateQuery([])
+
+        def close(self):
+            return None
+
+    monkeypatch.setattr(course_search_service.redis_conn, "get", fake_get)
+    monkeypatch.setattr(course_search_service.redis_conn, "setex", fake_setex)
+    monkeypatch.setattr(course_search_service, "SessionLocal", lambda: FakeDb())
+
+    boosts = await course_search_service.get_search_feedback_boosts("python")
+
+    assert boosts["course-python-1"] == 1.0
+    assert boosts["course-web-1"] == 0.25
+
+
+def test_top_clicked_queries_analytics_projection(monkeypatch):
+    row = SimpleNamespace(
+        display_query="python",
+        total_searches=10,
+        zero_result_searches=2,
+        total_clicks=6,
+        total_previews=3,
+        total_watches=2,
+        total_enrolls=1,
+        last_searched_at=None,
+        last_feedback_at=None,
+    )
+
+    class FakeQuery:
+        def order_by(self, *args, **kwargs):
+            return self
+
+        def limit(self, _limit):
+            return self
+
+        def all(self):
+            return [row]
+
+    class FakeDb:
+        def query(self, _model):
+            return FakeQuery()
+
+        def close(self):
+            return None
+
+    monkeypatch.setattr(course_search_service, "SessionLocal", lambda: FakeDb())
+
+    data = course_search_service.get_top_clicked_queries(limit=5)
+
+    assert data[0]["query"] == "python"
+    assert data[0]["zeroResultRate"] == 0.2
+
+
+def test_zero_result_queries_analytics_projection(monkeypatch):
+    row = SimpleNamespace(
+        display_query="figm",
+        total_searches=4,
+        zero_result_searches=4,
+        total_clicks=0,
+        total_previews=0,
+        total_watches=0,
+        total_enrolls=0,
+        last_searched_at=None,
+        last_feedback_at=None,
+    )
+
+    class FakeQuery:
+        def filter(self, *args, **kwargs):
+            return self
+
+        def order_by(self, *args, **kwargs):
+            return self
+
+        def limit(self, _limit):
+            return self
+
+        def all(self):
+            return [row]
+
+    class FakeDb:
+        def query(self, _model):
+            return FakeQuery()
+
+        def close(self):
+            return None
+
+    monkeypatch.setattr(course_search_service, "SessionLocal", lambda: FakeDb())
+
+    data = course_search_service.get_zero_result_queries(limit=5)
+
+    assert data[0]["query"] == "figm"
+    assert data[0]["zeroResultRate"] == 1.0
 
 
 async def _async_value(value):

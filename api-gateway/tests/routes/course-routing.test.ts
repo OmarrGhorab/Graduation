@@ -69,6 +69,18 @@ describe("Course routing split", () => {
     expect(target).toBe(config.services.recommendation[0].url);
   });
 
+  it("routes GET /api/v1/courses/analytics/top-query-courses to recommendation-service", async () => {
+    const app = express();
+    const config = mockConfig();
+    setupRoutes(app, config);
+
+    await request(app).get("/api/v1/courses/analytics/top-query-courses");
+
+    const matched = proxyCalls.find(call => call.req?.originalUrl === "/api/v1/courses/analytics/top-query-courses");
+    const target = typeof matched?.target === "function" ? matched?.target() : matched?.target;
+    expect(target).toBe(config.services.recommendation[0].url);
+  });
+
   it("keeps GET /api/v1/courses/:id on courses-service", async () => {
     const app = express();
     const config = mockConfig();
