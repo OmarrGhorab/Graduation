@@ -85,10 +85,11 @@ async def search_relevant_courses(
 
     query_vector = await embedding_service.embed_text(query, normalize=True)
     try:
-        if query_vector:
-            await vector_store.ensure_collections(len(query_vector))
+        if not query_vector:
+            return []
     except Exception as exc:
-        logger.warning(f"Collection setup skipped or failed: {exc}")
+        logger.warning(f"Query vector generation produced no usable vector: {exc}")
+        return []
 
     results = await vector_store.search_courses(query_vector, top_k=limit * 2)
     filtered = []
@@ -115,12 +116,8 @@ async def search_relevant_courses(
             }
         )
 
-    user_profile = {}
+    user_profile = course_client.get_cached_user_analytics_profile(user_id)
     enrolled_ids = set()
-    try:
-        user_profile = await course_client.get_user_analytics_profile(user_id)
-    except Exception:
-        user_profile = {}
     if filter_enrolled:
         enrolled_ids = set(get_enrolled_ids_from_profile(user_profile))
 

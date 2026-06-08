@@ -459,7 +459,12 @@ class ChatEngine:
                 asyncio.to_thread(self._load_history, chat_id),
                 self._get_retrieved_course_context(user_id, message),
             )
-            yield self._sse("retrieval", {"courses": self._retrieval_summary(courses)})
+            logger.debug(
+                "Chat retrieval context for user %s chat %s: %s",
+                user_id,
+                chat_id,
+                self._retrieval_summary(courses),
+            )
 
             # ── 4. Build prompt ─────────────────────────────────────────
             system_prompt = build_chat_system_prompt(courses)
