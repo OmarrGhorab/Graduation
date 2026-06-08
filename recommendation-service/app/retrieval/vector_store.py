@@ -1,4 +1,5 @@
 import logging
+import asyncio
 from typing import Dict, List, Optional
 
 from app.config import settings
@@ -17,24 +18,35 @@ class VectorStore:
         self.courses_collection = settings.QDRANT_COURSES_COLLECTION
         self.users_collection = settings.QDRANT_USERS_COLLECTION
         self.clusters_collection = settings.QDRANT_CLUSTERS_COLLECTION
+        self._collections_ready = False
+        self._ensure_lock = asyncio.Lock()
 
     async def ensure_collections(self, vector_size: int) -> None:
-        for collection_name in [
-            self.courses_collection,
-            self.users_collection,
-            self.clusters_collection,
-        ]:
-            exists = await self.client.collection_exists(collection_name=collection_name)
-            if exists:
-                continue
-            await self.client.create_collection(
-                collection_name=collection_name,
-                vectors_config=models.VectorParams(
-                    size=vector_size,
-                    distance=models.Distance.COSINE,
-                ),
-            )
-            logger.info(f"Created Qdrant collection: {collection_name}")
+        if self._collections_ready:
+            return
+
+        async with self._ensure_lock:
+            if self._collections_ready:
+                return
+
+            for collection_name in [
+                self.courses_collection,
+                self.users_collection,
+                self.clusters_collection,
+            ]:
+                exists = await self.client.collection_exists(collection_name=collection_name)
+                if exists:
+                    continue
+                await self.client.create_collection(
+                    collection_name=collection_name,
+                    vectors_config=models.VectorParams(
+                        size=vector_size,
+                        distance=models.Distance.COSINE,
+                    ),
+                )
+                logger.info(f"Created Qdrant collection: {collection_name}")
+
+            self._collections_ready = True
 
     async def recreate_course_collection(self, vector_size: int) -> None:
         exists = await self.client.collection_exists(collection_name=self.courses_collection)
@@ -147,13 +159,11 @@ class VectorStore:
             span.set_attribute("vector.result_count", len(parsed))
             span.set_attribute("vector.duration_ms", duration_ms)
             logger.info(
-                "vector_search_timing",
-                extra={
-                    "collection": self.courses_collection,
-                    "limit": limit,
-                    "result_count": len(parsed),
-                    "duration_ms": round(duration_ms, 2),
-                },
+                "vector_search_timing collection=%s limit=%d result_count=%d duration_ms=%.2f",
+                self.courses_collection,
+                limit,
+                len(parsed),
+                duration_ms,
             )
             return parsed
 

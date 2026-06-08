@@ -97,7 +97,7 @@ func (r *LessonRepository) GetLessonsWithCourseIntervals(ctx context.Context, st
 		Scan(&results).Error
 	return results, err
 }
-func (r *LessonRepository) GetFilteredLessons(ctx context.Context, courseIDs []uuid.UUID, subjectID *uuid.UUID, subjectName string, statuses []string, start, end time.Time) ([]lesson.Lesson, error) {
+func (r *LessonRepository) GetFilteredLessons(ctx context.Context, courseIDs []uuid.UUID, subjectID *uuid.UUID, subjectName string, statuses []string, start, end time.Time, limit, offset int) ([]lesson.Lesson, int64, error) {
 	query := r.db.WithContext(ctx).Table("lessons").
 		Select("lessons.*").
 		Joins("JOIN courses ON courses.id = lessons.course_id")
@@ -117,6 +117,19 @@ func (r *LessonRepository) GetFilteredLessons(ctx context.Context, courseIDs []u
 		query = query.Where("lessons.status IN ?", statuses)
 	}
 
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	if limit > 0 {
+		query = query.Limit(limit)
+	}
+
+	if offset > 0 {
+		query = query.Offset(offset)
+	}
+
 	var lessons []lesson.Lesson
 	err := query.Order(`
 		CASE 
@@ -127,5 +140,5 @@ func (r *LessonRepository) GetFilteredLessons(ctx context.Context, courseIDs []u
 		END ASC, 
 		lessons.scheduled_at ASC
 	`).Find(&lessons).Error
-	return lessons, err
+	return lessons, total, err
 }

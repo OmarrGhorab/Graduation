@@ -53,7 +53,7 @@ func (h *CalendarHandler) GetStudentCalendar(c *fiber.Ctx) error {
 
 	filter := h.parseCalendarFilter(c)
 
-	events, err := h.calendarService.GetStudentCalendar(c.Context(), userID, filter)
+	events, total, err := h.calendarService.GetStudentCalendar(c.Context(), userID, filter)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
@@ -66,6 +66,12 @@ func (h *CalendarHandler) GetStudentCalendar(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{
 		"success": true,
 		"data":    responses,
+		"meta": fiber.Map{
+			"page":       filter.Page,
+			"limit":      filter.Limit,
+			"total":      total,
+			"totalPages": totalPages(total, filter.Limit),
+		},
 	})
 }
 
@@ -87,7 +93,7 @@ func (h *CalendarHandler) GetTeacherCalendar(c *fiber.Ctx) error {
 
 	filter := h.parseCalendarFilter(c)
 
-	events, err := h.calendarService.GetTeacherCalendar(c.Context(), userID, filter)
+	events, total, err := h.calendarService.GetTeacherCalendar(c.Context(), userID, filter)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
@@ -100,6 +106,12 @@ func (h *CalendarHandler) GetTeacherCalendar(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{
 		"success": true,
 		"data":    responses,
+		"meta": fiber.Map{
+			"page":       filter.Page,
+			"limit":      filter.Limit,
+			"total":      total,
+			"totalPages": totalPages(total, filter.Limit),
+		},
 	})
 }
 
@@ -166,11 +178,33 @@ func (h *CalendarHandler) parseCalendarFilter(c *fiber.Ctx) calendarApp.Calendar
 		}
 	}
 
+	page := c.QueryInt("page", 1)
+	if page < 1 {
+		page = 1
+	}
+
+	limit := c.QueryInt("limit", 20)
+	if limit < 1 || limit > 100 {
+		limit = 20
+	}
+
 	return calendarApp.CalendarFilter{
 		Start:       start,
 		End:         end,
 		SubjectID:   subjectID,
 		SubjectName: subjectName,
 		Statuses:    statuses,
+		Page:        page,
+		Limit:       limit,
 	}
+}
+
+func totalPages(total int64, limit int) int64 {
+	if limit <= 0 {
+		return 1
+	}
+	if total == 0 {
+		return 0
+	}
+	return (total + int64(limit) - 1) / int64(limit)
 }

@@ -5,6 +5,7 @@ import os
 from datetime import datetime
 from difflib import SequenceMatcher
 from functools import lru_cache
+from time import perf_counter
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from app.clustering.cluster_service import ClusterService
@@ -506,8 +507,9 @@ def _semantic_query_text(
     search: str,
     catalog_terms: Optional[Set[str]] = None,
     catalog_aliases: Optional[Dict[str, str]] = None,
+    normalized_forms: Optional[Dict[str, Any]] = None,
 ) -> str:
-    forms = _normalized_query_forms(search, catalog_terms, catalog_aliases)
+    forms = normalized_forms or _normalized_query_forms(search, catalog_terms, catalog_aliases)
     variants = forms["variants"]
     return ", ".join(variants) if variants else forms["normalized"]
 
@@ -595,8 +597,9 @@ def _best_lexical_score(
     search: str,
     catalog_terms: Optional[Set[str]] = None,
     catalog_aliases: Optional[Dict[str, str]] = None,
+    normalized_forms: Optional[Dict[str, Any]] = None,
 ) -> Tuple[float, str]:
-    forms = _normalized_query_forms(search, catalog_terms, catalog_aliases)
+    forms = normalized_forms or _normalized_query_forms(search, catalog_terms, catalog_aliases)
     variants = forms["variants"] or [forms["normalized"]]
     best_score = 0.0
     best_source = "none"
@@ -616,8 +619,9 @@ def _best_keyword_score(
     search: str,
     catalog_terms: Optional[Set[str]] = None,
     catalog_aliases: Optional[Dict[str, str]] = None,
+    normalized_forms: Optional[Dict[str, Any]] = None,
 ) -> float:
-    forms = _normalized_query_forms(search, catalog_terms, catalog_aliases)
+    forms = normalized_forms or _normalized_query_forms(search, catalog_terms, catalog_aliases)
     variants = forms["variants"] or [forms["normalized"]]
     best = 0.0
     for index, variant in enumerate(variants):
@@ -648,8 +652,9 @@ def _token_coverage_metrics(
     search: str,
     catalog_terms: Optional[Set[str]] = None,
     catalog_aliases: Optional[Dict[str, str]] = None,
+    normalized_forms: Optional[Dict[str, Any]] = None,
 ) -> Tuple[int, int, float]:
-    query_tokens = _normalized_query_forms(search, catalog_terms, catalog_aliases)["canonical_tokens"]
+    query_tokens = (normalized_forms or _normalized_query_forms(search, catalog_terms, catalog_aliases))["canonical_tokens"]
     if not query_tokens:
         return 0, 0, 0.0
 
@@ -683,13 +688,21 @@ def _token_coverage_adjustment(
     search: str,
     catalog_terms: Optional[Set[str]] = None,
     catalog_aliases: Optional[Dict[str, str]] = None,
+    normalized_forms: Optional[Dict[str, Any]] = None,
 ) -> float:
-    query_tokens = _normalized_query_forms(search, catalog_terms, catalog_aliases)["canonical_tokens"]
+    forms = normalized_forms or _normalized_query_forms(search, catalog_terms, catalog_aliases)
+    query_tokens = forms["canonical_tokens"]
     unique_query_tokens = list(dict.fromkeys(query_tokens))
     if len(unique_query_tokens) < 2:
         return 0.0
 
-    matched_tokens, strong_matches, coverage_ratio = _token_coverage_metrics(course, search, catalog_terms, catalog_aliases)
+    matched_tokens, strong_matches, coverage_ratio = _token_coverage_metrics(
+        course,
+        search,
+        catalog_terms,
+        catalog_aliases,
+        normalized_forms=forms,
+    )
     if matched_tokens == 0:
         return -0.08
     if coverage_ratio >= 1.0:
@@ -985,6 +998,7 @@ def _is_low_confidence_semantic_only_query(
     search: str,
     catalog_terms: Optional[Set[str]] = None,
     catalog_aliases: Optional[Dict[str, str]] = None,
+    normalized_forms: Optional[Dict[str, Any]] = None,
 ) -> bool:
     normalized_query = _normalize_text(search)
     if not normalized_query or not ranked:
@@ -993,8 +1007,20 @@ def _is_low_confidence_semantic_only_query(
     lexical_signals = []
     keyword_signals = []
     for item in ranked[:5]:
-        lexical_score, _ = _best_lexical_score(item, normalized_query, catalog_terms, catalog_aliases)
-        keyword_score = _best_keyword_score(item, normalized_query, catalog_terms, catalog_aliases)
+        lexical_score, _ = _best_lexical_score(
+            item,
+            normalized_query,
+            catalog_terms,
+            catalog_aliases,
+            normalized_forms=normalized_forms,
+        )
+        keyword_score = _best_keyword_score(
+            item,
+            normalized_query,
+            catalog_terms,
+            catalog_aliases,
+            normalized_forms=normalized_forms,
+        )
         lexical_signals.append(lexical_score)
         keyword_signals.append(keyword_score)
 
@@ -1085,33 +1111,57 @@ async def semantic_course_search(
     page: int = _DEFAULT_PAGE,
     limit: int = _DEFAULT_LIMIT,
 ) -> Dict[str, Any]:
+    total_start = perf_counter()
     page = max(page, 1)
     limit = min(max(limit, 1), _MAX_LIMIT)
     search = (search or "").strip()
     normalized_filters = dict(filters)
     cache_key = _search_cache_key(user_id, search, normalized_filters, page, limit)
 
+    cache_start = perf_counter()
     cached = await _read_cache(cache_key)
     if cached:
+        logger.info(
+            "semantic_search_timing query=%r cache_hit=%s cache_ms=%.2f total_ms=%.2f result_count=%d",
+            search,
+            True,
+            (perf_counter() - cache_start) * 1000,
+            (perf_counter() - total_start) * 1000,
+            len(cached.get("data", [])),
+        )
         return cached
 
+    catalog_start = perf_counter()
     courses = await course_client.get_all_courses()
     catalog = _course_catalog_index(courses)
     catalog_terms = _collect_catalog_terms(courses)
     catalog_aliases = _catalog_aliases(courses, catalog_terms)
-    user_profile = await course_client.get_user_analytics_profile(user_id)
+    normalized_forms = _normalized_query_forms(search, catalog_terms, catalog_aliases)
+    user_profile = course_client.get_cached_user_analytics_profile(user_id)
     watched_subjects = _extract_subject_preferences(user_profile)
     cluster_affinity = _get_cluster_affinity(user_id)
     recent_searches = await get_recent_searches(user_id)
     query_feedback_boosts = await get_search_feedback_boosts(search)
+    catalog_ms = (perf_counter() - catalog_start) * 1000
 
     candidate_limit = min(max(limit * 5, 40), 200)
     hydrated_candidates: Dict[str, Dict[str, Any]] = {}
+    semantic_ms = 0.0
+    lexical_ms = 0.0
+    fallback_ms = 0.0
 
     try:
-        query_vector = await embedding_service.embed_text(_semantic_query_text(search, catalog_terms, catalog_aliases), normalize=True)
+        semantic_start = perf_counter()
+        query_vector = await embedding_service.embed_text(
+            _semantic_query_text(
+                search,
+                catalog_terms,
+                catalog_aliases,
+                normalized_forms=normalized_forms,
+            ),
+            normalize=True,
+        )
         if query_vector:
-            await vector_store.ensure_collections(len(query_vector))
             semantic_hits = await vector_store.search_courses(query_vector, top_k=candidate_limit)
             for hit in semantic_hits:
                 similarity = _safe_float(hit.get("similarityScore"))
@@ -1120,11 +1170,23 @@ async def semantic_course_search(
                 course = catalog.get(str(hit.get("courseId")))
                 if not course or not _matches_filters(course, normalized_filters):
                     continue
-                lexical_score, _ = _best_lexical_score(course, search, catalog_terms, catalog_aliases)
+                lexical_score, _ = _best_lexical_score(
+                    course,
+                    search,
+                    catalog_terms,
+                    catalog_aliases,
+                    normalized_forms=normalized_forms,
+                )
                 search_score, _, cluster_boost, _ = _rank_course(course, similarity, watched_subjects, cluster_affinity)
                 recent_boost = _recent_search_boost(course, recent_searches)
                 feedback_boost = _query_feedback_boost(course, query_feedback_boosts)
-                token_coverage_boost = _token_coverage_adjustment(course, search, catalog_terms, catalog_aliases)
+                token_coverage_boost = _token_coverage_adjustment(
+                    course,
+                    search,
+                    catalog_terms,
+                    catalog_aliases,
+                    normalized_forms=normalized_forms,
+                )
                 search_score += min(lexical_score / 20.0, 0.08) + recent_boost + feedback_boost + token_coverage_boost
                 result = _project_course_result(
                     course,
@@ -1136,14 +1198,28 @@ async def semantic_course_search(
                 existing = hydrated_candidates.get(course_id)
                 if not existing or result["searchScore"] > existing["searchScore"]:
                     hydrated_candidates[course_id] = result
+        semantic_ms = (perf_counter() - semantic_start) * 1000
     except Exception as exc:
         logger.warning(f"Semantic course search failed for '{search}': {exc}")
 
+    lexical_start = perf_counter()
     for course in courses:
         if not _matches_filters(course, normalized_filters):
             continue
-        lexical_score, lexical_source = _best_lexical_score(course, search, catalog_terms, catalog_aliases)
-        keyword_score = _best_keyword_score(course, search, catalog_terms, catalog_aliases)
+        lexical_score, lexical_source = _best_lexical_score(
+            course,
+            search,
+            catalog_terms,
+            catalog_aliases,
+            normalized_forms=normalized_forms,
+        )
+        keyword_score = _best_keyword_score(
+            course,
+            search,
+            catalog_terms,
+            catalog_aliases,
+            normalized_forms=normalized_forms,
+        )
         if lexical_score <= 0 and keyword_score <= 0:
             continue
         course_id = str(course.get("id"))
@@ -1151,11 +1227,18 @@ async def semantic_course_search(
         similarity = _safe_float(existing.get("similarityScore") if existing else 0.0)
         recent_boost = _recent_search_boost(course, recent_searches)
         feedback_boost = _query_feedback_boost(course, query_feedback_boosts)
-        token_coverage_boost = _token_coverage_adjustment(course, search, catalog_terms, catalog_aliases)
+        token_coverage_boost = _token_coverage_adjustment(
+            course,
+            search,
+            catalog_terms,
+            catalog_aliases,
+            normalized_forms=normalized_forms,
+        )
         lexical_total = max(lexical_score, keyword_score) + (0.25 * similarity) + recent_boost + feedback_boost + token_coverage_boost
         candidate = _project_course_result(course, lexical_total, similarity, f"lexical:{lexical_source}")
         if not existing or candidate["searchScore"] > existing["searchScore"]:
             hydrated_candidates[course_id] = candidate
+    lexical_ms = (perf_counter() - lexical_start) * 1000
 
     if hydrated_candidates:
         ranked = sorted(
@@ -1171,10 +1254,17 @@ async def semantic_course_search(
     else:
         ranked = []
 
-    if ranked and _is_low_confidence_semantic_only_query(ranked, search, catalog_terms, catalog_aliases):
+    if ranked and _is_low_confidence_semantic_only_query(
+        ranked,
+        search,
+        catalog_terms,
+        catalog_aliases,
+        normalized_forms=normalized_forms,
+    ):
         ranked = []
 
     if not ranked:
+        fallback_start = perf_counter()
         fallback: List[Dict[str, Any]] = []
         for course in courses:
             if not _matches_filters(course, normalized_filters):
@@ -1194,6 +1284,7 @@ async def semantic_course_search(
             ),
             reverse=True,
         )
+        fallback_ms = (perf_counter() - fallback_start) * 1000
 
     total = len(ranked)
     start = (page - 1) * limit
@@ -1208,6 +1299,19 @@ async def semantic_course_search(
     }
     await track_search_analytics(search, total)
     await _write_cache(cache_key, response)
+    logger.info(
+        "semantic_search_timing query=%r cache_hit=%s catalog_ms=%.2f semantic_ms=%.2f lexical_ms=%.2f fallback_ms=%.2f total_ms=%.2f candidate_count=%d result_count=%d total_ranked=%d",
+        search,
+        False,
+        catalog_ms,
+        semantic_ms,
+        lexical_ms,
+        fallback_ms,
+        (perf_counter() - total_start) * 1000,
+        len(hydrated_candidates),
+        len(paged),
+        total,
+    )
     return response
 
 
@@ -1235,9 +1339,16 @@ async def course_autocomplete(user_id: str, search: str, limit: int = _DEFAULT_A
     query_feedback_boosts = await get_search_feedback_boosts(search)
 
     try:
-        query_vector = await embedding_service.embed_text(_semantic_query_text(search, catalog_terms, catalog_aliases), normalize=True)
+        query_vector = await embedding_service.embed_text(
+            _semantic_query_text(
+                search,
+                catalog_terms,
+                catalog_aliases,
+                normalized_forms=normalized_forms,
+            ),
+            normalize=True,
+        )
         if query_vector:
-            await vector_store.ensure_collections(len(query_vector))
             hits = await vector_store.search_courses(query_vector, top_k=min(max(limit * 4, 16), 80))
             for hit in hits:
                 similarity = _safe_float(hit.get("similarityScore"))
@@ -1246,7 +1357,13 @@ async def course_autocomplete(user_id: str, search: str, limit: int = _DEFAULT_A
                 course = catalog.get(str(hit.get("courseId")))
                 if not course:
                     continue
-                lexical_score, lexical_source = _best_lexical_score(course, search, catalog_terms, catalog_aliases)
+                lexical_score, lexical_source = _best_lexical_score(
+                    course,
+                    search,
+                    catalog_terms,
+                    catalog_aliases,
+                    normalized_forms=normalized_forms,
+                )
                 if lexical_score <= lexical_floor and len(_normalize_text(search)) <= _SHORT_QUERY_LEN:
                     continue
                 feedback_boost = _query_feedback_boost(course, query_feedback_boosts)
@@ -1279,7 +1396,13 @@ async def course_autocomplete(user_id: str, search: str, limit: int = _DEFAULT_A
 
     if not suggestions_by_course:
         for course in courses:
-            lexical_score, lexical_source = _best_lexical_score(course, search, catalog_terms, catalog_aliases)
+            lexical_score, lexical_source = _best_lexical_score(
+                course,
+                search,
+                catalog_terms,
+                catalog_aliases,
+                normalized_forms=normalized_forms,
+            )
             if lexical_score <= 0:
                 continue
             suggestions_by_course[str(course.get("id"))] = {

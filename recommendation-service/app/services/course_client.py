@@ -11,6 +11,7 @@ class CourseClient:
         self.secret = settings.INTERNAL_SERVICE_SECRET
         self._catalog_cache: List[Dict[str, Any]] = []
         self._catalog_cache_fingerprint: Optional[str] = None
+        self._user_analytics_cache: Dict[str, Dict[str, Any]] = {}
 
     def get_cached_courses(self) -> List[Dict[str, Any]]:
         return list(self._catalog_cache)
@@ -22,6 +23,13 @@ class CourseClient:
     def clear_cached_courses(self) -> None:
         self._catalog_cache = []
         self._catalog_cache_fingerprint = None
+
+    def get_catalog_fingerprint(self) -> Optional[str]:
+        return self._catalog_cache_fingerprint
+
+    def get_cached_user_analytics_profile(self, user_id: str) -> Dict[str, Any]:
+        cached = self._user_analytics_cache.get(user_id)
+        return dict(cached) if cached is not None else {}
 
     async def get_all_courses(self):
         """Fetches the full course catalog from the internal endpoint."""
@@ -45,6 +53,10 @@ class CourseClient:
 
     async def get_user_analytics_profile(self, user_id: str):
         """Fetches the user's combined analytics profile from the internal endpoint."""
+        cached = self._user_analytics_cache.get(user_id)
+        if cached is not None:
+            return dict(cached)
+
         async with httpx.AsyncClient() as client:
             try:
                 response = await client.get(
@@ -54,7 +66,9 @@ class CourseClient:
                 )
                 response.raise_for_status()
                 data = response.json()
-                return data.get("data", {})
+                payload = data.get("data", {})
+                self._user_analytics_cache[user_id] = dict(payload)
+                return payload
             except Exception as e:
                 logger.error(f"Failed to fetch user analytics: {str(e)}")
                 return {}
