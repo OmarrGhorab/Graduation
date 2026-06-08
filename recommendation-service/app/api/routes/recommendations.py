@@ -1,8 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from app.services.recommendation_engine import get_personalized_recommendations
 from app.api.dependencies import get_current_user
-from typing import List, Dict
+from typing import Dict
 import logging
+from app.models.database import SessionLocal
+from app.clustering.cluster_service import ClusterService
+from app.utils.api_response import error_response, success_response
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -16,13 +19,50 @@ async def get_my_recommendations(user = Depends(get_current_user)):
     user_id = user["user_id"]
     try:
         recommendations = await get_personalized_recommendations(user_id)
-        return {
-            "success": True,
-            "data": recommendations
-        }
+        return success_response(data=recommendations)
     except Exception as e:
         logger.error(f"Failed to get recommendations for {user_id}: {str(e)}")
-        raise HTTPException(status_code=500, detail="Could not generate recommendations")
+        raise HTTPException(
+            status_code=500,
+            detail=error_response("RECOMMENDATION_GENERATION_FAILED", "Could not generate recommendations"),
+        )
+
+@router.get("/explain")
+@router.get("/explain/")
+async def get_recommendations_explain(user = Depends(get_current_user)):
+    """
+    Returns reasoning summary and tool trace for latest v2 recommendation generation.
+    """
+    from app.services.recommendation_engine import get_recommendation_explanation
+    user_id = user["user_id"]
+    try:
+        explanation = await get_recommendation_explanation(user_id)
+        return success_response(data=explanation)
+    except Exception as e:
+        logger.error(f"Failed to get explanation for {user_id}: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=error_response("RECOMMENDATION_EXPLANATION_FAILED", "Could not fetch recommendation explanation"),
+        )
+
+
+@router.get("/debug")
+@router.get("/debug/")
+async def get_recommendations_debug(user = Depends(get_current_user)):
+    """
+    Returns scoring inputs for the authenticated user's current recommendation run.
+    """
+    from app.services.recommendation_engine import get_recommendation_debug
+    user_id = user["user_id"]
+    try:
+        debug = await get_recommendation_debug(user_id)
+        return success_response(data=debug)
+    except Exception as e:
+        logger.error(f"Failed to get recommendation debug for {user_id}: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=error_response("RECOMMENDATION_DEBUG_FAILED", "Could not fetch recommendation debug data"),
+        )
 
 @router.post("/refresh")
 async def refresh_recommendations(background_tasks: BackgroundTasks, user = Depends(get_current_user)):
@@ -30,16 +70,45 @@ async def refresh_recommendations(background_tasks: BackgroundTasks, user = Depe
     Invalidates the cache and triggers a fresh recommendation generation in the background.
     """
     from app.services.recommendation_engine import clear_cache, get_personalized_recommendations
+    from app.clustering.jobs import gather_known_user_ids, run_clustering_job_for_users
     user_id = user["user_id"]
-    
+
     # 1. Clear current cache
     await clear_cache(user_id)
-    
-    # 2. Trigger fresh generation in background
-    background_tasks.add_task(get_personalized_recommendations, user_id)
-    
+
+    # 2. Rebuild clusters (so the collaborative-filtering signal is fresh), then regenerate
+    async def _rebuild_and_recommend():
+        try:
+            user_ids = set(gather_known_user_ids())
+            user_ids.add(str(user_id))
+            await run_clustering_job_for_users(list(user_ids))
+        except Exception as exc:
+            logger.warning(f"Cluster rebuild during refresh failed for {user_id}: {exc}")
+        await get_personalized_recommendations(user_id)
+
+    background_tasks.add_task(_rebuild_and_recommend)
+
     logger.info(f"Public background refresh requested for user {user_id}")
-    return {"success": True, "message": "Recommendations cache cleared and refresh started in background"}
+    return success_response(message="Recommendations cache cleared and refresh started in background")
+
+
+@router.post("/clusters/rebuild")
+async def rebuild_clusters(background_tasks: BackgroundTasks, user = Depends(get_current_user)):
+    """
+    Recomputes user clusters from current analytics for all known users
+    (plus the caller) so recommendations carry an up-to-date cluster signal.
+    """
+    from app.clustering.jobs import gather_known_user_ids, run_clustering_job_for_users
+    user_id = user["user_id"]
+
+    async def _rebuild():
+        user_ids = set(gather_known_user_ids())
+        user_ids.add(str(user_id))
+        result = await run_clustering_job_for_users(list(user_ids))
+        logger.info(f"Manual cluster rebuild result: {result}")
+
+    background_tasks.add_task(_rebuild)
+    return success_response(message="Cluster rebuild started in background")
 
 @router.delete("/cache/{user_id}")
 async def invalidate_cache(user_id: str, background_tasks: BackgroundTasks):
@@ -56,7 +125,7 @@ async def invalidate_cache(user_id: str, background_tasks: BackgroundTasks):
     background_tasks.add_task(get_personalized_recommendations, user_id)
     
     logger.info(f"Background refresh triggered for user {user_id}")
-    return {"success": True, "message": f"Cache invalidated and background refresh started for user {user_id}"}
+    return success_response(message=f"Cache invalidated and background refresh started for user {user_id}")
 
 @router.post("/test")
 async def chat_test(data: Dict):
@@ -67,10 +136,7 @@ async def chat_test(data: Dict):
     from app.services.gemma_client import gemma_client
     message = data.get("message", "Hello!")
     response = await gemma_client.chat(message)
-    return {
-        "success": True,
-        "response": response
-    }
+    return success_response(data={"response": response})
 
 @router.get("/trending")
 @router.get("/trending/")
@@ -81,13 +147,46 @@ async def get_trending_courses():
     from app.services.recommendation_engine import get_trending_recommendations
     try:
         trending = await get_trending_recommendations()
-        return {
-            "success": True,
-            "data": trending
-        }
+        return success_response(data=trending)
     except Exception as e:
         logger.error(f"Failed to get trending courses: {str(e)}")
-        return {
-            "success": False,
-            "message": "Error fetching trending courses"
-        }
+        return error_response("TRENDING_RECOMMENDATIONS_FAILED", "Error fetching trending courses")
+
+
+@router.get("/clusters/{user_id}")
+async def get_user_cluster(user_id: str):
+    db = SessionLocal()
+    try:
+        service = ClusterService(db)
+        cluster = service.get_user_cluster(user_id)
+        if not cluster:
+            raise HTTPException(
+                status_code=404,
+                detail=error_response("CLUSTER_ASSIGNMENT_NOT_FOUND", "Cluster assignment not found for user"),
+            )
+        return success_response(
+            data={
+                "userId": cluster.user_id,
+                "clusterId": cluster.cluster_id,
+                "distanceToCentroid": cluster.distance_to_centroid,
+                "assignedAt": cluster.assigned_at.isoformat() if cluster.assigned_at else None,
+            },
+        )
+    finally:
+        db.close()
+
+
+@router.get("/clusters/{cluster_id}/top-courses")
+async def get_cluster_top_courses(cluster_id: int):
+    db = SessionLocal()
+    try:
+        service = ClusterService(db)
+        top_courses = service.list_top_courses_for_cluster(cluster_id)
+        return success_response(
+            data={
+                "clusterId": cluster_id,
+                "topCourses": top_courses,
+            },
+        )
+    finally:
+        db.close()

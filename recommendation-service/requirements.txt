@@ -22,3 +22,10 @@ prometheus-fastapi-instrumentator
 structlog
 python-json-logger
 sentry-sdk[fastapi]
+langgraph==0.2.76
+langchain-core==0.3.35
+sentence-transformers==3.4.1
+qdrant-client==1.13.2
+scikit-learn==1.6.1
+numpy==2.2.2
+apscheduler==3.11.0

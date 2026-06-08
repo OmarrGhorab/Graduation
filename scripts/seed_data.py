@@ -14,6 +14,46 @@ def get_password_hash(password: str):
     hashed = bcrypt.hashpw(password.encode('utf-8'), salt)
     return hashed.decode('utf-8')
 
+def ensure_interest(cur, interest_id: str, name: str, now):
+    cur.execute(
+        """
+        INSERT INTO auth."Interest" (id, name, "createdAt", "updatedAt")
+        VALUES (%s, %s, %s, %s)
+        ON CONFLICT (id) DO UPDATE
+        SET name = EXCLUDED.name,
+            "updatedAt" = EXCLUDED."updatedAt"
+        """,
+        (interest_id, name, now, now),
+    )
+
+def get_or_create_user(cur, now, email, name, username, role, interests=None):
+    cur.execute("SELECT id FROM auth.\"User\" WHERE email = %s", (email,))
+    row = cur.fetchone()
+    if row:
+        uid = row[0]
+    else:
+        uid = str(uuid.uuid4())
+        cur.execute(
+            """INSERT INTO auth.\"User\" (id, name, username, email, password, role, \"onboardingCompleted\", verified, \"createdAt\", \"updatedAt\") 
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+            (uid, name, username, email, get_password_hash("password123"), role, True, True, now, now)
+        )
+
+    cur.execute("DELETE FROM auth.\"UserInterest\" WHERE \"userId\" = %s", (uid,))
+    if interests:
+        for interest_name in interests:
+            cur.execute(
+                """
+                INSERT INTO auth."UserInterest" ("userId", "interestId", "createdAt")
+                SELECT %s, id, %s
+                FROM auth."Interest"
+                WHERE name = %s
+                """,
+                (uid, now, interest_name),
+            )
+
+    return uid
+
 def seed():
     print("Starting Seeding with VALID Cloudinary URLs...")
     conn = psycopg2.connect(DB_URL)
@@ -39,28 +79,42 @@ def seed():
         ]
         execute_values(cur, "INSERT INTO public.subjects (id, name, description, icon) VALUES %s", subjects)
 
-        # 2. Get or Create Teacher & Student with stable IDs
-        def get_or_create_user(email, name, username, role):
-            cur.execute("SELECT id FROM auth.\"User\" WHERE email = %s", (email,))
-            row = cur.fetchone()
-            if row:
-                return row[0]
-            
-            uid = str(uuid.uuid4())
-            cur.execute(
-                """INSERT INTO auth.\"User\" (id, name, username, email, password, role, \"onboardingCompleted\", verified, \"createdAt\", \"updatedAt\") 
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
-                (uid, name, username, email, get_password_hash("password123"), role, True, True, now, now)
-            )
-            return uid
+        # 2. Interests and verified users
+        print("Seeding Interests...")
+        interests = [(s[0], s[1], now, now) for s in subjects]
+        execute_values(cur, "INSERT INTO auth.\"Interest\" (id, name, \"createdAt\", \"updatedAt\") VALUES %s", interests)
 
-        teacher_id = get_or_create_user("teacher@example.com", "Prof. Omar", "omar_teacher", "TEACHER")
-        student_id = get_or_create_user("student@example.com", "Test Student", "student_user", "STUDENT")
-        parent_id = get_or_create_user("parent@example.com", "Guardian User", "parent_user", "PARENT")
+        teacher_id = get_or_create_user(
+            cur, now,
+            "teacher@example.com", "Prof. Omar", "omar_teacher", "TEACHER",
+            interests=["Cloud Architecture", "UI/UX Design"],
+        )
+        student_id = get_or_create_user(
+            cur, now,
+            "student@example.com", "Test Student", "student_user", "STUDENT",
+            interests=["Mobile Development", "UI/UX Design", "Data Science"],
+        )
+        parent_id = get_or_create_user(
+            cur, now,
+            "parent@example.com", "Guardian User", "parent_user", "PARENT",
+            interests=["Data Science"],
+        )
+        mentor_id = get_or_create_user(
+            cur, now,
+            "mentor@example.com", "Mentor Noor", "noor_mentor", "TEACHER",
+            interests=["Mobile Development", "Cloud Architecture"],
+        )
+        designer_id = get_or_create_user(
+            cur, now,
+            "designer@example.com", "Sara Design", "sara_design", "STUDENT",
+            interests=["UI/UX Design", "Mobile Development"],
+        )
 
         print(f"Teacher ID: {teacher_id}")
         print(f"Student ID: {student_id}")
         print(f"Parent ID: {parent_id}")
+        print(f"Mentor ID: {mentor_id}")
+        print(f"Designer ID: {designer_id}")
 
         # 2.2. Link parent to student
         print("Linking parent to student...")
@@ -68,15 +122,6 @@ def seed():
             "INSERT INTO auth.\"ParentChildLink\" (id, \"parentId\", \"childId\", \"createdAt\") VALUES (%s, %s, %s, %s) ON CONFLICT DO NOTHING",
             (str(uuid.uuid4()), parent_id, student_id, now)
         )
-
-        # 2.5. Interests
-        print("Seeding Interests & Assigning to student...")
-        interests = [(s[0], s[1], now, now) for s in subjects]
-        execute_values(cur, "INSERT INTO auth.\"Interest\" (id, name, \"createdAt\", \"updatedAt\") VALUES %s", interests)
-
-        selected_interests = random.sample(subjects, 3)
-        student_interests = [(student_id, si[0], now) for si in selected_interests]
-        execute_values(cur, "INSERT INTO auth.\"UserInterest\" (\"userId\", \"interestId\", \"createdAt\") VALUES %s", student_interests)
 
         # 3. Valid Assets Pool
         VALID_THUMBS = [

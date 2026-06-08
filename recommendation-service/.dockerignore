@@ -1,0 +1,26 @@
+# VCS
+.git
+.gitignore
+
+# Python artifacts
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.venv/
+venv/
+
+# Local/dev files
+.env
+.env.*
+*.log
+
+# Tooling/editor
+.vscode/
+.idea/
+
+# Dev utilities and test directories
+tests/
+alembic/
+fix_db.py
+*.md

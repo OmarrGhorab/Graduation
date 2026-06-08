@@ -11,19 +11,25 @@ def build_chat_system_prompt(courses: List[Dict]) -> str:
     Builds the system prompt that restricts the chatbot to education content
     and provides course context to ground its answers.
     """
-    # Build course catalog for context
+    # Build retrieved context for grounding
     course_context = ""
-    for course in courses:
-        subject = course.get("subject", {}).get("name", "General")
+    for index, course in enumerate(courses, start=1):
+        subject_data = course.get("subject", {})
+        subject = subject_data.get("name") if isinstance(subject_data, dict) else None
+        subject = subject or course.get("subjectName") or course.get("subject") or "General"
         title = course.get("title", "Untitled")
-        description = (course.get("description", "") or "")[:120]
-        course_context += f"- {title} (Subject: {subject}): {description}\n"
+        description = (course.get("description", "") or "")[:240]
+        score = course.get("similarityScore")
+        score_text = f", Retrieval score: {round(float(score), 3)}" if score is not None else ""
+        course_context += f"[{index}] {title} (Subject: {subject}{score_text})\n"
+        if description:
+            course_context += f"    {description}\n"
 
     system_prompt = f"""You are an AI teaching assistant for an online education platform.
 
 ━━━━ STRICT RULES — FOLLOW AT ALL TIMES ━━━━
 
-1. SCOPE: You MUST ONLY answer questions related to educational content from the courses listed below.
+1. SCOPE: You MUST ONLY answer questions related to educational content from the retrieved course context below.
 
 2. NO CODE: You MUST NEVER generate, write, or provide code in ANY programming language. This includes:
    - Code snippets, scripts, functions, classes, methods
@@ -41,17 +47,20 @@ def build_chat_system_prompt(courses: List[Dict]) -> str:
    - Use analogies, real-world examples, and step-by-step breakdowns
    - You may reference specific courses when relevant to guide the student's learning path
    - Encourage curiosity and deeper exploration of topics
+   - When useful, mention the retrieved course title(s) that support the answer
 
 5. FORMATTING:
    - Use bullet points and numbered lists for structured explanations
    - Use **bold** for key terms
    - Do NOT use code blocks or inline code formatting
 
-━━━━ AVAILABLE COURSES ON THE PLATFORM ━━━━
+━━━━ RETRIEVED COURSE CONTEXT ━━━━
 
 {course_context if course_context else "No courses currently available."}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+If the retrieved context does not contain enough information to answer specifically, say what is missing and answer only at a high level.
 
 Remember: Your role is to TEACH and EXPLAIN concepts. Never write code. Never go off-topic."""
 
@@ -61,13 +70,12 @@ Remember: Your role is to TEACH and EXPLAIN concepts. Never write code. Never go
 def build_conversation_messages(history: List[Dict], current_message: str) -> list:
     """
     Converts internal message history into the format expected by the
-    Gemini/Gemma API (roles: "user" and "model").
+    OpenAI-compatible Responses API (roles: "user" and "assistant").
     """
     messages = []
 
     for msg in history:
-        # Map our "assistant" role to Gemini's "model" role
-        role = "user" if msg["role"] == "user" else "model"
+        role = "user" if msg["role"] == "user" else "assistant"
         messages.append({"role": role, "content": msg["content"]})
 
     # Append the new user message

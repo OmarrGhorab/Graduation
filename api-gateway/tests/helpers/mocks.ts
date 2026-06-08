@@ -130,7 +130,7 @@ export function mockArcjetProtect(decision: MockArcjetDecision = mockArcjetDecis
  * Create a mock configuration for testing
  */
 export function mockConfig(overrides: any = {}) {
-  return {
+  const base = {
     server: {
       port: 3000,
       nodeEnv: 'test' as const,
@@ -157,6 +157,21 @@ export function mockConfig(overrides: any = {}) {
         url: 'http://localhost:3003',
         healthPath: '/health',
       }],
+      courses: [{
+        name: 'courses-service',
+        url: 'http://localhost:8085',
+        healthPath: '/health',
+      }],
+      payment: [{
+        name: 'payment-service',
+        url: 'http://localhost:8086',
+        healthPath: '/health',
+      }],
+      recommendation: [{
+        name: 'recommendation-service',
+        url: 'http://localhost:8095',
+        healthPath: '/health',
+      }],
       ws: [{
         name: 'ws-gateway',
         url: 'http://localhost:8001',
@@ -167,7 +182,27 @@ export function mockConfig(overrides: any = {}) {
       arcjetKey: 'test-key',
       arcjetEnabled: false,
     },
+  };
+
+  return {
+    ...base,
     ...overrides,
+    server: {
+      ...base.server,
+      ...(overrides.server || {}),
+    },
+    cors: {
+      ...base.cors,
+      ...(overrides.cors || {}),
+    },
+    services: {
+      ...base.services,
+      ...(overrides.services || {}),
+    },
+    security: {
+      ...base.security,
+      ...(overrides.security || {}),
+    },
   };
 }
 

@@ -18,8 +18,8 @@ COPY . .
 
 # Environment variables
 ENV PYTHONUNBUFFERED=1
-ENV PORT=8095
+ENV SERVER_PORT=8095
 
 EXPOSE 8095
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8095"]
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${SERVER_PORT:-${PORT:-8095}}"]
