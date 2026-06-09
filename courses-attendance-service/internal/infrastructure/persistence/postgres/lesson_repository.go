@@ -98,29 +98,30 @@ func (r *LessonRepository) GetLessonsWithCourseIntervals(ctx context.Context, st
 	return results, err
 }
 func (r *LessonRepository) GetFilteredLessons(ctx context.Context, courseIDs []uuid.UUID, subjectID *uuid.UUID, subjectName string, statuses []string, start, end time.Time, limit, offset int) ([]lesson.Lesson, int64, error) {
-	query := r.db.WithContext(ctx).Table("lessons").
-		Select("lessons.*").
+	baseQuery := r.db.WithContext(ctx).Table("lessons").
 		Joins("JOIN courses ON courses.id = lessons.course_id")
 
 	if subjectName != "" {
-		query = query.Joins("JOIN subjects ON subjects.id = courses.subject_id").
+		baseQuery = baseQuery.Joins("JOIN subjects ON subjects.id = courses.subject_id").
 			Where("subjects.name ILIKE ?", "%"+subjectName+"%")
 	}
 
-	query = query.Where("lessons.course_id IN ? AND lessons.scheduled_at BETWEEN ? AND ?", courseIDs, start, end)
+	baseQuery = baseQuery.Where("lessons.course_id IN ? AND lessons.scheduled_at BETWEEN ? AND ?", courseIDs, start, end)
 
 	if subjectID != nil {
-		query = query.Where("courses.subject_id = ?", *subjectID)
+		baseQuery = baseQuery.Where("courses.subject_id = ?", *subjectID)
 	}
 
 	if len(statuses) > 0 {
-		query = query.Where("lessons.status IN ?", statuses)
+		baseQuery = baseQuery.Where("lessons.status IN ?", statuses)
 	}
 
 	var total int64
-	if err := query.Count(&total).Error; err != nil {
+	if err := baseQuery.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
+
+	query := baseQuery.Select("lessons.*")
 
 	if limit > 0 {
 		query = query.Limit(limit)

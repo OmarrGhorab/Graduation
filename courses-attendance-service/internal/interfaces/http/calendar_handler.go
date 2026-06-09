@@ -1,6 +1,7 @@
 package http
 
 import (
+	"strings"
 	"time"
 
 	calendarApp "github.com/OmarrGhorab/courses-attendance-service/internal/application/calendar"
@@ -173,8 +174,21 @@ func (h *CalendarHandler) parseCalendarFilter(c *fiber.Ctx) calendarApp.Calendar
 			statuses = []string{"SCHEDULED", "LIVE"}
 		case "finished":
 			statuses = []string{"COMPLETED"}
+		case "cancelled":
+			statuses = []string{"CANCELED"}
 		default:
-			statuses = []string{statusStr}
+			parts := strings.Split(statusStr, ",")
+			statuses = make([]string, 0, len(parts))
+			for _, part := range parts {
+				normalized := strings.TrimSpace(strings.ToUpper(part))
+				if normalized == "" {
+					continue
+				}
+				if normalized == "CANCELLED" {
+					normalized = "CANCELED"
+				}
+				statuses = append(statuses, normalized)
+			}
 		}
 	}
 
