@@ -38,6 +38,9 @@ class GetUserHistoryOutput(BaseModel):
     enrolled_course_ids: List[str] = Field(default_factory=list)
     cart_subjects: List[str] = Field(default_factory=list)
     interests: List[str] = Field(default_factory=list)
+    subject_preferences: List[Dict[str, Any]] = Field(default_factory=list)
+    preview_interests: List[Dict[str, Any]] = Field(default_factory=list)
+    behavior_query: str = ""
 
 
 class GetRecentCartActivityInput(BaseModel):

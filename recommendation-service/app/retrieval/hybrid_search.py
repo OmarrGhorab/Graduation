@@ -1,7 +1,7 @@
 import hashlib
 import json
 import logging
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 import redis.asyncio as redis
 
@@ -12,7 +12,10 @@ from app.services.course_client import course_client
 from app.utils.profile_utils import (
     get_enrolled_ids_from_profile,
     get_subject_name,
+    list_cart_subjects,
+    list_preview_interests,
     list_subject_preferences,
+    list_user_interests,
 )
 
 logger = logging.getLogger(__name__)
@@ -63,6 +66,67 @@ def _profile_subject_boost(course_subject: str, user_profile: Dict) -> float:
     if course_subject.lower() in watched_subjects:
         return 0.08
     return 0.0
+
+
+def _profile_interest_terms(user_profile: Dict) -> set[str]:
+    terms: set[str] = set()
+
+    for interest in list_user_interests(user_profile):
+        normalized = _normalize_text(interest)
+        if normalized:
+            terms.add(normalized)
+
+    for subject in list_cart_subjects(user_profile):
+        normalized = _normalize_text(subject)
+        if normalized:
+            terms.add(normalized)
+
+    for preview in list_preview_interests(user_profile):
+        subject_name = get_subject_name(preview)
+        normalized = _normalize_text(subject_name)
+        if normalized:
+            terms.add(normalized)
+
+    for subject in list_subject_preferences(user_profile):
+        subject_name = get_subject_name(subject)
+        normalized = _normalize_text(subject_name)
+        if normalized:
+            terms.add(normalized)
+
+    return terms
+
+
+def _interest_match_score(course: Dict[str, Any], user_profile: Dict) -> float:
+    terms = _profile_interest_terms(user_profile)
+    if not terms:
+        return 0.0
+
+    haystack = " ".join(
+        filter(
+            None,
+            [
+                _normalize_text(course.get("title")),
+                _normalize_text(course.get("description")),
+                _normalize_text(course.get("subjectName")),
+                _normalize_text(course.get("teacherName")),
+            ],
+        )
+    )
+    if not haystack:
+        return 0.0
+
+    score = 0.0
+    for term in terms:
+        if term in haystack:
+            score += 0.18
+        else:
+            term_tokens = [token for token in term.split() if len(token) >= 3]
+            if term_tokens and all(token in haystack for token in term_tokens):
+                score += 0.12
+            elif any(token in haystack for token in term_tokens):
+                score += 0.06
+
+    return min(score, 0.45)
 
 
 async def search_relevant_courses(
@@ -122,6 +186,7 @@ async def search_relevant_courses(
         enrolled_ids = set(get_enrolled_ids_from_profile(user_profile))
 
     cluster_affinity = _get_cluster_affinity(user_id)
+    interest_terms = _profile_interest_terms(user_profile)
 
     final = []
     for item in filtered:
@@ -135,13 +200,18 @@ async def search_relevant_courses(
             cluster_score=cluster_score,
         )
         subject_boost = _profile_subject_boost(str(item.get("subjectName") or ""), user_profile)
+        interest_boost = _interest_match_score(item, user_profile)
         score += subject_boost
+        score += interest_boost
         item["hybridScore"] = score
         item["profileSubjectBoost"] = round(subject_boost, 4)
+        item["interestBoost"] = round(interest_boost, 4)
         # 0.10 is the cluster weight in _hybrid_score — surface its contribution
         item["clusterContribution"] = round(0.10 * cluster_score, 4)
         if cluster_score > 0 and "cluster_affinity" not in item["source"]:
             item["source"].append("cluster_affinity")
+        if interest_terms and interest_boost > 0 and "onboarding_interest" not in item["source"]:
+            item["source"].append("onboarding_interest")
         final.append(item)
 
     final.sort(key=lambda x: x.get("hybridScore", 0.0), reverse=True)

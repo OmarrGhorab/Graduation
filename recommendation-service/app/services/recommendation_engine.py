@@ -91,6 +91,15 @@ async def _get_agentic_recommendations(user_id: str):
     return recommendations
 
 
+def _has_explicit_cold_start_interests(profile: dict) -> bool:
+    return bool(
+        list_user_interests(profile)
+        or list_cart_subjects(profile)
+        or list_preview_interests(profile)
+        or list_subject_preferences(profile)
+    )
+
+
 async def _get_legacy_recommendations(user_id: str):
     """
     Orchestrates the full recommendation flow:
@@ -138,13 +147,20 @@ async def _get_legacy_recommendations(user_id: str):
 
         # 3. Build Prompt
         logger.info("Building AI prompt...")
-        prompt = build_recommendation_prompt(user_profile, filtered_courses)
-        logger.info("Prompt built successfully")
-        
-        # 4. Generate with Gemma 4
-        logger.info(f"Calling AI model: {settings.AI_MODEL}")
-        recommendations = await gemma_client.generate_recommendations(prompt)
-        logger.info(f"AI returned {len(recommendations) if isinstance(recommendations, list) else 'invalid'} items")
+        has_explicit_interests = _has_explicit_cold_start_interests(user_profile)
+        if has_explicit_interests and not get_enrolled_ids_from_profile(user_profile):
+            # Fresh account with onboarding intent: rank directly from user interests
+            prompt = build_recommendation_prompt(user_profile, filtered_courses)
+            logger.info("Prompt built successfully for cold-start interest ranking")
+            logger.info(f"Calling AI model: {settings.AI_MODEL}")
+            recommendations = await gemma_client.generate_recommendations(prompt)
+            logger.info(f"AI returned {len(recommendations) if isinstance(recommendations, list) else 'invalid'} items")
+        else:
+            prompt = build_recommendation_prompt(user_profile, filtered_courses)
+            logger.info("Prompt built successfully")
+            logger.info(f"Calling AI model: {settings.AI_MODEL}")
+            recommendations = await gemma_client.generate_recommendations(prompt)
+            logger.info(f"AI returned {len(recommendations) if isinstance(recommendations, list) else 'invalid'} items")
         
         # 5. Hydrate Results with full course data
         logger.info("Hydrating AI results with course catalog details...")
@@ -318,6 +334,7 @@ async def get_recommendation_debug(user_id: str) -> dict:
     return {
         "userId": str(user_id),
         "behaviorQuery": behavior_query,
+        "coldStartHasExplicitInterests": _has_explicit_cold_start_interests(profile),
         "watchedSubjects": list_subject_preferences(profile),
         "previewInterests": list_preview_interests(profile),
         "cartSubjects": list_cart_subjects(profile),
@@ -344,6 +361,7 @@ async def get_recommendation_debug(user_id: str) -> dict:
 
 async def clear_cache(user_id: str):
     """Removes the cached recommendations for a specific user."""
+    course_client.clear_cached_user_analytics_profile(user_id)
     await redis_conn.delete(f"recommendation:v1:{user_id}")
     await redis_conn.delete(f"recommendation:v2:{user_id}")
     await redis_conn.delete(f"recommendation:v2:explain:{user_id}")

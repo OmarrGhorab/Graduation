@@ -74,7 +74,7 @@ services:
       - "6001:6001"
     environment:
       - PORT=6001
-      - NODE_ENV=production
+      - NODE_ENV=development
       - DATABASE_URL=postgresql://graduation:graduation_secret@postgres:5432/graduation?schema=auth
       - REDIS_URL=redis://redis:6379
       - JWT_ACCESS_SECRET=47079cb745e7b5c1ebaa8106cabc00f43d6356ce3b0d4b725156742f4084280b
@@ -116,7 +116,7 @@ services:
       - ./notification-service/.env
     environment:
       - PORT=6003
-      - NODE_ENV=production
+      - NODE_ENV=development
       - DATABASE_URL=postgresql://graduation:graduation_secret@postgres:5432/graduation?schema=notifications
       - COURSES_SERVICE_URL=http://courses-service-1:8085
       - REDIS_URL=redis://redis:6379
@@ -144,7 +144,7 @@ services:
       - "3000:3000"
     environment:
       - PORT=3000
-      - NODE_ENV=production
+      - NODE_ENV=development
       - ALLOWED_ORIGINS=*
       - AUTH_SERVICE_URLS=http://auth-service:6001
       - NOTIFICATION_SERVICE_URLS=http://notification-service:6003
@@ -497,6 +497,8 @@ services:
   # ============ RECOMMENDATION SERVICE ============
   recommendation-service:
     build: ./recommendation-service
+    volumes:
+      - ./recommendation-service/app:/app/app
     ports:
       - "8095:8095"
     environment:

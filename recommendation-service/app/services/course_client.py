@@ -31,6 +31,9 @@ class CourseClient:
         cached = self._user_analytics_cache.get(user_id)
         return dict(cached) if cached is not None else {}
 
+    def clear_cached_user_analytics_profile(self, user_id: str) -> None:
+        self._user_analytics_cache.pop(str(user_id), None)
+
     async def get_all_courses(self):
         """Fetches the full course catalog from the internal endpoint."""
         if self._catalog_cache:

@@ -6,8 +6,10 @@ from opentelemetry import trace
 
 from app.agents.state import RecommendationState
 from app.config import settings
+from app.services.course_client import course_client
 from app.tools.registry import tool_registry
 from app.retrieval.hybrid_search import search_relevant_courses
+from app.utils.profile_utils import get_subject_name
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer(__name__)
@@ -52,7 +54,7 @@ async def plan_next_tool(state: RecommendationState) -> RecommendationState:
         user_history = context.get("get_user_history", {})
         enrolled_ids = user_history.get("enrolled_course_ids") or []
         interests = user_history.get("interests") or []
-        query = user_history.get("behavior_query") or ", ".join(interests) or "popular courses"
+        query = ", ".join(interests) or user_history.get("behavior_query") or "popular courses"
         state["done"] = False
         state["next_tool"] = "search_relevant_courses"
         state["next_tool_args"] = {
@@ -220,6 +222,121 @@ def _build_deterministic_reason(item: Dict[str, Any]) -> str:
     return " ".join(reasons)
 
 
+def _normalize_text(value: Any) -> str:
+    return str(value or "").strip().lower()
+
+
+def _history_interest_terms(user_history: Dict[str, Any]) -> List[str]:
+    terms: List[str] = []
+
+    for value in user_history.get("interests", []) or []:
+        if value:
+            terms.append(str(value))
+
+    for value in user_history.get("cart_subjects", []) or []:
+        if value:
+            terms.append(str(value))
+
+    for item in user_history.get("preview_interests", []) or []:
+        subject_name = get_subject_name(item)
+        if subject_name:
+            terms.append(subject_name)
+
+    for item in user_history.get("subject_preferences", []) or []:
+        subject_name = get_subject_name(item)
+        if subject_name:
+            terms.append(subject_name)
+
+    seen = set()
+    unique_terms = []
+    for term in terms:
+        normalized = _normalize_text(term)
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        unique_terms.append(term)
+    return unique_terms
+
+
+def _course_interest_match_score(course: Dict[str, Any], terms: List[str]) -> float:
+    if not terms:
+        return 0.0
+
+    haystack = " ".join(
+        [
+            _normalize_text(course.get("title")),
+            _normalize_text(course.get("description")),
+            _normalize_text(course.get("subjectName")),
+            _normalize_text(course.get("teacherName")),
+        ]
+    )
+    if not haystack:
+        return 0.0
+
+    score = 0.0
+    for term in terms:
+        normalized_term = _normalize_text(term)
+        if not normalized_term:
+            continue
+        if normalized_term in haystack:
+            score += 0.55
+            continue
+        tokens = [token for token in normalized_term.split() if len(token) >= 3]
+        if tokens and all(token in haystack for token in tokens):
+            score += 0.35
+        elif any(token in haystack for token in tokens):
+            score += 0.15
+    return score
+
+
+async def _profile_catalog_fallback(user_history: Dict[str, Any], exclude_set: set[str]) -> List[Dict[str, Any]]:
+    terms = _history_interest_terms(user_history)
+    if not terms:
+        return []
+
+    courses = await course_client.get_all_courses()
+    ranked: List[Dict[str, Any]] = []
+    for course in courses or []:
+        course_id = str(course.get("id") or course.get("courseId") or "")
+        if not course_id or course_id in exclude_set:
+            continue
+        interest_score = _course_interest_match_score(course, terms)
+        if interest_score <= 0:
+            continue
+
+        popularity = min(float(course.get("enrollmentCount", 0) or 0) / 1000.0, 1.0)
+        teacher_score = min(float(course.get("teacherAuthority", course.get("teacherScore", 0)) or 0) / 5.0, 1.0)
+        hybrid_score = min(1.0, 0.72 * min(interest_score, 1.0) + 0.18 * popularity + 0.10 * teacher_score)
+        subject_name = course.get("subjectName")
+        ranked.append(
+            {
+                "courseId": course_id,
+                "title": course.get("title"),
+                "courseImage": course.get("courseImage"),
+                "price": course.get("price", 0),
+                "currency": course.get("currency", "EGP"),
+                "enrolledCount": course.get("enrollmentCount", 0),
+                "subjectName": subject_name,
+                "teacher": {
+                    "name": course.get("teacherName", "Recommendation Teacher"),
+                    "avatar": course.get("teacherProfileImg") or "https://i.pravatar.cc/150?u=fallback",
+                },
+                "similarityScore": round(min(interest_score, 1.0), 4),
+                "hybridScore": hybrid_score,
+                "profileSubjectBoost": 0.0,
+                "interestBoost": round(min(interest_score, 1.0), 4),
+                "clusterContribution": 0.0,
+                "source": ["profile_interest"],
+                "matchReason": f"Matches your selected or early activity interest in {subject_name or terms[0]}.",
+                "reason": f"Matches your selected or early activity interest in {subject_name or terms[0]}.",
+                "priority": "HIGH",
+            }
+        )
+
+    ranked.sort(key=lambda item: item.get("hybridScore", 0), reverse=True)
+    return ranked[: settings.AGENT_TOP_K_CANDIDATES]
+
+
 async def fallback_retrieval(state: RecommendationState) -> RecommendationState:
     from app.services.recommendation_engine import get_trending_recommendations
     from app.retrieval.hybrid_search import get_enrolled_course_ids
@@ -242,7 +359,7 @@ async def fallback_retrieval(state: RecommendationState) -> RecommendationState:
             logger.warning(f"Could not fetch enrolled IDs for fallback filter: {exc}")
 
     interests = user_history.get("interests", []) or []
-    query = user_history.get("behavior_query") or ", ".join(interests) or "recommended courses"
+    query = ", ".join(interests) or user_history.get("behavior_query") or "recommended courses"
     exclude_set = set(exclude_course_ids)
 
     try:
@@ -255,6 +372,13 @@ async def fallback_retrieval(state: RecommendationState) -> RecommendationState:
     except Exception as exc:
         logger.warning(f"Agent fallback semantic retrieval failed: {exc}")
         semantic = []
+
+    if not semantic:
+        try:
+            semantic = await _profile_catalog_fallback(user_history, exclude_set)
+        except Exception as exc:
+            logger.warning(f"Agent fallback profile catalog ranking failed: {exc}")
+            semantic = []
 
     if not semantic:
         try:

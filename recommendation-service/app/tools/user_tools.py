@@ -5,6 +5,7 @@ from app.utils.profile_utils import (
     build_behavior_query,
     get_enrolled_ids_from_profile,
     list_cart_subjects,
+    list_preview_interests,
     list_subject_preferences,
     list_user_interests,
 )
@@ -24,6 +25,7 @@ async def get_user_history_tool(user_id: str) -> Dict[str, Any]:
         "cart_subjects": list_cart_subjects(profile),
         "interests": list_user_interests(profile),
         "subject_preferences": list_subject_preferences(profile),
+        "preview_interests": list_preview_interests(profile),
         "behavior_query": build_behavior_query(profile),
     }
 
