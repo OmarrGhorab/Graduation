@@ -6,6 +6,7 @@ import logging
 import re
 
 import httpx
+from typing import AsyncGenerator
 
 logger = logging.getLogger(__name__)
 
@@ -87,6 +88,13 @@ class GemmaClient:
         max_retries: int = _MAX_RETRIES,
         base_delay: float = _BASE_DELAY,
     ):
+        if stream:
+            return self._stream_responses_completion(
+                messages,
+                response_format=response_format,
+                timeout_seconds=timeout_seconds,
+                reasoning_effort=reasoning_effort,
+            )
         return await self._responses_completion(
             messages,
             response_format=response_format,
@@ -159,6 +167,98 @@ class GemmaClient:
                 return response.json()
 
         return await _with_retry(_request, max_retries=max_retries, base_delay=base_delay)
+
+    async def _stream_responses_completion(
+        self,
+        messages: list,
+        *,
+        response_format: dict | None = None,
+        timeout_seconds: float = 90.0,
+        reasoning_effort: str | None = None,
+    ) -> AsyncGenerator[str, None]:
+        instructions, input_messages = self._responses_input(messages)
+        payload = {
+            "model": self.model_id,
+            "input": input_messages,
+            "store": self.store_responses,
+            "stream": True,
+        }
+        if instructions:
+            payload["instructions"] = instructions
+        if response_format:
+            payload["text"] = {"format": response_format}
+        selected_effort = reasoning_effort if reasoning_effort is not None else self.reasoning_effort
+        if selected_effort:
+            payload["reasoning"] = {"effort": selected_effort}
+
+        async with httpx.AsyncClient(timeout=timeout_seconds) as client:
+            async with client.stream(
+                "POST",
+                self._responses_url(),
+                headers=self._headers(),
+                json=payload,
+            ) as response:
+                response.raise_for_status()
+
+                current_event = None
+                data_lines: list[str] = []
+
+                async for raw_line in response.aiter_lines():
+                    line = raw_line.strip()
+                    if not line:
+                        chunk = self._extract_stream_chunk(current_event, data_lines)
+                        if chunk:
+                            yield chunk
+                        current_event = None
+                        data_lines = []
+                        continue
+
+                    if line.startswith("event:"):
+                        current_event = line[6:].strip()
+                        continue
+
+                    if line.startswith("data:"):
+                        data_lines.append(line[5:].strip())
+
+                chunk = self._extract_stream_chunk(current_event, data_lines)
+                if chunk:
+                    yield chunk
+
+    @classmethod
+    def _extract_stream_chunk(cls, event_name: str | None, data_lines: list[str]) -> str:
+        if not data_lines:
+            return ""
+
+        raw_payload = "\n".join(data_lines).strip()
+        if not raw_payload or raw_payload == "[DONE]":
+            return ""
+
+        try:
+            payload = json.loads(raw_payload)
+        except json.JSONDecodeError:
+            return ""
+
+        if event_name == "response.output_text.delta":
+            delta = payload.get("delta")
+            return delta if isinstance(delta, str) else ""
+
+        if event_name == "response.refusal.delta":
+            delta = payload.get("delta")
+            return delta if isinstance(delta, str) else ""
+
+        if event_name in {"response.output_text.done", "response.completed"}:
+            text = cls._text_from_response(payload)
+            return text if isinstance(text, str) else ""
+
+        delta = payload.get("delta")
+        if isinstance(delta, str):
+            return delta
+
+        text = payload.get("text")
+        if isinstance(text, str):
+            return text
+
+        return ""
 
     @staticmethod
     def _text_from_response(response: dict) -> str:
@@ -320,14 +420,69 @@ class GemmaClient:
         }
 
     async def stream_chat(self, system_prompt: str, messages: list, media: dict = None):
-        response = await self._chat_completion(
-            [{"role": "system", "content": system_prompt}]
-            + [self._message_with_media(message, media if index == len(messages) - 1 else None)
-               for index, message in enumerate(messages)]
-        )
+        request_messages = [{"role": "system", "content": system_prompt}] + [
+            self._message_with_media(message, media if index == len(messages) - 1 else None)
+            for index, message in enumerate(messages)
+        ]
+
+        streamed_any = False
+        streamed_text = ""
+
+        try:
+            stream = await self._chat_completion(request_messages, stream=True)
+            async for chunk in stream:
+                if chunk:
+                    streamed_any = True
+                    streamed_text += chunk
+                    yield chunk
+            if streamed_any:
+                return
+        except Exception as exc:
+            logger.warning("Falling back to buffered AI response streaming: %s", exc)
+
+        response = await self._chat_completion(request_messages)
         text = self._text_from_response(response)
-        if text:
-            yield text
+        if not text:
+            return
+
+        if streamed_text and text.startswith(streamed_text):
+            remaining = text[len(streamed_text):]
+        else:
+            remaining = text
+
+        for chunk in self._chunk_text_for_stream(remaining):
+            yield chunk
+            await asyncio.sleep(0.02)
+
+    @staticmethod
+    def _chunk_text_for_stream(text: str, target_size: int = 48) -> list[str]:
+        if not text:
+            return []
+
+        normalized = text.strip()
+        if not normalized:
+            return []
+
+        chunks: list[str] = []
+        start = 0
+        length = len(normalized)
+
+        while start < length:
+            end = min(start + target_size, length)
+            if end < length:
+                split_candidates = [
+                    normalized.rfind(marker, start, end)
+                    for marker in (" ", ".", ",", "!", "?", "\n")
+                ]
+                split_at = max(split_candidates)
+                if split_at > start:
+                    end = split_at + 1
+            chunk = normalized[start:end]
+            if chunk:
+                chunks.append(chunk)
+            start = end
+
+        return chunks
 
 
 gemma_client = GemmaClient()
