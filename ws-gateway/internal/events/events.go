@@ -11,13 +11,16 @@ const (
 )
 
 type MessageCreatedEvent struct {
-	ID                    string         `json:"id"`
-	ConversationID        string         `json:"conversation_id"`
-	SenderID              string         `json:"sender_id"`
-	Content               string         `json:"content"`
-	Type                  string         `json:"type"`
-	MediaURLs             []string       `json:"media_urls,omitempty"`
-	CreatedAt             time.Time      `json:"created_at"`
+	ID             string         `json:"id"`
+	LocalID        string         `json:"local_id,omitempty"`
+	ConversationID string         `json:"conversation_id"`
+	SenderID       string         `json:"sender_id"`
+	SenderName     string         `json:"sender_name,omitempty"`
+	SenderImage    string         `json:"sender_image,omitempty"`
+	Content        string         `json:"content"`
+	Type           string         `json:"type"`
+	MediaURLs      []string       `json:"media_urls,omitempty"`
+	CreatedAt      time.Time      `json:"created_at"`
 	RecipientIDs          []string       `json:"recipient_ids"`
 	RecipientUnreadCounts map[string]int `json:"recipient_unread_counts,omitempty"`
 }
@@ -26,6 +29,7 @@ type TypingEvent struct {
 	ConversationID string   `json:"conversation_id"`
 	UserID         string   `json:"user_id"`
 	UserName       string   `json:"user_name,omitempty"`
+	UserImage      string   `json:"user_image,omitempty"`
 	IsTyping       bool     `json:"is_typing"`
 	RecipientIDs   []string `json:"recipient_ids"`
 }
