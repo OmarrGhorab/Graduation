@@ -97,8 +97,7 @@ func (s *Service) GetUserConversations(userID, role, convType, search string, li
 	if err == nil {
 		// Sync & Store Metadata for Groups
 		for _, g := range discovery.Groups {
-			_, _ = s.repo.UpsertCourseGroup(g.ID, g.Name, userID, g.Image)
-			_ = s.repo.EnsureMembership(g.ID, userID)
+			_ = s.syncCourseGroup(g.ID, g.Name, g.Image, userID)
 			discoveryMetadata[g.ID] = struct {
 				Category string
 				Relation string
@@ -265,6 +264,46 @@ func (s *Service) GetUserConversations(userID, role, convType, search string, li
 		end = total
 	}
 	return responses[offset:end], nil
+}
+
+func (s *Service) syncCourseGroup(courseID, name, imageURL, fallbackUserID string) error {
+	groupMembers, err := s.userService.FetchCourseGroupMembers(courseID)
+	if err != nil || len(groupMembers) == 0 {
+		_, upsertErr := s.repo.UpsertCourseGroup(courseID, name, fallbackUserID, imageURL)
+		if upsertErr != nil {
+			return upsertErr
+		}
+		return s.repo.EnsureMembership(courseID, fallbackUserID)
+	}
+
+	creatorID := fallbackUserID
+	for _, member := range groupMembers {
+		if member.Role == string(models.RoleOwner) {
+			creatorID = member.UserID
+			break
+		}
+	}
+
+	_, err = s.repo.UpsertCourseGroup(courseID, name, creatorID, imageURL)
+	if err != nil {
+		return err
+	}
+
+	for _, member := range groupMembers {
+		role := models.RoleMember
+		switch member.Role {
+		case string(models.RoleOwner):
+			role = models.RoleOwner
+		case string(models.RoleAdmin):
+			role = models.RoleAdmin
+		}
+
+		if err := s.repo.EnsureMembershipWithRole(courseID, member.UserID, role); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 func (s *Service) GetConversation(id, userID string) (*models.ConversationResponse, error) {

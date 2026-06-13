@@ -8,9 +8,9 @@ import (
 
 	courseDomain "github.com/OmarrGhorab/courses-attendance-service/internal/domain/course"
 	"github.com/OmarrGhorab/courses-attendance-service/internal/domain/events"
-	"github.com/OmarrGhorab/courses-attendance-service/internal/infrastructure/clock"
 	"github.com/OmarrGhorab/courses-attendance-service/internal/infrastructure/aiclient"
 	"github.com/OmarrGhorab/courses-attendance-service/internal/infrastructure/authclient"
+	"github.com/OmarrGhorab/courses-attendance-service/internal/infrastructure/clock"
 	"github.com/OmarrGhorab/courses-attendance-service/internal/infrastructure/cloudinary"
 	"github.com/OmarrGhorab/courses-attendance-service/internal/infrastructure/notificationevents"
 	"github.com/OmarrGhorab/courses-attendance-service/internal/infrastructure/persistence/postgres"
@@ -29,12 +29,12 @@ var (
 
 // Service handles course-related business logic
 type Service struct {
-	courseRepo     *postgres.CourseRepository
-	subjectRepo    *postgres.SubjectRepository
-	enrollmentRepo *postgres.EnrollmentRepository
-	assistantRepo  *postgres.CourseAssistantRepository
-	events          *notificationevents.EventDispatcher
-	clock           clock.Clock
+	courseRepo        *postgres.CourseRepository
+	subjectRepo       *postgres.SubjectRepository
+	enrollmentRepo    *postgres.EnrollmentRepository
+	assistantRepo     *postgres.CourseAssistantRepository
+	events            *notificationevents.EventDispatcher
+	clock             clock.Clock
 	teacherRatingRepo *postgres.TeacherRatingRepository
 	progressRepo      *postgres.ProgressSnapshotRepository
 	authClient        *authclient.Client
@@ -53,15 +53,15 @@ type ChildAnalytics struct {
 
 // CourseProgress represents a child's details in a specific course
 type CourseProgress struct {
-	CourseID        uuid.UUID `json:"courseId"`
-	Title           string    `json:"title"`
-	TeacherName     string    `json:"teacherName"`
-	TeacherRating   float64   `json:"teacherRating"`
-	Progress        float64   `json:"progress"`         // Overall progress %
-	Attendance      float64   `json:"attendance"`       // Attendance %
+	CourseID         uuid.UUID `json:"courseId"`
+	Title            string    `json:"title"`
+	TeacherName      string    `json:"teacherName"`
+	TeacherRating    float64   `json:"teacherRating"`
+	Progress         float64   `json:"progress"`   // Overall progress %
+	Attendance       float64   `json:"attendance"` // Attendance %
 	LessonsCompleted int       `json:"lessonsCompleted"`
-	TotalLessons    int       `json:"totalLessons"`
-	Status          string    `json:"status"`           // Course status
+	TotalLessons     int       `json:"totalLessons"`
+	Status           string    `json:"status"` // Course status
 }
 
 // TeacherAnalytics represents the top-level stats for a teacher
@@ -92,6 +92,11 @@ type ChatContexts struct {
 	Students   []uuid.UUID `json:"students"`
 	Assistants []uuid.UUID `json:"assistants"`
 	Groups     []GroupInfo `json:"groups"`
+}
+
+type CourseGroupMember struct {
+	UserID uuid.UUID `json:"user_id"`
+	Role   string    `json:"role"`
 }
 
 // GroupInfo represents a course-based group
@@ -231,10 +236,10 @@ func (s *Service) GetCourse(ctx context.Context, id uuid.UUID) (*courseDomain.Co
 	if course == nil {
 		return nil, ErrCourseNotFound
 	}
-	
+
 	count, _ := s.enrollmentRepo.CountByCourseID(ctx, id)
 	course.EnrollmentCount = int(count)
-	
+
 	return course, nil
 }
 
@@ -244,13 +249,13 @@ func (s *Service) ListCourses(ctx context.Context, filters map[string]interface{
 	if err != nil {
 		return nil, 0, err
 	}
-	
+
 	// Populate counts for all courses
 	for i := range courses {
 		count, _ := s.enrollmentRepo.CountByCourseID(ctx, courses[i].ID)
 		courses[i].EnrollmentCount = int(count)
 	}
-	
+
 	return courses, total, nil
 }
 
@@ -438,7 +443,6 @@ func (s *Service) EnrollStudent(ctx context.Context, courseID, studentID uuid.UU
 	return enrollment, nil
 }
 
-
 func (s *Service) GetEnrollment(ctx context.Context, courseID, studentID uuid.UUID) (*courseDomain.Enrollment, error) {
 	return s.enrollmentRepo.GetByCourseAndUser(ctx, courseID, studentID)
 }
@@ -504,7 +508,6 @@ func (s *Service) NotifyStudentEnrollment(ctx context.Context, courseID, student
 
 	return nil
 }
-
 
 // AddAssistant adds an assistant to a course
 func (s *Service) AddAssistant(ctx context.Context, courseID, teacherID, assistantID uuid.UUID) (*courseDomain.CourseAssistant, error) {
@@ -724,8 +727,6 @@ func (s *Service) MarkEnrollmentPaid(ctx context.Context, courseID, studentID uu
 	return nil
 }
 
-
-
 // GetCourseAssistants returns all assistants for a course
 func (s *Service) GetCourseAssistants(ctx context.Context, courseID uuid.UUID) ([]courseDomain.CourseAssistant, error) {
 	return s.assistantRepo.GetByCourseID(ctx, courseID)
@@ -757,7 +758,6 @@ func (s *Service) RemoveAssistant(ctx context.Context, courseID, teacherID, assi
 	return s.assistantRepo.Delete(ctx, courseID, assistantID)
 }
 
-
 func (s *Service) ListSubjects(ctx context.Context) ([]courseDomain.Subject, error) {
 	return s.subjectRepo.GetAll(ctx)
 }
@@ -778,7 +778,6 @@ func (s *Service) CreateSubject(ctx context.Context, name, description, icon str
 
 	return subject, nil
 }
-
 
 // GetTeacherAnalytics aggregates all analytics for a teacher
 func (s *Service) GetTeacherAnalytics(ctx context.Context, teacherID uuid.UUID) (*TeacherAnalytics, error) {
@@ -897,7 +896,7 @@ func (s *Service) GetParentAnalytics(ctx context.Context, parentID uuid.UUID) ([
 
 			// Get progress snapshot
 			progress, err := s.progressRepo.GetByCourseAndStudent(ctx, e.CourseID, childID)
-			
+
 			// Get teacher info
 			var teacherName string
 			var teacherRating float64
@@ -905,7 +904,7 @@ func (s *Service) GetParentAnalytics(ctx context.Context, parentID uuid.UUID) ([
 			if err == nil && teacherInfo != nil {
 				teacherName = teacherInfo.Name
 			}
-			
+
 			rating, _ := s.teacherRatingRepo.GetTeacherAvgRating(ctx, course.TeacherID)
 			if rating != nil {
 				teacherRating = rating.AvgRating
@@ -957,7 +956,7 @@ func (s *Service) GetChatContexts(ctx context.Context, userID uuid.UUID, role st
 
 		for _, c := range courses {
 			teacherSet[c.TeacherID] = true
-			
+
 			// Priority: GroupImage -> CourseImage
 			img := c.GroupImage
 			if img == "" {
@@ -1000,7 +999,7 @@ func (s *Service) GetChatContexts(ctx context.Context, userID uuid.UUID, role st
 				img = c.CourseImage
 			}
 			contexts.Groups = append(contexts.Groups, GroupInfo{
-				ID:    c.ID, 
+				ID:    c.ID,
 				Name:  c.Title,
 				Image: img,
 			})
@@ -1044,7 +1043,7 @@ func (s *Service) GetChatContexts(ctx context.Context, userID uuid.UUID, role st
 					img = c.CourseImage
 				}
 				contexts.Groups = append(contexts.Groups, GroupInfo{
-					ID:    c.ID, 
+					ID:    c.ID,
 					Name:  c.Title,
 					Image: img,
 				})
@@ -1072,6 +1071,44 @@ func (s *Service) GetChatContexts(ctx context.Context, userID uuid.UUID, role st
 func (s *Service) GetTeacherAuthority(ctx context.Context, teacherID uuid.UUID) (int, error) {
 	count, err := s.enrollmentRepo.CountByTeacherID(ctx, teacherID)
 	return int(count), err
+}
+
+func (s *Service) GetCourseGroupMembers(ctx context.Context, courseID uuid.UUID) ([]CourseGroupMember, error) {
+	course, err := s.courseRepo.GetByID(ctx, courseID)
+	if err != nil {
+		return nil, err
+	}
+
+	members := []CourseGroupMember{
+		{UserID: course.TeacherID, Role: "OWNER"},
+	}
+
+	assistants, err := s.GetCourseAssistants(ctx, courseID)
+	if err != nil {
+		return nil, err
+	}
+	for _, assistant := range assistants {
+		members = append(members, CourseGroupMember{
+			UserID: assistant.AssistantID,
+			Role:   "ADMIN",
+		})
+	}
+
+	enrollments, err := s.GetCourseEnrollments(ctx, courseID)
+	if err != nil {
+		return nil, err
+	}
+	for _, enrollment := range enrollments {
+		if enrollment.UserID == course.TeacherID {
+			continue
+		}
+		members = append(members, CourseGroupMember{
+			UserID: enrollment.UserID,
+			Role:   "MEMBER",
+		})
+	}
+
+	return members, nil
 }
 
 // UploadCourseImage uploads a course image to Cloudinary and returns the URL

@@ -1,12 +1,13 @@
 package repository
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 	"time"
 
-	"github.com/graduation/chat-service/internal/models"
 	"github.com/google/uuid"
+	"github.com/graduation/chat-service/internal/models"
 	"gorm.io/gorm"
 )
 
@@ -102,10 +103,11 @@ func (r *Repository) FindOrCreateDirectConversation(user1, user2 string) (*model
 func (r *Repository) UpsertCourseGroup(courseID, name, creatorID, imageURL string) (*models.Conversation, error) {
 	var conv models.Conversation
 	if err := r.db.First(&conv, "id = ?", courseID).Error; err == nil {
-		// Update name and image if exists without touching updated_at
+		// Update metadata if exists without touching updated_at
 		return &conv, r.db.Model(&conv).UpdateColumns(map[string]interface{}{
-			"name":      name,
-			"image_url": imageURL,
+			"name":       name,
+			"image_url":  imageURL,
+			"created_by": creatorID,
 		}).Error
 	}
 
@@ -131,16 +133,26 @@ func (r *Repository) UpsertCourseGroup(courseID, name, creatorID, imageURL strin
 }
 
 func (r *Repository) EnsureMembership(conversationID, userID string) error {
+	return r.EnsureMembershipWithRole(conversationID, userID, models.RoleMember)
+}
+
+func (r *Repository) EnsureMembershipWithRole(conversationID, userID string, role models.MemberRole) error {
 	var m models.ConversationMember
 	err := r.db.Where("conversation_id = ? AND user_id = ?", conversationID, userID).First(&m).Error
 	if err == nil {
+		if m.Role != role {
+			return r.db.Model(&m).Update("role", role).Error
+		}
 		return nil // already a member
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return err
 	}
 
 	m = models.ConversationMember{
 		ConversationID: conversationID,
 		UserID:         userID,
-		Role:           models.RoleMember,
+		Role:           role,
 		JoinedAt:       time.Now(),
 	}
 	return r.db.Create(&m).Error
@@ -190,31 +202,31 @@ func (r *Repository) DeleteConversation(conversationID string) error {
 	// Delete conversation (cascade should handle members and messages if configured)
 	// Otherwise, manually delete related records
 	tx := r.db.Begin()
-	
+
 	// Delete members
 	if err := tx.Where("conversation_id = ?", conversationID).Delete(&models.ConversationMember{}).Error; err != nil {
 		tx.Rollback()
 		return err
 	}
-	
+
 	// Delete messages
 	if err := tx.Where("conversation_id = ?", conversationID).Delete(&models.Message{}).Error; err != nil {
 		tx.Rollback()
 		return err
 	}
-	
+
 	// Delete pinned messages
 	if err := tx.Where("conversation_id = ?", conversationID).Delete(&models.PinnedMessage{}).Error; err != nil {
 		tx.Rollback()
 		return err
 	}
-	
+
 	// Delete conversation
 	if err := tx.Where("id = ?", conversationID).Delete(&models.Conversation{}).Error; err != nil {
 		tx.Rollback()
 		return err
 	}
-	
+
 	return tx.Commit().Error
 }
 
@@ -223,13 +235,13 @@ func (r *Repository) DeleteConversation(conversationID string) error {
 func (r *Repository) CreateMessage(m *models.Message) error {
 	// Start a transaction to create message and update conversation
 	tx := r.db.Begin()
-	
+
 	// Create the message
 	if err := tx.Create(m).Error; err != nil {
 		tx.Rollback()
 		return err
 	}
-	
+
 	// Update the conversation's updated_at timestamp
 	if err := tx.Model(&models.Conversation{}).
 		Where("id = ?", m.ConversationID).
@@ -237,19 +249,19 @@ func (r *Repository) CreateMessage(m *models.Message) error {
 		tx.Rollback()
 		return err
 	}
-	
+
 	return tx.Commit().Error
 }
 
 func (r *Repository) GetMessages(conversationID string, search string, limit, offset int) ([]models.Message, error) {
 	var messages []models.Message
 	query := r.db.Where("conversation_id = ? AND is_deleted = ?", conversationID, false)
-	
+
 	// Apply search filter if provided
 	if search != "" {
 		query = query.Where("content ILIKE ?", "%"+search+"%")
 	}
-	
+
 	err := query.Order("created_at desc").
 		Limit(limit).
 		Offset(offset).
@@ -302,7 +314,7 @@ func (r *Repository) GetMessagesByType(conversationID string, messageType models
 func (r *Repository) GetMessagesWithLinks(conversationID string) ([]models.Message, error) {
 	var messages []models.Message
 	// Match messages containing http:// or https://
-	err := r.db.Where("conversation_id = ? AND type = ? AND is_deleted = ? AND (content LIKE ? OR content LIKE ?)", 
+	err := r.db.Where("conversation_id = ? AND type = ? AND is_deleted = ? AND (content LIKE ? OR content LIKE ?)",
 		conversationID, models.Text, false, "%http://%", "%https://%").
 		Order("created_at desc").
 		Find(&messages).Error
@@ -331,7 +343,7 @@ func (r *Repository) GetUnreadCount(conversationID, userID string) (int64, error
 		Where("conversation_id = ? AND sender_id != ? AND created_at > ? AND is_deleted = ?",
 			conversationID, userID, member.LastReadAt, false).
 		Count(&count).Error
-	
+
 	return count, err
 }
 
@@ -366,6 +378,6 @@ func (r *Repository) GetReadReceiptsForMessages(messageIDs []string) (map[string
 	for _, receipt := range receipts {
 		result[receipt.MessageID] = append(result[receipt.MessageID], receipt)
 	}
-	
+
 	return result, nil
 }

@@ -38,6 +38,7 @@ func (h *InternalHandler) RegisterRoutes(router fiber.Router) {
 	internal.Get("/reports/student/:userId", h.GetReport)
 	internal.Get("/reports/student/:userId/weekly", h.GetReport) // Backward compatibility
 	internal.Get("/users/:userId/chat-contexts", h.GetChatContexts)
+	internal.Get("/courses/:courseId/chat-members", h.GetCourseGroupMembers)
 }
 
 func (h *InternalHandler) InternalEnroll(c *fiber.Ctx) error {
@@ -66,7 +67,6 @@ func (h *InternalHandler) InternalEnroll(c *fiber.Ctx) error {
 		"data":    dto.ToEnrollmentResponse(enrollment),
 	})
 }
-
 
 func (h *InternalHandler) GetCourse(c *fiber.Ctx) error {
 	id, err := uuid.Parse(c.Params("id"))
@@ -138,7 +138,6 @@ func (h *InternalHandler) ActivateEnrollment(c *fiber.Ctx) error {
 		return handleServiceError(c, err)
 	}
 
-
 	return c.JSON(fiber.Map{
 		"success": true,
 		"message": "Enrollment activated successfully",
@@ -203,16 +202,16 @@ func (h *InternalHandler) ListAllCourses(c *fiber.Ctx) error {
 			authority, _ = h.courseService.GetTeacherAuthority(c.Context(), crs.TeacherID)
 			teacherAuthorityMap[crs.TeacherID] = authority
 		}
-		
+
 		tInfo, ok := teacherInfoMap[crs.TeacherID]
 		if !ok {
 			tInfo, _ = h.authClient.GetUserInfo(c.Context(), crs.TeacherID.String())
 			teacherInfoMap[crs.TeacherID] = tInfo
 		}
-		
+
 		resp := dto.ToCourseResponse(&crs)
 		resp.TeacherAuthority = authority
-		
+
 		if tInfo != nil {
 			resp.TeacherName = tInfo.Name
 			resp.TeacherProfileImg = tInfo.ProfileImg
@@ -300,4 +299,22 @@ func (h *InternalHandler) GetChatContexts(c *fiber.Ctx) error {
 	})
 }
 
+func (h *InternalHandler) GetCourseGroupMembers(c *fiber.Ctx) error {
+	courseID, err := uuid.Parse(c.Params("courseId"))
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"success": false,
+			"error":   "Invalid course ID",
+		})
+	}
 
+	members, err := h.courseService.GetCourseGroupMembers(c.Context(), courseID)
+	if err != nil {
+		return handleServiceError(c, err)
+	}
+
+	return c.JSON(fiber.Map{
+		"success": true,
+		"data":    members,
+	})
+}

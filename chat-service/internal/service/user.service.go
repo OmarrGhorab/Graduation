@@ -22,6 +22,11 @@ type GroupInfo struct {
 	Image string `json:"image"`
 }
 
+type CourseGroupMember struct {
+	UserID string `json:"user_id"`
+	Role   string `json:"role"`
+}
+
 type ChatContexts struct {
 	Teachers   []string    `json:"teachers"`
 	Students   []string    `json:"students"`
@@ -148,6 +153,37 @@ func (s *UserService) FetchChatContexts(userID, role string) (*ChatContexts, err
 	return result.Data, nil
 }
 
+func (s *UserService) FetchCourseGroupMembers(courseID string) ([]CourseGroupMember, error) {
+	url := fmt.Sprintf("%s/api/v1/internal/courses/%s/chat-members", s.coursesServiceURL, courseID)
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Set("x-internal-service-secret", s.internalServiceSecret)
+
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("courses service returned status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var result struct {
+		Success bool                `json:"success"`
+		Data    []CourseGroupMember `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, err
+	}
+
+	return result.Data, nil
+}
+
 func (s *UserService) fetchProfilesList(url string) ([]*UserProfile, error) {
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
@@ -177,4 +213,3 @@ func (s *UserService) fetchProfilesList(url string) ([]*UserProfile, error) {
 
 	return result.Data, nil
 }
-
