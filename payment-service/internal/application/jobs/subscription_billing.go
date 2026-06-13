@@ -9,6 +9,8 @@ import (
 	"github.com/OmarrGhorab/payment-service/internal/application/payment"
 	subscriptionApp "github.com/OmarrGhorab/payment-service/internal/application/subscription"
 	subscriptionDomain "github.com/OmarrGhorab/payment-service/internal/domain/subscription"
+	"github.com/OmarrGhorab/payment-service/internal/infrastructure/authclient"
+	"github.com/OmarrGhorab/payment-service/internal/infrastructure/coursesclient"
 	"github.com/OmarrGhorab/payment-service/internal/infrastructure/messaging/kafka"
 	"github.com/OmarrGhorab/payment-service/internal/infrastructure/notification"
 	"github.com/OmarrGhorab/payment-service/internal/infrastructure/paymob"
@@ -23,6 +25,8 @@ type SubscriptionBillingJob struct {
 	paymentMethodRepo   *postgres.PaymentMethodRepository
 	emailService        *notification.EmailService
 	kafkaProducer       *kafka.Producer
+	authClient          *authclient.Client
+	coursesClient       *coursesclient.Client
 }
 
 func NewSubscriptionBillingJob(
@@ -32,6 +36,8 @@ func NewSubscriptionBillingJob(
 	pmRepo *postgres.PaymentMethodRepository,
 	emailSvc *notification.EmailService,
 	kafkaProducer *kafka.Producer,
+	authClient *authclient.Client,
+	coursesClient *coursesclient.Client,
 ) *SubscriptionBillingJob {
 	return &SubscriptionBillingJob{
 		subscriptionService: subSvc,
@@ -40,6 +46,8 @@ func NewSubscriptionBillingJob(
 		paymentMethodRepo:   pmRepo,
 		emailService:        emailSvc,
 		kafkaProducer:       kafkaProducer,
+		authClient:          authClient,
+		coursesClient:       coursesClient,
 	}
 }
 
@@ -86,38 +94,87 @@ func (j *SubscriptionBillingJob) processReminder(ctx context.Context, subscripti
 		return err
 	}
 
-	// 1. Send Email Reminder
 	amount := fmt.Sprintf("%.2f", float64(sub.PriceCents)/100)
-	emailData := notification.SubscriptionRenewalEmail{
-		UserName:        "Student", // Should get from auth
-		CourseName:      "Course Name", // Should get from course service
-		Amount:          amount,
-		Currency:        sub.Currency,
-		NextBillingDate: sub.NextBillingDate.Format("January 2, 2006"),
-		SubscriptionID:  sub.ID.String(),
+
+	// Fetch real user name and email
+	userName := "Student"
+	userEmail := ""
+	if userInfo, err := j.authClient.GetUserInfo(ctx, sub.UserID.String()); err == nil && userInfo != nil {
+		userName = userInfo.Name
+		userEmail = userInfo.Email
+	} else {
+		log.Printf("[BillingJob] Failed to fetch user info for %s: %v", sub.UserID, err)
 	}
 
-	userEmail := "student@example.com" // TODO: Get from auth
-	if err := j.emailService.SendSubscriptionRenewalNotification(ctx, userEmail, emailData); err != nil {
-		log.Printf("Failed to email reminder for sub %s: %v", sub.ID, err)
+	// Fetch real course name
+	courseName := "your course"
+	if courseInfo, err := j.coursesClient.GetCourseByID(ctx, sub.CourseID.String()); err == nil && courseInfo != nil {
+		courseName = courseInfo.Title
+	} else {
+		log.Printf("[BillingJob] Failed to fetch course info for %s: %v", sub.CourseID, err)
 	}
 
-	// 2. Emit Kafka Event for In-App Notification
-	notificationEvent := map[string]interface{}{
+	daysLeft := int(time.Until(sub.NextBillingDate).Hours() / 24)
+	if daysLeft < 1 {
+		daysLeft = 1
+	}
+
+	// 1. Send Email Reminder to student
+	if userEmail != "" {
+		emailData := notification.SubscriptionRenewalEmail{
+			UserName:        userName,
+			CourseName:      courseName,
+			Amount:          amount,
+			Currency:        sub.Currency,
+			NextBillingDate: sub.NextBillingDate.Format("January 2, 2006"),
+			SubscriptionID:  sub.ID.String(),
+		}
+		if err := j.emailService.SendSubscriptionRenewalNotification(ctx, userEmail, emailData); err != nil {
+			log.Printf("[BillingJob] Failed to email reminder for sub %s: %v", sub.ID, err)
+		}
+	}
+
+	// 2. Emit Kafka notification for the student
+	studentEvent := map[string]interface{}{
 		"event_type":      "subscription.renewal_soon",
 		"user_id":         sub.UserID.String(),
 		"subscription_id": sub.ID.String(),
 		"course_id":       sub.CourseID.String(),
+		"course_name":     courseName,
 		"amount":          amount,
 		"currency":        sub.Currency,
 		"next_billing":    sub.NextBillingDate.Format("2006-01-02"),
-		"days_left":       3,
+		"days_left":       daysLeft,
 	}
-	if err := j.kafkaProducer.Publish(ctx, "notifications.v1", sub.UserID.String(), notificationEvent); err != nil {
-		log.Printf("Failed to publish renewal notification event: %v", err)
+	if err := j.kafkaProducer.Publish(ctx, "notifications.v1", sub.UserID.String(), studentEvent); err != nil {
+		log.Printf("[BillingJob] Failed to publish student renewal event: %v", err)
 	}
 
-	// 3. Update record to mark reminder as sent
+	// 3. Emit Kafka notification for each parent of the student
+	parents, err := j.authClient.GetParents(ctx, sub.UserID.String())
+	if err != nil {
+		log.Printf("[BillingJob] Failed to fetch parents for user %s: %v", sub.UserID, err)
+	}
+	for _, parent := range parents {
+		parentEvent := map[string]interface{}{
+			"event_type":      "subscription.renewal_soon",
+			"user_id":         parent.ID,
+			"subscription_id": sub.ID.String(),
+			"course_id":       sub.CourseID.String(),
+			"course_name":     courseName,
+			"child_id":        sub.UserID.String(),
+			"child_name":      userName,
+			"amount":          amount,
+			"currency":        sub.Currency,
+			"next_billing":    sub.NextBillingDate.Format("2006-01-02"),
+			"days_left":       daysLeft,
+		}
+		if err := j.kafkaProducer.Publish(ctx, "notifications.v1", parent.ID, parentEvent); err != nil {
+			log.Printf("[BillingJob] Failed to publish parent renewal event for parent %s: %v", parent.ID, err)
+		}
+	}
+
+	// 4. Mark reminder as sent
 	return j.subscriptionRepo.UpdateReminderSent(ctx, sub.ID)
 }
 

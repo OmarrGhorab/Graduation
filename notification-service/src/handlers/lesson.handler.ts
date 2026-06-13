@@ -180,6 +180,7 @@ export const setupLessonHandlers = () => {
         console.log(`[LessonHandler] Fanning out LESSON_REMINDER (${minutes_before}m) for ${lesson_id} to ${studentIds.length} students`);
 
         for (const studentId of studentIds) {
+            // 1. Notify student
             await publishNotification(studentId, {
                 type: 'LESSON_REMINDER',
                 lesson_id,
@@ -187,6 +188,21 @@ export const setupLessonHandlers = () => {
                 lesson_title,
                 minutes_before
             });
+
+            // 2. Notify parents
+            const childInfo = await getChildInfo(studentId);
+            const parents = await getChildParents(studentId);
+            for (const parent of parents) {
+                await publishNotification(parent.id, {
+                    type: 'CHILD_LESSON_REMINDER',
+                    lesson_id,
+                    course_id,
+                    child_id: studentId,
+                    child_name: childInfo?.name || 'Your child',
+                    lesson_title,
+                    minutes_before
+                });
+            }
         }
     });
 

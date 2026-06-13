@@ -45,9 +45,18 @@ func QRTokenKey(lessonID string) string {
 	return fmt.Sprintf("attendance:lesson:%s:active_qr", lessonID)
 }
 
-// QRNonceKey returns the key for a QR nonce
+// QRNonceKey returns the shared key that proves a QR nonce is still in its valid rotation window.
+// This key is NOT consumed on scan — it lives for the full nonce TTL so all students can verify
+// the QR is still valid for this rotation period.
 func QRNonceKey(lessonID, nonce string) string {
 	return fmt.Sprintf("attendance:lesson:%s:nonce:%s", lessonID, nonce)
+}
+
+// QRNonceStudentKey returns the per-student consumed key for a QR nonce.
+// This is set when a specific student scans, preventing that student from reusing the
+// same QR payload — without blocking other students from scanning the same code.
+func QRNonceStudentKey(lessonID, nonce, studentID string) string {
+	return fmt.Sprintf("attendance:lesson:%s:nonce:%s:student:%s", lessonID, nonce, studentID)
 }
 
 // QRTokenData represents the QR token stored in Redis
@@ -96,18 +105,38 @@ func (c *Client) SetQRNonce(ctx context.Context, lessonID, nonce string, ttl tim
 	return c.client.Set(ctx, QRNonceKey(lessonID, nonce), "1", ttl).Err()
 }
 
-// CheckQRNonce checks if a nonce exists (not consumed)
-func (c *Client) CheckQRNonce(ctx context.Context, lessonID, nonce string) (bool, error) {
-	exists, err := c.client.Exists(ctx, QRNonceKey(lessonID, nonce)).Result()
+// CheckQRNonce checks two things:
+//  1. The global nonce key exists → QR is still in its valid rotation window.
+//  2. This specific student has NOT already scanned this nonce → no per-student replay.
+//
+// Returns (true, nil) only when both conditions hold.
+func (c *Client) CheckQRNonce(ctx context.Context, lessonID, nonce, studentID string) (bool, error) {
+	// 1. Is the QR nonce still in its valid rotation window?
+	nonceExists, err := c.client.Exists(ctx, QRNonceKey(lessonID, nonce)).Result()
 	if err != nil {
 		return false, err
 	}
-	return exists > 0, nil
+	if nonceExists == 0 {
+		return false, nil // QR has expired or never existed
+	}
+
+	// 2. Has this student already scanned this exact nonce?
+	studentConsumed, err := c.client.Exists(ctx, QRNonceStudentKey(lessonID, nonce, studentID)).Result()
+	if err != nil {
+		return false, err
+	}
+	if studentConsumed > 0 {
+		return false, nil // This student already used this QR payload
+	}
+
+	return true, nil
 }
 
-// ConsumeQRNonce marks a nonce as consumed by deleting it
-func (c *Client) ConsumeQRNonce(ctx context.Context, lessonID, nonce string) error {
-	return c.client.Del(ctx, QRNonceKey(lessonID, nonce)).Err()
+// ConsumeQRNonce records that a specific student has used this nonce.
+// The global nonce key is preserved so other students can still scan the same QR code.
+// The per-student key TTL matches the global nonce TTL to ensure cleanup.
+func (c *Client) ConsumeQRNonce(ctx context.Context, lessonID, nonce, studentID string, ttl time.Duration) error {
+	return c.client.Set(ctx, QRNonceStudentKey(lessonID, nonce, studentID), "1", ttl).Err()
 }
 
 // ========== Scan Lock Operations ==========

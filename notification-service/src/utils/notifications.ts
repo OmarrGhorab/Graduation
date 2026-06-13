@@ -229,45 +229,68 @@ export async function publishNotification(
       delete data.data;
       data = { ...data, ...nested };
     }
-    // Check for duplicate notification in the last 30 seconds
-    // This prevents duplicate notifications from rapid retries or double-clicks
+    // Check for true duplicates - uses type-specific key fields, not just type alone
     const thirtySecondsAgo = new Date(Date.now() - 30 * 1000);
     const recentDuplicate = await prisma.notification.findFirst({
-      where: {
-        userId,
-        type: data.type,
-        createdAt: { gte: thirtySecondsAgo },
-      },
+      where: { userId, type: data.type, createdAt: { gte: thirtySecondsAgo } },
       orderBy: { createdAt: 'desc' },
     });
 
     if (recentDuplicate) {
-      // Check if the notification data is similar (same device for security alerts)
-      const existingData = recentDuplicate.data as Record<string, any>;
-      const isSameDevice = data.newDevice && existingData.newDevice &&
-        data.newDevice.name === existingData.newDevice?.name &&
-        data.newDevice.platform === existingData.newDevice?.platform;
+      const existing = recentDuplicate.data as Record<string, any>;
 
-      if (isSameDevice || data.type === recentDuplicate.type) {
-        console.log(`[Notification] Skipping duplicate notification for user ${userId}, type: ${data.type} (sent ${Math.round((Date.now() - recentDuplicate.createdAt.getTime()) / 1000)}s ago)`);
-        return; // Skip duplicate
+      // Security: deduplicate by same device
+      if (data.newDevice && existing.newDevice &&
+          data.newDevice.name === existing.newDevice?.name &&
+          data.newDevice.platform === existing.newDevice?.platform) {
+        console.log(`[Notification] Skipping duplicate security alert for user ${userId}`);
+        return;
+      }
+
+      // Chat: only deduplicate if it's literally the same message
+      if (data.type === 'chat.message') {
+        if (data.message_id && existing.message_id && data.message_id === existing.message_id) {
+          console.log(`[Notification] Skipping duplicate chat message ${data.message_id}`);
+          return;
+        }
+        // Different message_id → allow through, don't deduplicate
+      } else if (data.type.startsWith('LESSON_') || data.type.startsWith('CHILD_LESSON_')) {
+        // Lesson events: deduplicate by lesson_id
+        if (data.lesson_id && existing.lesson_id && data.lesson_id === existing.lesson_id) {
+          console.log(`[Notification] Skipping duplicate lesson event ${data.lesson_id}`);
+          return;
+        }
+      } else if (data.type.startsWith('ATTENDANCE_') || data.type.startsWith('CHILD_ATTENDANCE_')) {
+        // Attendance: deduplicate by lesson_id + student
+        if (data.lesson_id && existing.lesson_id && data.lesson_id === existing.lesson_id) {
+          console.log(`[Notification] Skipping duplicate attendance event for lesson ${data.lesson_id}`);
+          return;
+        }
+      } else if (data.type === 'parent_link_request' || data.type === 'unlink_request') {
+        // Link requests: deduplicate by request_id
+        if (data.requestId && existing.requestId && data.requestId === existing.requestId) {
+          return;
+        }
+      } else if (!['SUBSCRIPTION_RENEWAL_SOON', 'CHILD_SUBSCRIPTION_RENEWAL_SOON', 'LESSON_REMINDER', 'CHILD_LESSON_REMINDER'].includes(data.type)) {
+        // For all other non-repeating types, deduplicate by type within 30s
+        console.log(`[Notification] Skipping duplicate ${data.type} for user ${userId}`);
+        return;
       }
     }
 
-    // Save to database for persistence and pagination
+    // Save to database
     const notification = await prisma.notification.create({
-      data: {
-        userId,
-        type: data.type,
-        data: data,
-      },
+      data: { userId, type: data.type, data: data },
     });
+
+    // Include DB notification id in the data so FCM and SSE share the same id
+    const dataWithId = { ...data, notification_id: notification.id };
 
     // Enrich for UI delivery
     const enriched = enrichNotification({
       id: notification.id,
       type: data.type,
-      data: data,
+      data: dataWithId,
       read: false,
       createdAt: notification.createdAt,
     });
@@ -280,8 +303,8 @@ export async function publishNotification(
     const notificationsEnabled = await getUserNotificationPreference(userId);
 
     if (notificationsEnabled) {
-      // User has notifications enabled - send FCM push
-      await sendFcmNotification(userId, data);
+      // Pass dataWithId so FCM payload includes the DB notification_id
+      await sendFcmNotification(userId, dataWithId);
       console.log(`[Notification] FCM push sent for user ${userId} (notifications enabled)`);
     } else {
       console.log(`[Notification] Skipping FCM push for user ${userId} (notifications disabled)`);
@@ -545,10 +568,12 @@ function getNotificationTitle(type: string, data?: Record<string, any>): string 
     "LESSON_CANCELED": "Lesson Canceled ⚠️",
     "LESSON_RESCHEDULED": "Lesson Rescheduled 📅",
     "LESSON_REMINDER": "Upcoming Lesson 🔔",
+    "CHILD_LESSON_REMINDER": "Child's Lesson Starting Soon 🔔",
     "CHILD_LESSON_STARTED": "Child's Lesson Started 🚀",
     "CHILD_LESSON_ENDED": "Child's Lesson Ended ✅",
     "CHILD_ATTENDANCE_RECORDED": "Child Arrived at Lesson 📍",
     "SUBSCRIPTION_RENEWAL_SOON": "Subscription Renewal Soon 💳",
+    "CHILD_SUBSCRIPTION_RENEWAL_SOON": "Child's Subscription Renewing 💳",
     "SUBSCRIPTION_PAYMENT_FAILED": "Payment Failed ❌",
     "COURSE_REVIEW": "New Course Review ⭐",
   };
@@ -617,10 +642,15 @@ function getNotificationBody(
       return `The lesson has been moved to ${data.new_scheduled_at || "a new time"}.`;
     case "LESSON_REMINDER":
       return `Lesson "${data.lesson_title || "Lesson"}" starts in ${data.minutes_before || "a few"} minutes!`;
+    case "CHILD_LESSON_REMINDER":
+      return `Your child ${data.child_name || "has a lesson"} starting in ${data.minutes_before || "a few"} minutes: "${data.lesson_title || "Lesson"}"`;
+
     case "SUBSCRIPTION_RENEWAL_SOON":
-      return `Your subscription for "${data.course_name || "Course"}" is renewing in ${data.days_left || 3} days (${data.amount} ${data.currency}).`;
+      return `Your subscription for "${data.course_name || "your course"}" is renewing in ${data.days_left || 3} days (${data.amount} ${data.currency}).`;
+    case "CHILD_SUBSCRIPTION_RENEWAL_SOON":
+      return `Your child ${data.child_name || "has"} a subscription for "${data.course_name || "a course"}" renewing in ${data.days_left || 3} days (${data.amount} ${data.currency}).`;
     case "SUBSCRIPTION_PAYMENT_FAILED":
-      return `We couldn't process your payment for "${data.course_name || "Course"}". Please check your payment method.`;
+      return `We couldn't process your payment for "${data.course_name || "your course"}". Please check your payment method.`;
     case "COURSE_REVIEW":
       return `${data.student_name || "A student"} left a ${data.rating}-star review on "${data.course_name || "Course"}": "${data.review_text || ""}"`;
     default:
@@ -707,6 +737,19 @@ function getNotificationAction(
       return {
         type: "navigate",
         target: "/course-reviews",
+        params: { id: data.course_id },
+      };
+    case "SUBSCRIPTION_RENEWAL_SOON":
+    case "CHILD_SUBSCRIPTION_RENEWAL_SOON":
+      return {
+        type: "navigate",
+        target: "/course-details",
+        params: { id: data.course_id },
+      };
+    case "CHILD_LESSON_REMINDER":
+      return {
+        type: "navigate",
+        target: "/course-details",
         params: { id: data.course_id },
       };
     case "CHILD_LESSON_STARTED":

@@ -305,9 +305,10 @@ func (s *Service) StartLesson(ctx context.Context, lessonID uuid.UUID) (*lessonD
 
 	// Emit event
 	s.events.EmitLessonStarted(ctx, events.LessonStartedPayload{
-		LessonID: lesson.ID,
-		CourseID: lesson.CourseID,
-		StartsAt: *lesson.StartsAt,
+		LessonID:    lesson.ID,
+		CourseID:    lesson.CourseID,
+		LessonTitle: lesson.Title,
+		StartsAt:    *lesson.StartsAt,
 	})
 
 	return lesson, nil
@@ -338,9 +339,10 @@ func (s *Service) EndLesson(ctx context.Context, lessonID uuid.UUID) (*lessonDom
 
 	// Emit event
 	s.events.EmitLessonEnded(ctx, events.LessonEndedPayload{
-		LessonID: lesson.ID,
-		CourseID: lesson.CourseID,
-		EndsAt:   *lesson.EndsAt,
+		LessonID:    lesson.ID,
+		CourseID:    lesson.CourseID,
+		LessonTitle: lesson.Title,
+		EndsAt:      *lesson.EndsAt,
 	})
 
 	// Trigger progress recomputation for all students in the course
@@ -376,9 +378,10 @@ func (s *Service) CancelLesson(ctx context.Context, lessonID uuid.UUID) (*lesson
 
 	// Emit event
 	s.events.Dispatch(ctx, events.TypeLessonCanceled, lesson.ID.String(), uuid.UUID{}, events.LessonCanceledPayload{
-		LessonID: lesson.ID,
-		CourseID: lesson.CourseID,
-		Reason:   "Canceled by teacher/assistant",
+		LessonID:    lesson.ID,
+		CourseID:    lesson.CourseID,
+		LessonTitle: lesson.Title,
+		Reason:      "Canceled by teacher/assistant",
 	})
 
 	s.populateEnrollmentCount(ctx, lesson)
@@ -410,6 +413,8 @@ func (s *Service) RescheduleLesson(ctx context.Context, lessonID uuid.UUID, newS
 	// Emit event
 	s.events.Dispatch(ctx, events.TypeLessonRescheduled, lesson.ID.String(), uuid.UUID{}, events.LessonRescheduledPayload{
 		LessonID:       lesson.ID,
+		CourseID:       lesson.CourseID,
+		LessonTitle:    lesson.Title,
 		OldScheduledAt: oldScheduledAt,
 		NewScheduledAt: lesson.ScheduledAt,
 	})

@@ -38,25 +38,30 @@ type EventEnvelope struct {
 // Payload structures
 
 type LessonStartedPayload struct {
-	LessonID uuid.UUID `json:"lesson_id"`
-	CourseID uuid.UUID `json:"course_id"`
-	StartsAt time.Time `json:"starts_at"`
+	LessonID    uuid.UUID `json:"lesson_id"`
+	CourseID    uuid.UUID `json:"course_id"`
+	LessonTitle string    `json:"lesson_title"`
+	StartsAt    time.Time `json:"starts_at"`
 }
 
 type LessonEndedPayload struct {
-	LessonID uuid.UUID `json:"lesson_id"`
-	CourseID uuid.UUID `json:"course_id"`
-	EndsAt   time.Time `json:"ends_at"`
+	LessonID    uuid.UUID `json:"lesson_id"`
+	CourseID    uuid.UUID `json:"course_id"`
+	LessonTitle string    `json:"lesson_title"`
+	EndsAt      time.Time `json:"ends_at"`
 }
 
 type LessonCanceledPayload struct {
-	LessonID uuid.UUID `json:"lesson_id"`
-	CourseID uuid.UUID `json:"course_id"`
-	Reason   string    `json:"reason"`
+	LessonID    uuid.UUID `json:"lesson_id"`
+	CourseID    uuid.UUID `json:"course_id"`
+	LessonTitle string    `json:"lesson_title"`
+	Reason      string    `json:"reason"`
 }
 
 type LessonRescheduledPayload struct {
 	LessonID       uuid.UUID `json:"lesson_id"`
+	CourseID       uuid.UUID `json:"course_id"`
+	LessonTitle    string    `json:"lesson_title"`
 	OldScheduledAt time.Time `json:"old_scheduled_at"`
 	NewScheduledAt time.Time `json:"new_scheduled_at"`
 }

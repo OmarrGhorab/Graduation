@@ -348,21 +348,23 @@ func (s *Service) ScanAttendance(ctx context.Context, input ScanInput) (*ScanRes
 		return nil, ErrInvalidQRToken
 	}
 
-	// 3. Verify QR nonce exists and is not consumed
-	// With tolerance window, we need to check if the nonce is valid
-	// The nonce should exist in Redis (not expired) and not be marked as consumed
-	nonceExists, err := s.redisClient.CheckQRNonce(ctx, lessonID.String(), payload.Nonce)
+	// 3. Verify QR nonce is still in its valid rotation window AND this student
+	// has not already scanned this specific QR payload (per-student anti-replay).
+	// Other students are NOT blocked — the global nonce key stays alive.
+	nonceValid, err := s.redisClient.CheckQRNonce(ctx, lessonID.String(), payload.Nonce, input.StudentID.String())
 	if err != nil {
 		return nil, err
 	}
-	if !nonceExists {
-		// Nonce doesn't exist or was already consumed
+	if !nonceValid {
+		// Either: QR rotation window has expired, or this student already scanned this payload.
 		return nil, ErrQRNonceConsumed
 	}
-	
-	// Mark nonce as consumed to prevent replay attacks
-	// This ensures each QR code can only be scanned once
-	if err := s.redisClient.ConsumeQRNonce(ctx, lessonID.String(), payload.Nonce); err != nil {
+
+	// Mark this student as having consumed this nonce.
+	// TTL matches the global nonce window (expirySeconds + 2x tolerance) so keys clean up automatically.
+	toleranceWindow := 30 * time.Second
+	nonceTTL := time.Duration(s.expirySeconds)*time.Second + 2*toleranceWindow
+	if err := s.redisClient.ConsumeQRNonce(ctx, lessonID.String(), payload.Nonce, input.StudentID.String(), nonceTTL); err != nil {
 		return nil, err
 	}
 

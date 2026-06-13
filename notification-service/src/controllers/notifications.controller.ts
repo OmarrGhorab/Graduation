@@ -333,21 +333,26 @@ export const publishNotificationEndpoint = async (
     console.log(`[Notification Controller] Received request body:`, JSON.stringify(req.body));
     console.log(`[Notification Controller] Headers:`, JSON.stringify(req.headers));
 
-    const { userId, type, ...data } = req.body;
+    const { userId, type, data: nestedData, ...restData } = req.body;
 
     if (!userId || !type) {
       console.log(`[Notification Controller] Missing required fields - userId: ${userId}, type: ${type}`);
       throw new BadRequestError("userId and type are required");
     }
 
+    // Merge nested data but ensure the top-level `type` always wins —
+    // never let a field called "type" inside the payload overwrite the notification type.
+    const mergedData = { ...(nestedData || {}), ...restData };
+    delete mergedData.type; // strip any rogue "type" field from inner data
+
     // Import the publish function to avoid circular dependencies
     const { publishNotification } = await import("../utils/notifications");
 
-    console.log(`[Notification Controller] Received publish request for user ${userId}, type: ${type}`, data);
+    console.log(`[Notification Controller] Received publish request for user ${userId}, type: ${type}`, mergedData);
 
     await publishNotification(userId, {
       type,
-      ...data,
+      ...mergedData,
     });
 
     console.log(`[Notification Controller] Successfully published notification for user ${userId}`);

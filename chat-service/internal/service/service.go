@@ -558,7 +558,7 @@ func (s *Service) sendOfflineNotifications(msg *models.Message, members []models
 				"sender_image":      senderImage,
 				"content":           msg.Content,
 				"body":              notificationBody,
-				"type":              string(msg.Type),
+				"chat_content_type": string(msg.Type),
 				"unread_count":      fmt.Sprintf("%d", unreadCount),
 				"created_at":        msg.CreatedAt.Format(time.RFC3339),
 			},

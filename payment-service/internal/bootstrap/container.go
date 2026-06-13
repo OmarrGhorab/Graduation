@@ -172,6 +172,8 @@ func (c *Container) initJobs() {
 		c.PaymentMethodRepo,
 		c.EmailService,
 		c.KafkaProducer,
+		c.AuthClient,
+		c.CoursesClient,
 	)
 }
 
