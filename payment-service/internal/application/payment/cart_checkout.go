@@ -60,13 +60,6 @@ func (s *Service) CheckoutCart(ctx context.Context, opts CheckoutCartOptions) (s
 			return "", uuid.Nil, fmt.Errorf("you are already enrolled and paid for course %s", item.CourseID)
 		}
 
-		// Auto-enroll if not enrolled
-		if !isEnrolled {
-			if err := s.coursesClient.EnrollStudent(ctx, opts.UserID.String(), item.CourseID.String()); err != nil {
-				return "", uuid.Nil, fmt.Errorf("failed to auto-enroll in course %s: %w", item.CourseID, err)
-			}
-		}
-
 		totalAmount += item.PriceCents
 
 		orderItems = append(orderItems, payment.PaymentOrderItem{

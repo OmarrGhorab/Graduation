@@ -163,13 +163,6 @@ func (s *Service) CreatePayment(ctx context.Context, opts CreatePaymentOptions) 
 		return "", uuid.Nil, errors.New("you are already enrolled and paid for this course")
 	}
 
-	// Auto-enroll if not enrolled
-	if !isEnrolled {
-		if err := s.coursesClient.EnrollStudent(ctx, opts.UserID.String(), opts.CourseID.String()); err != nil {
-			return "", uuid.Nil, fmt.Errorf("failed to auto-enroll student: %w", err)
-		}
-	}
-
 	amountCents := int64(math.Round(course.Price * 100))
 
 	// 2. Create order item for single course

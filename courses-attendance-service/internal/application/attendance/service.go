@@ -436,8 +436,11 @@ func (s *Service) ScanAttendance(ctx context.Context, input ScanInput) (*ScanRes
 
 	if lesson.DeliveryType == lessonDomain.DeliveryTypeOffline &&
 		lesson.LocationLat != nil && lesson.LocationLng != nil &&
-		lesson.GeofenceRadiusM != nil && *lesson.GeofenceRadiusM > 0 &&
-		input.Latitude != nil && input.Longitude != nil {
+		lesson.GeofenceRadiusM != nil && *lesson.GeofenceRadiusM > 0 {
+
+		if input.Latitude == nil || input.Longitude == nil {
+			return nil, ErrOutsideGeofence
+		}
 
 		distM, withinFence := geo.DistanceFromGeofence(
 			*lesson.LocationLat, *lesson.LocationLng,
