@@ -22,6 +22,10 @@ logger = logging.getLogger(__name__)
 redis_conn = redis.from_url(settings.REDIS_URL, decode_responses=True)
 
 
+def _normalize_text(value: Any) -> str:
+    return str(value or "").strip().lower()
+
+
 def _cache_key(user_id: str, query: str, exclude_ids: List[str], filter_enrolled: bool) -> str:
     raw = f"{user_id}:{query}:{','.join(sorted(exclude_ids))}:{filter_enrolled}".encode("utf-8")
     return f"retrieval:v1:{hashlib.sha256(raw).hexdigest()}"
@@ -203,6 +207,10 @@ async def search_relevant_courses(
         )
         subject_boost = _profile_subject_boost(str(item.get("subjectName") or ""), user_profile)
         interest_boost = _interest_match_score(item, user_profile)
+        if interest_boost == 0.0 and is_cold_start and interest_terms:
+            similarity = float(item.get("similarityScore", 0.0))
+            if similarity >= 0.50:
+                interest_boost = (similarity - 0.45) * 0.6
         # For cold-start users, interests are the only personalisation signal
         # so we amplify them to differentiate recommendations across users
         if is_cold_start and interest_boost > 0:

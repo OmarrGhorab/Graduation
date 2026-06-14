@@ -211,6 +211,8 @@ def _priority_from_score(hybrid_score: float) -> str:
 def _build_deterministic_reason(item: Dict[str, Any]) -> str:
     reasons: List[str] = []
     subject = item.get("subjectName")
+    if float(item.get("interestBoost", 0) or 0) > 0:
+        reasons.append("Matches your selected onboarding interests.")
     if subject and float(item.get("profileSubjectBoost", 0) or 0) > 0:
         reasons.append(f"Strong match with your watched interest in {subject}.")
     if float(item.get("clusterContribution", 0) or 0) > 0:

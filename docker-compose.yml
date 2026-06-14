@@ -91,6 +91,7 @@ services:
       - EMAIL_FROM=${EMAIL_FROM:-onboarding@resend.dev}
       - RESEND_API_KEY=${RESEND_API_KEY}
       - NOTIFICATION_SERVICE_URL=http://notification-service:6003
+      - RECOMMENDATION_SERVICE_URL=http://recommendation-service:8095
       - ALLOWED_ORIGINS=http://localhost:3000,http://localhost:8080,http://localhost:3001
       - INTERNAL_SERVICE_SECRET=graduation-mega-secret-2026
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318

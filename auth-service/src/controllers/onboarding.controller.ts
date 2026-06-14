@@ -252,6 +252,19 @@ export const createOnboarding = async (req: Request, res: Response, next: NextFu
         },
       });
     });
+    
+    // Invalidate recommendation service cache so fresh recommendations are generated for the new interests
+    const RECOMMENDATION_SERVICE_URL = process.env.RECOMMENDATION_SERVICE_URL || "http://recommendation-service:8095";
+    fetch(`${RECOMMENDATION_SERVICE_URL}/api/v1/recommendations/cache/${userId}`, {
+      method: "DELETE",
+      headers: {
+        ...(process.env.INTERNAL_SERVICE_SECRET && {
+          "x-internal-service-secret": process.env.INTERNAL_SERVICE_SECRET,
+        }),
+      },
+    }).catch((err) => {
+      console.error("[Onboarding] Failed to invalidate recommendation cache:", err);
+    });
 
     // Handle parent linking (outside transaction to avoid blocking onboarding completion)
     // Parent linking is optional and failures shouldn't prevent onboarding completion

@@ -264,6 +264,19 @@ export const updateProfile = async (req: Request, res: Response, next: NextFunct
           },
         });
       }
+
+      // Invalidate recommendation service cache so fresh recommendations are generated for the updated interests
+      const RECOMMENDATION_SERVICE_URL = process.env.RECOMMENDATION_SERVICE_URL || "http://recommendation-service:8095";
+      fetch(`${RECOMMENDATION_SERVICE_URL}/api/v1/recommendations/cache/${userId}`, {
+        method: "DELETE",
+        headers: {
+          ...(process.env.INTERNAL_SERVICE_SECRET && {
+            "x-internal-service-secret": process.env.INTERNAL_SERVICE_SECRET,
+          }),
+        },
+      }).catch((err) => {
+        console.error("[Profile] Failed to invalidate recommendation cache:", err);
+      });
     }
 
     // Fetch updated user with interests

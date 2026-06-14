@@ -43,7 +43,7 @@ class Settings(BaseSettings):
     RETRIEVAL_TOP_K: int = 20
     RETRIEVAL_CACHE_TTL: int = 1800        # 30 minutes in seconds
     CATALOG_CACHE_TTL: int = 300           # 5 minutes – how long the in-memory course list is trusted
-    USER_PROFILE_CACHE_TTL: int = 600      # 10 minutes – how long a cached user analytics profile is trusted
+    USER_PROFILE_CACHE_TTL: int = 5        # 5 seconds – how long a cached user analytics profile is trusted
     QDRANT_COURSES_COLLECTION: str = "courses"
     QDRANT_USERS_COLLECTION: str = "users"
     QDRANT_CLUSTERS_COLLECTION: str = "clusters"
