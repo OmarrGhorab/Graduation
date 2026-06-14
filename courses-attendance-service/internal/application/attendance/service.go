@@ -14,6 +14,7 @@ import (
 	"github.com/OmarrGhorab/courses-attendance-service/internal/infrastructure/authclient"
 	"github.com/OmarrGhorab/courses-attendance-service/internal/infrastructure/cache/redis"
 	"github.com/OmarrGhorab/courses-attendance-service/internal/infrastructure/clock"
+	"github.com/OmarrGhorab/courses-attendance-service/internal/infrastructure/geo"
 	"github.com/OmarrGhorab/courses-attendance-service/internal/infrastructure/notificationevents"
 	"github.com/OmarrGhorab/courses-attendance-service/internal/infrastructure/persistence/postgres"
 	"github.com/OmarrGhorab/courses-attendance-service/internal/infrastructure/qr"
@@ -423,12 +424,30 @@ func (s *Service) ScanAttendance(ctx context.Context, input ScanInput) (*ScanRes
 		}
 	}
 
-	// 7. Geofence validation for offline lessons (DISABLED FOR TESTING)
+	// 7. Geofence validation for OFFLINE lessons only.
+	// For ONLINE lessons geofence is not applicable.
+	// Distance is measured between the student's reported GPS position and the
+	// lesson's physical location. If the student is outside the teacher-defined
+	// radius (e.g. USA device trying to scan for an Egypt classroom), the scan
+	// is rejected.
 	var distance *float64
-	
-	// TODO: Re-enable geofence validation for production
-	// For now, skip geofence check to allow testing from anywhere
-	_ = distance // Suppress unused variable warning
+
+	if lesson.DeliveryType == lessonDomain.DeliveryTypeOffline &&
+		lesson.LocationLat != nil && lesson.LocationLng != nil &&
+		lesson.GeofenceRadiusM != nil && *lesson.GeofenceRadiusM > 0 &&
+		input.Latitude != nil && input.Longitude != nil {
+
+		distM, withinFence := geo.DistanceFromGeofence(
+			*lesson.LocationLat, *lesson.LocationLng,
+			*input.Latitude, *input.Longitude,
+			float64(*lesson.GeofenceRadiusM),
+		)
+		distance = &distM
+
+		if !withinFence {
+			return nil, ErrOutsideGeofence
+		}
+	}
 
 	// 8. Acquire scan lock
 	locked, err := s.redisClient.AcquireScanLock(ctx, lessonID.String(), input.StudentID.String(), 5*time.Second)

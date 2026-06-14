@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"time"
 
 
@@ -84,6 +85,7 @@ func (h *CourseHandler) RegisterRoutes(router fiber.Router) {
 	courses.Delete("/:id/assistants/:assistantId", teacherOnly, h.RemoveAssistant)
 	courses.Get("/:id/enrollments", teacherOnly, h.GetCourseEnrollments)
 	courses.Get("/teacher", teacherOnly, h.GetMyCourses)
+	courses.Get("/teacher/search", teacherOnly, h.SearchTeacherCourses)
 	courses.Get("/teacher/analytics", teacherOnly, h.GetTeacherAnalytics)
 	courses.Get("/parent/analytics", middleware.RequireRole("PARENT"), h.GetParentAnalytics)
 
@@ -590,6 +592,84 @@ func (h *CourseHandler) GetMyCourses(c *fiber.Ctx) error {
 	}
 
 	return c.JSON(responseBody)
+}
+
+// SearchTeacherCourses godoc
+// @Summary Search and filter teacher's own courses
+// @Tags courses
+// @Produce json
+// @Param q query string false "Search by title or description"
+// @Param subject_id query string false "Filter by subject UUID"
+// @Param delivery_type query string false "ONLINE or OFFLINE"
+// @Param status query string false "PUBLISHED or DRAFT"
+// @Param sort query string false "newest|oldest|enrollment_desc|enrollment_asc|rating_desc|rating_asc"
+// @Success 200 {object} map[string]interface{}
+// @Router /api/v1/courses/teacher/search [get]
+func (h *CourseHandler) SearchTeacherCourses(c *fiber.Ctx) error {
+	teacherID, err := getUserIDFromContext(c)
+	if err != nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"success": false, "error": "Unauthorized"})
+	}
+
+	input := courseApp.SearchTeacherCoursesInput{
+		Search:       c.Query("q"),
+		DeliveryType: c.Query("delivery_type"),
+		Status:       c.Query("status"),
+		SortBy:       c.Query("sort", "newest"),
+	}
+
+	if rawSubject := c.Query("subject_id"); rawSubject != "" {
+		if sid, err := uuid.Parse(rawSubject); err == nil {
+			input.SubjectID = &sid
+		}
+	}
+
+	courses, err := h.courseService.SearchTeacherCourses(c.Context(), teacherID, input)
+	if err != nil {
+		return handleServiceError(c, err)
+	}
+
+	var responses []dto.CourseResponse
+	for _, crs := range courses {
+		resp := dto.ToCourseResponse(&crs)
+
+		analytics := &dto.CourseAnalytics{
+			TotalStudents:  crs.EnrollmentCount,
+			TotalRevenue:   float64(crs.EnrollmentCount) * crs.Price,
+			ActiveStudents: crs.EnrollmentCount,
+		}
+		if h.courseRatingRepo != nil {
+			if rating, _ := h.courseRatingRepo.GetCourseAvgRating(c.Context(), crs.ID); rating != nil {
+				analytics.AverageRating = rating.AvgRating
+				analytics.ReviewCount = rating.TotalRatings
+			}
+		}
+		resp.Analytics = analytics
+		responses = append(responses, resp)
+	}
+
+	// Sort by rating if requested (rating was fetched per-course above)
+	if input.SortBy == "rating_desc" {
+		sort.Slice(responses, func(i, j int) bool {
+			ri, rj := 0.0, 0.0
+			if responses[i].Analytics != nil { ri = responses[i].Analytics.AverageRating }
+			if responses[j].Analytics != nil { rj = responses[j].Analytics.AverageRating }
+			return ri > rj
+		})
+	} else if input.SortBy == "rating_asc" {
+		sort.Slice(responses, func(i, j int) bool {
+			ri, rj := 0.0, 0.0
+			if responses[i].Analytics != nil { ri = responses[i].Analytics.AverageRating }
+			if responses[j].Analytics != nil { rj = responses[j].Analytics.AverageRating }
+			return ri < rj
+		})
+	}
+
+	return c.JSON(fiber.Map{
+		"success": true,
+		"data":    responses,
+		"count":   len(responses),
+	})
 }
 
 // GetMySubjects godoc

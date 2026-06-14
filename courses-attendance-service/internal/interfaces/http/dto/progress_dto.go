@@ -42,13 +42,17 @@ func ToProgressResponse(p *progress.ProgressSnapshot) ProgressResponse {
 }
 
 type CalendarEventResponse struct {
-	ID           uuid.UUID `json:"id"`
-	Title        string    `json:"title"`
-	CourseID     uuid.UUID `json:"courseId"`
-	CourseTitle  string    `json:"courseTitle"`
-	StartTime    time.Time `json:"startTime"`
-	EndTime      time.Time `json:"endTime"`
-	Status       string    `json:"status"`
-	Location     string    `json:"location"`
-	LessonNumber int       `json:"lessonNumber"`
+	ID                uuid.UUID  `json:"id"`
+	Title             string     `json:"title"`
+	CourseID          uuid.UUID  `json:"courseId"`
+	CourseTitle       string     `json:"courseTitle"`
+	StartTime         time.Time  `json:"startTime"`
+	EndTime           time.Time  `json:"endTime"`
+	Status            string     `json:"status"`
+	Location          string     `json:"location"`
+	LessonNumber      int        `json:"lessonNumber"`
+	AttendanceStatus  *string    `json:"attendanceStatus"`
+	CanMarkAttendance bool       `json:"canMarkAttendance"`
+	ChildID           *uuid.UUID `json:"childId,omitempty"`
+	ChildName         string     `json:"childName,omitempty"`
 }

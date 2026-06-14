@@ -28,10 +28,12 @@ func NewCalendarHandler(calendarService *calendarApp.Service, authClient *authcl
 func (h *CalendarHandler) RegisterRoutes(router fiber.Router) {
 	auth := middleware.Authenticate(h.authClient)
 	managementOnly := middleware.RequireRole("TEACHER", "INSTRUCTOR", "ASSISTANT")
+	parentOnly := middleware.RequireRole("PARENT")
 
 	calendar := router.Group("/calendar", auth)
 	calendar.Get("/student", h.GetStudentCalendar)
 	calendar.Get("/teacher", managementOnly, h.GetTeacherCalendar)
+	calendar.Get("/parent", parentOnly, h.GetParentCalendar)
 }
 
 // GetStudentCalendar godoc
@@ -95,6 +97,76 @@ func (h *CalendarHandler) GetTeacherCalendar(c *fiber.Ctx) error {
 	filter := h.parseCalendarFilter(c)
 
 	events, total, err := h.calendarService.GetTeacherCalendar(c.Context(), userID, filter)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+	}
+
+	responses := make([]dto.CalendarEventResponse, len(events))
+	for i, e := range events {
+		responses[i] = dto.CalendarEventResponse(e)
+	}
+
+	return c.JSON(fiber.Map{
+		"success": true,
+		"data":    responses,
+		"meta": fiber.Map{
+			"page":       filter.Page,
+			"limit":      filter.Limit,
+			"total":      total,
+			"totalPages": totalPages(total, filter.Limit),
+		},
+	})
+}
+
+// GetParentCalendar returns calendar events for parent's children.
+// Optional ?child_id=UUID to scope to a single child.
+func (h *CalendarHandler) GetParentCalendar(c *fiber.Ctx) error {
+	userID, err := getUserIDFromContext(c)
+	if err != nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "Unauthorized"})
+	}
+
+	filter := h.parseCalendarFilter(c)
+
+	// Fetch all linked children to verify ownership
+	children, err := h.authClient.GetChildren(c.Context(), userID.String())
+	if err != nil || len(children) == 0 {
+		return c.JSON(fiber.Map{
+			"success": true,
+			"data":    []dto.CalendarEventResponse{},
+			"meta":    fiber.Map{"page": filter.Page, "limit": filter.Limit, "total": 0, "totalPages": 0},
+		})
+	}
+
+	// Build full map of linked children
+	allChildIDs := make([]uuid.UUID, 0, len(children))
+	childNameMap := make(map[uuid.UUID]string, len(children))
+	for _, ch := range children {
+		if uid, err := uuid.Parse(ch.ID); err == nil {
+			allChildIDs = append(allChildIDs, uid)
+			childNameMap[uid] = ch.Name
+		}
+	}
+
+	// If a specific child_id was requested, validate it belongs to this parent
+	childIDs := allChildIDs
+	if childIDStr := c.Query("child_id"); childIDStr != "" {
+		if requestedUID, err := uuid.Parse(childIDStr); err == nil {
+			// Only allow if this child is actually linked to the parent
+			owned := false
+			for _, cid := range allChildIDs {
+				if cid == requestedUID {
+					owned = true
+					break
+				}
+			}
+			if owned {
+				childIDs = []uuid.UUID{requestedUID}
+			}
+		}
+	}
+
+	events, total, err := h.calendarService.GetParentCalendar(c.Context(), childIDs, childNameMap, filter)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}

@@ -570,6 +570,45 @@ func (s *Service) GetTeacherCourses(ctx context.Context, teacherID uuid.UUID) ([
 	return courses, nil
 }
 
+// SearchTeacherCoursesInput holds filter params for the teacher course search endpoint
+type SearchTeacherCoursesInput struct {
+	Search       string
+	SubjectID    *uuid.UUID
+	DeliveryType string
+	Status       string
+	SortBy       string
+}
+
+// SearchTeacherCourses returns filtered/sorted courses for a teacher
+func (s *Service) SearchTeacherCourses(ctx context.Context, teacherID uuid.UUID, input SearchTeacherCoursesInput) ([]courseDomain.Course, error) {
+	filter := postgres.TeacherCourseFilter{
+		Search:       input.Search,
+		SubjectID:    input.SubjectID,
+		DeliveryType: input.DeliveryType,
+		Status:       input.Status,
+		SortBy:       input.SortBy,
+	}
+
+	courses, err := s.courseRepo.SearchTeacherCourses(ctx, teacherID, filter)
+	if err != nil {
+		return nil, err
+	}
+
+	// Populate live enrollment counts
+	for i := range courses {
+		count, _ := s.enrollmentRepo.CountByCourseID(ctx, courses[i].ID)
+		courses[i].EnrollmentCount = int(count)
+	}
+
+	// Sort by rating client-side if requested (requires extra DB calls)
+	if input.SortBy == "rating_desc" || input.SortBy == "rating_asc" {
+		// Rating is fetched per-course in the handler via courseRatingRepo
+		// Nothing extra needed here
+	}
+
+	return courses, nil
+}
+
 // GetStudentCourses returns all courses a student is enrolled in
 func (s *Service) GetStudentCourses(ctx context.Context, studentID uuid.UUID) ([]courseDomain.Course, error) {
 	enrollments, err := s.enrollmentRepo.GetByUserID(ctx, studentID)

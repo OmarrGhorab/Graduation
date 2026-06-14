@@ -228,6 +228,7 @@ func (c *Container) initServices() {
 		c.LessonRepo,
 		c.CourseRepo,
 		c.EnrollmentRepo,
+		c.AttendanceRecordRepo,
 	)
 
 	c.WatchTimeService = watchtimeApp.NewService(

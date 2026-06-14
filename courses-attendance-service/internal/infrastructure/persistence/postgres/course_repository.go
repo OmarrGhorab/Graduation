@@ -46,6 +46,49 @@ func (r *CourseRepository) GetByTeacherID(ctx context.Context, teacherID uuid.UU
 	return courses, err
 }
 
+// TeacherCourseFilter holds search/filter/sort parameters for teacher's own courses
+type TeacherCourseFilter struct {
+	Search       string
+	SubjectID    *uuid.UUID
+	DeliveryType string
+	Status       string
+	SortBy       string // enrollment_desc | enrollment_asc | rating_desc | rating_asc | newest | oldest
+}
+
+func (r *CourseRepository) SearchTeacherCourses(ctx context.Context, teacherID uuid.UUID, f TeacherCourseFilter) ([]course.Course, error) {
+	var courses []course.Course
+
+	query := r.db.WithContext(ctx).Preload("Subject").Where("teacher_id = ?", teacherID)
+
+	if f.Search != "" {
+		q := "%" + f.Search + "%"
+		query = query.Where("title ILIKE ? OR description ILIKE ?", q, q)
+	}
+	if f.SubjectID != nil {
+		query = query.Where("subject_id = ?", *f.SubjectID)
+	}
+	if f.DeliveryType != "" {
+		query = query.Where("delivery_type = ?", f.DeliveryType)
+	}
+	if f.Status != "" {
+		query = query.Where("status = ?", f.Status)
+	}
+
+	switch f.SortBy {
+	case "enrollment_desc":
+		query = query.Order("enrollment_count DESC")
+	case "enrollment_asc":
+		query = query.Order("enrollment_count ASC")
+	case "oldest":
+		query = query.Order("created_at ASC")
+	default: // newest, rating_desc, rating_asc — default newest
+		query = query.Order("created_at DESC")
+	}
+
+	err := query.Find(&courses).Error
+	return courses, err
+}
+
 func (r *CourseRepository) GetByIDs(ctx context.Context, ids []uuid.UUID) ([]course.Course, error) {
 	var courses []course.Course
 	err := r.db.WithContext(ctx).Preload("Subject").Where("id IN ?", ids).Find(&courses).Error
