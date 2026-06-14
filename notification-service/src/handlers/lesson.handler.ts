@@ -206,26 +206,5 @@ export const setupLessonHandlers = () => {
         }
     });
 
-    // Attendance Recorded (Notifying Parents)
-    registerHandler('courses.attendance.recorded.v1', async (envelope: EventEnvelope<any>) => {
-        const { student_id, lesson_id, lesson_title, course_id, status } = envelope.payload;
-        
-        // Notify parents
-        const childInfo = await getChildInfo(student_id);
-        const parents = await getChildParents(student_id);
-        
-        console.log(`[LessonHandler] Notifying ${parents.length} parents about child attendance for student ${student_id}`);
-        
-        for (const parent of parents) {
-            await publishNotification(parent.id, {
-                type: 'CHILD_ATTENDANCE_RECORDED',
-                lesson_id,
-                course_id,
-                child_id: student_id,
-                child_name: childInfo?.name || "Your child",
-                lesson_title,
-                status
-            });
-        }
-    });
+    // NOTE: courses.attendance.recorded.v1 is handled in attendance.handler.ts
 };
