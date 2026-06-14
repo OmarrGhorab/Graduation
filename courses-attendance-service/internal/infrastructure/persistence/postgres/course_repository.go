@@ -76,9 +76,9 @@ func (r *CourseRepository) SearchTeacherCourses(ctx context.Context, teacherID u
 
 	switch f.SortBy {
 	case "enrollment_desc":
-		query = query.Order("enrollment_count DESC")
+		query = query.Order("(SELECT COUNT(*) FROM enrollments WHERE enrollments.course_id = courses.id AND enrollments.is_active = true) DESC")
 	case "enrollment_asc":
-		query = query.Order("enrollment_count ASC")
+		query = query.Order("(SELECT COUNT(*) FROM enrollments WHERE enrollments.course_id = courses.id AND enrollments.is_active = true) ASC")
 	case "oldest":
 		query = query.Order("created_at ASC")
 	default: // newest, rating_desc, rating_asc — default newest

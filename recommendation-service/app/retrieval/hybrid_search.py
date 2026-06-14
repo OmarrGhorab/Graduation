@@ -126,7 +126,7 @@ def _interest_match_score(course: Dict[str, Any], user_profile: Dict) -> float:
             elif any(token in haystack for token in term_tokens):
                 score += 0.06
 
-    return min(score, 0.45)
+    return min(score, 0.65)
 
 
 async def search_relevant_courses(
@@ -187,6 +187,8 @@ async def search_relevant_courses(
 
     cluster_affinity = _get_cluster_affinity(user_id)
     interest_terms = _profile_interest_terms(user_profile)
+    # Cold-start: if user has no enrollments, amplify interest signal
+    is_cold_start = len(enrolled_ids) == 0
 
     final = []
     for item in filtered:
@@ -201,6 +203,10 @@ async def search_relevant_courses(
         )
         subject_boost = _profile_subject_boost(str(item.get("subjectName") or ""), user_profile)
         interest_boost = _interest_match_score(item, user_profile)
+        # For cold-start users, interests are the only personalisation signal
+        # so we amplify them to differentiate recommendations across users
+        if is_cold_start and interest_boost > 0:
+            interest_boost *= 2.5
         score += subject_boost
         score += interest_boost
         item["hybridScore"] = score

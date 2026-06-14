@@ -187,6 +187,24 @@ func ValidateVideoFile(header *multipart.FileHeader) error {
 
 	// Check content type
 	contentType := header.Header.Get("Content-Type")
+	ext := strings.ToLower(filepath.Ext(header.Filename))
+	if contentType == "application/octet-stream" || contentType == "" {
+		switch ext {
+		case ".mp4":
+			contentType = "video/mp4"
+		case ".mpeg":
+			contentType = "video/mpeg"
+		case ".mov":
+			contentType = "video/quicktime"
+		case ".avi":
+			contentType = "video/x-msvideo"
+		case ".mkv":
+			contentType = "video/x-matroska"
+		case ".webm":
+			contentType = "video/webm"
+		}
+	}
+
 	validTypes := []string{
 		"video/mp4",
 		"video/mpeg",
@@ -215,6 +233,24 @@ func ValidateDocumentFile(header *multipart.FileHeader) error {
 
 	// Check content type
 	contentType := header.Header.Get("Content-Type")
+	ext := strings.ToLower(filepath.Ext(header.Filename))
+	if contentType == "application/octet-stream" || contentType == "" {
+		switch ext {
+		case ".pdf":
+			contentType = "application/pdf"
+		case ".doc":
+			contentType = "application/msword"
+		case ".docx":
+			contentType = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+		case ".ppt":
+			contentType = "application/vnd.ms-powerpoint"
+		case ".pptx":
+			contentType = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+		case ".zip":
+			contentType = "application/zip"
+		}
+	}
+
 	validTypes := []string{
 		"application/pdf",
 		"application/msword",
@@ -244,6 +280,20 @@ func ValidateImageFile(header *multipart.FileHeader) error {
 
 	// Check content type
 	contentType := header.Header.Get("Content-Type")
+	ext := strings.ToLower(filepath.Ext(header.Filename))
+	if contentType == "application/octet-stream" || contentType == "" {
+		switch ext {
+		case ".jpg", ".jpeg":
+			contentType = "image/jpeg"
+		case ".png":
+			contentType = "image/png"
+		case ".webp":
+			contentType = "image/webp"
+		case ".gif":
+			contentType = "image/gif"
+		}
+	}
+
 	validTypes := []string{
 		"image/jpeg",
 		"image/png",

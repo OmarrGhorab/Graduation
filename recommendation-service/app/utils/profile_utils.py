@@ -98,4 +98,16 @@ def build_behavior_query(profile: Dict[str, Any]) -> str:
         seen.add(key)
         unique_parts.append(part)
 
-    return ", ".join(unique_parts) or "recommended courses"
+    if unique_parts:
+        return ", ".join(unique_parts)
+
+    # Cold-start fallback: if we have onboarding interests but no watch/preview/cart
+    # signals yet, build a targeted query from those interests so fresh accounts
+    # get personalised recommendations instead of the same generic set.
+    interests = list_user_interests(profile)
+    if interests:
+        interest_names = [str(i).strip() for i in interests if str(i).strip()][:8]
+        if interest_names:
+            return "interested in " + ", ".join(interest_names)
+
+    return "recommended courses"

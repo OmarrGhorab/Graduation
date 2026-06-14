@@ -3,8 +3,11 @@ package course
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"mime/multipart"
+	"net/http"
+	"os"
 
 	courseDomain "github.com/OmarrGhorab/courses-attendance-service/internal/domain/course"
 	"github.com/OmarrGhorab/courses-attendance-service/internal/domain/events"
@@ -224,6 +227,9 @@ func (s *Service) CreateCourse(ctx context.Context, input CreateCourseInput) (*c
 		return nil, err
 	}
 
+	// Notify recommendation service to re-index so the new course is searchable
+	go notifyRecommendationServiceReindex()
+
 	return course, nil
 }
 
@@ -355,6 +361,9 @@ func (s *Service) UpdateCourse(ctx context.Context, courseID uuid.UUID, teacherI
 		return nil, err
 	}
 
+	// Notify recommendation service to re-index so updated course data is searchable
+	go notifyRecommendationServiceReindex()
+
 	return course, nil
 }
 
@@ -371,7 +380,40 @@ func (s *Service) DeleteCourse(ctx context.Context, courseID uuid.UUID, teacherI
 		return ErrUnauthorized
 	}
 
-	return s.courseRepo.Delete(ctx, courseID)
+	err = s.courseRepo.Delete(ctx, courseID)
+	if err == nil {
+		// Notify recommendation service to re-index so deleted course is removed from search
+		go notifyRecommendationServiceReindex()
+	}
+	return err
+}
+
+// notifyRecommendationServiceReindex tells the recommendation service to
+// refresh its course catalog and vector embeddings. Fire-and-forget; any
+// failure is logged but never blocks the caller.
+func notifyRecommendationServiceReindex() {
+	recURL := os.Getenv("RECOMMENDATION_SERVICE_URL")
+	if recURL == "" {
+		recURL = "http://recommendation-service:8095" // Docker internal name
+	}
+	secret := os.Getenv("INTERNAL_SERVICE_SECRET")
+
+	url := fmt.Sprintf("%s/api/v1/courses/reindex", recURL)
+	req, err := http.NewRequest(http.MethodPost, url, nil)
+	if err != nil {
+		log.Printf("[CourseService] Failed to build reindex request: %v", err)
+		return
+	}
+	req.Header.Set("x-internal-service-secret", secret)
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Printf("[CourseService] Recommendation reindex notification failed: %v", err)
+		return
+	}
+	defer resp.Body.Close()
+	log.Printf("[CourseService] Recommendation reindex triggered, status=%d", resp.StatusCode)
 }
 
 // EnrollStudent enrolls a student in a course

@@ -117,6 +117,7 @@ async def startup_event():
     logger.info("Database tables verified/created.")
 
     asyncio.create_task(_index_courses_on_startup())
+    asyncio.create_task(_periodic_course_reindex())
 
 
 async def _index_courses_on_startup():
@@ -220,6 +221,95 @@ def _build_course_catalog_fingerprint(courses: list[dict]) -> str:
 def _build_user_id_fingerprint(user_ids: list[str]) -> str:
     raw = json.dumps(sorted(str(user_id) for user_id in user_ids)).encode("utf-8")
     return hashlib.sha256(raw).hexdigest()
+
+async def _periodic_course_reindex():
+    """Periodically re-index courses so new ones created via the dashboard
+    become searchable without requiring a service restart."""
+    interval_seconds = settings.EMBEDDING_REFRESH_INTERVAL_MINUTES * 60
+    logger.info(f"Periodic course re-index: will run every {settings.EMBEDDING_REFRESH_INTERVAL_MINUTES} minutes")
+
+    # Wait for the initial startup indexing to complete first
+    await asyncio.sleep(interval_seconds)
+
+    while True:
+        try:
+            from app.services.course_client import course_client
+            from app.jobs.embedding_jobs import refresh_course_embeddings
+            import redis.asyncio as aioredis
+
+            # Force-clear the in-memory cache so get_all_courses() fetches live data
+            course_client.clear_cached_courses()
+            courses = await course_client.get_all_courses()
+            if not courses:
+                logger.warning("Periodic reindex: no courses returned")
+                await asyncio.sleep(interval_seconds)
+                continue
+
+            catalog_fingerprint = _build_course_catalog_fingerprint(courses)
+            previous_fingerprint = course_client.get_catalog_fingerprint()
+
+            if previous_fingerprint == catalog_fingerprint:
+                logger.info(f"Periodic reindex: catalog unchanged ({len(courses)} courses)")
+            else:
+                logger.info(f"Periodic reindex: catalog changed, re-indexing {len(courses)} courses...")
+                await refresh_course_embeddings(courses)
+                course_client.set_cached_courses(courses, catalog_fingerprint)
+
+                r = aioredis.from_url(settings.REDIS_URL, decode_responses=True)
+                await r.set(_COURSE_INDEX_FINGERPRINT_KEY, catalog_fingerprint)
+                # Flush stale search caches
+                keys = []
+                for pattern in ("retrieval:v1:*", "recommendation:v2:*", "course-search:v2:*", "course-autocomplete:v2:*"):
+                    keys.extend(await r.keys(pattern))
+                if keys:
+                    await r.delete(*keys)
+                    logger.info(f"Periodic reindex: flushed {len(keys)} stale cache entries")
+                await r.aclose()
+                logger.info("Periodic reindex: completed successfully")
+        except Exception as exc:
+            logger.error(f"Periodic reindex failed: {exc}", exc_info=True)
+
+        await asyncio.sleep(interval_seconds)
+
+
+@app.post("/api/v1/courses/reindex")
+async def trigger_course_reindex(request: Request):
+    """Event-driven endpoint: courses-service calls this after course create/update
+    to force the recommendation service to immediately refresh its catalog."""
+    secret = request.headers.get("x-internal-service-secret", "")
+    expected = settings.INTERNAL_SERVICE_SECRET
+    if secret != expected:
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    try:
+        from app.services.course_client import course_client
+        from app.jobs.embedding_jobs import refresh_course_embeddings
+        import redis.asyncio as aioredis
+
+        course_client.clear_cached_courses()
+        courses = await course_client.get_all_courses()
+        if not courses:
+            return JSONResponse(content={"success": True, "message": "No courses found", "indexed": 0})
+
+        catalog_fingerprint = _build_course_catalog_fingerprint(courses)
+        await refresh_course_embeddings(courses)
+        course_client.set_cached_courses(courses, catalog_fingerprint)
+
+        r = aioredis.from_url(settings.REDIS_URL, decode_responses=True)
+        await r.set(_COURSE_INDEX_FINGERPRINT_KEY, catalog_fingerprint)
+        keys = []
+        for pattern in ("retrieval:v1:*", "course-search:v2:*", "course-autocomplete:v2:*"):
+            keys.extend(await r.keys(pattern))
+        if keys:
+            await r.delete(*keys)
+        await r.aclose()
+
+        logger.info(f"Event-driven reindex: indexed {len(courses)} courses")
+        return JSONResponse(content={"success": True, "message": "Reindex complete", "indexed": len(courses)})
+    except Exception as exc:
+        logger.error(f"Event-driven reindex failed: {exc}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(exc))
+
 
 if __name__ == "__main__":
     import uvicorn
