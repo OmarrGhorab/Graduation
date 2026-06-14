@@ -35,6 +35,7 @@ func (h *AbsenceHandler) RegisterRoutes(router fiber.Router) {
 	absences.Get("/lesson/:id", managementOnly, h.GetLessonRequests)
 	absences.Get("/pending-parent", h.GetPendingParentRequests)
 	absences.Get("/parent/kids", h.GetParentKidsAbsences)
+	absences.Get("/teacher/pending", managementOnly, h.GetTeacherPendingRequests)
 	absences.Post("/:id/respond", h.RespondToRequest)
 }
 
@@ -213,6 +214,29 @@ func (h *AbsenceHandler) GetLessonRequests(c *fiber.Ctx) error {
 		"success": true,
 		"data":    responses,
 	})
+}
+
+// GetTeacherPendingRequests returns all PENDING absence requests for this teacher's lessons
+func (h *AbsenceHandler) GetTeacherPendingRequests(c *fiber.Ctx) error {
+	teacherID, err := getUserIDFromContext(c)
+	if err != nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"success": false, "error": "Unauthorized"})
+	}
+
+	requests, err := h.absenceService.GetPendingTeacherRequests(c.Context(), teacherID)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"success": false, "error": "Failed to fetch absence requests"})
+	}
+
+	var responses []dto.AbsenceRequestResponse
+	for _, r := range requests {
+		responses = append(responses, dto.ToAbsenceRequestResponse(r))
+	}
+	if responses == nil {
+		responses = []dto.AbsenceRequestResponse{}
+	}
+
+	return c.JSON(fiber.Map{"success": true, "data": responses})
 }
 
 // GetPendingParentRequests godoc

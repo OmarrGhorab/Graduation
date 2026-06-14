@@ -252,6 +252,14 @@ func (s *Service) RespondToRequest(ctx context.Context, input RespondRequestInpu
 		return nil, ErrUnauthorized
 	}
 
+	// Fetch lesson for event enrichment (needed regardless of who responded)
+	var lessonTitle string
+	var courseID uuid.UUID
+	if lesson, err := s.lessonRepo.GetByID(ctx, req.LessonID); err == nil && lesson != nil {
+		lessonTitle = lesson.Title
+		courseID = lesson.CourseID
+	}
+
 	now := s.clock.Now()
 	status := absenceDomain.AbsenceStatusRejected
 	if input.Approve {
@@ -268,11 +276,16 @@ func (s *Service) RespondToRequest(ctx context.Context, input RespondRequestInpu
 		return nil, err
 	}
 
-	// Emit event
+	// Emit event with full context so notification service can notify student + parents
 	s.events.EmitAbsenceReviewed(ctx, events.AbsenceReviewedPayload{
-		RequestID:  req.ID,
-		Status:     string(req.Status),
-		ReviewerID: input.RespondedBy,
+		RequestID:    req.ID,
+		Status:       string(req.Status),
+		ReviewerID:   input.RespondedBy,
+		StudentID:    req.StudentID,
+		LessonID:     req.LessonID,
+		CourseID:     courseID,
+		LessonTitle:  lessonTitle,
+		ResponseNote: input.ResponseNote,
 	})
 
 	// If approved, update the attendance record to EXCUSED
@@ -322,6 +335,37 @@ func (s *Service) GetLessonRequests(ctx context.Context, lessonID uuid.UUID) ([]
 // GetPendingParentRequests returns all pending requests for students linked to this parent
 func (s *Service) GetPendingParentRequests(ctx context.Context, parentID uuid.UUID) ([]EnrichedAbsenceRequest, error) {
 	requests, err := s.absenceRepo.GetPendingByParent(ctx, parentID)
+	if err != nil {
+		return nil, err
+	}
+	return s.enrichRequests(ctx, requests), nil
+}
+
+// GetPendingTeacherRequests returns all PENDING absence requests for all lessons taught by this teacher
+func (s *Service) GetPendingTeacherRequests(ctx context.Context, teacherID uuid.UUID) ([]EnrichedAbsenceRequest, error) {
+	// 1. Get all courses owned by teacher
+	courses, err := s.courseRepo.GetByTeacherID(ctx, teacherID)
+	if err != nil || len(courses) == 0 {
+		return []EnrichedAbsenceRequest{}, nil
+	}
+
+	// 2. Get all lesson IDs across those courses
+	courseIDs := make([]uuid.UUID, len(courses))
+	for i, c := range courses {
+		courseIDs[i] = c.ID
+	}
+	lessons, err := s.lessonRepo.GetByCourseIDs(ctx, courseIDs)
+	if err != nil || len(lessons) == 0 {
+		return []EnrichedAbsenceRequest{}, nil
+	}
+
+	lessonIDs := make([]uuid.UUID, len(lessons))
+	for i, l := range lessons {
+		lessonIDs[i] = l.ID
+	}
+
+	// 3. Get pending requests for those lessons
+	requests, err := s.absenceRepo.GetPendingByLessonIDs(ctx, lessonIDs)
 	if err != nil {
 		return nil, err
 	}

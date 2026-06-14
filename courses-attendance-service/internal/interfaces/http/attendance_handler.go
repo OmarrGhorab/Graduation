@@ -103,10 +103,12 @@ func (h *AttendanceHandler) ScanAttendance(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{
 		"success": true,
 		"data": dto.ScanAttendanceResponse{
-			Status:    string(result.Status),
-			ScannedAt: result.ScannedAt,
-			Distance:  result.Distance,
-			Message:   result.Message,
+			Status:       string(result.Status),
+			ScannedAt:    result.ScannedAt,
+			Distance:     result.Distance,
+			Message:      result.Message,
+			LessonTitle:  result.LessonTitle,
+			LocationName: result.LocationName,
 		},
 	})
 }

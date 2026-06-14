@@ -79,6 +79,18 @@ func (r *LessonRepository) CountCompletedByCourse(ctx context.Context, courseID 
 	return count, err
 }
 
+func (r *LessonRepository) GetByCourseIDs(ctx context.Context, courseIDs []uuid.UUID) ([]lesson.Lesson, error) {
+	if len(courseIDs) == 0 {
+		return []lesson.Lesson{}, nil
+	}
+	var lessons []lesson.Lesson
+	err := r.db.WithContext(ctx).
+		Where("course_id IN ?", courseIDs).
+		Select("id, course_id").
+		Find(&lessons).Error
+	return lessons, err
+}
+
 func (r *LessonRepository) GetByCoursesAndTimeRange(ctx context.Context, courseIDs []uuid.UUID, start, end time.Time) ([]lesson.Lesson, error) {
 	var lessons []lesson.Lesson
 	err := r.db.WithContext(ctx).

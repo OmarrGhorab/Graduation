@@ -566,12 +566,22 @@ function getNotificationTitle(type: string, data?: Record<string, any>): string 
     "COURSE_ENROLLMENT": "New Student Enrolled",
     "LESSON_STARTED": "Lesson Started 🚀",
     "LESSON_CANCELED": "Lesson Canceled ⚠️",
+    "LESSON_ENDED": "Lesson Ended ✅",
     "LESSON_RESCHEDULED": "Lesson Rescheduled 📅",
     "LESSON_REMINDER": "Upcoming Lesson 🔔",
     "CHILD_LESSON_REMINDER": "Child's Lesson Starting Soon 🔔",
     "CHILD_LESSON_STARTED": "Child's Lesson Started 🚀",
     "CHILD_LESSON_ENDED": "Child's Lesson Ended ✅",
-    "CHILD_ATTENDANCE_RECORDED": "Child Arrived at Lesson 📍",
+    "ATTENDANCE_RECORDED": "Attendance Recorded ✅",
+    "CHILD_ATTENDANCE_RECORDED": "Child's Attendance Recorded 📍",
+    "ABSENCE_REQUEST_TEACHER": "New Absence Appeal 📋",
+    "ABSENCE_REQUEST_PARENT": "Absence Update",
+    "ATTENDANCE_STATUS_UPDATE": "Attendance Status Updated",
+    "ATTENDANCE_FRAUD_TEACHER": "Attendance Fraud Alert ⚠️",
+    "ATTENDANCE_FRAUD_PARENT": "Attendance Security Alert ⚠️",
+    "VIDEO_READY": "Lesson Video Ready 🎬",
+    "VIDEO_FAILED": "Video Processing Failed ❌",
+    "PROGRESS_UPDATED": "Progress Updated 📈",
     "SUBSCRIPTION_RENEWAL_SOON": "Subscription Renewal Soon 💳",
     "CHILD_SUBSCRIPTION_RENEWAL_SOON": "Child's Subscription Renewing 💳",
     "SUBSCRIPTION_PAYMENT_FAILED": "Payment Failed ❌",
@@ -627,34 +637,60 @@ function getNotificationBody(
       return body;
     // Course & Lesson notifications
     case "COURSE_ENROLLMENT":
-      return `${data.student_name || "A student"} has enrolled in your course: ${data.course_name || "Course"}`;
+      return `${data.student_name || "A student"} has enrolled in your course: ${data.course_name || data.course_title || "Course"}`;
     case "LESSON_STARTED":
       return `The lesson "${data.lesson_title || "Lesson"}" has started! Get ready.`;
+    case "LESSON_ENDED":
+      return `The lesson "${data.lesson_title || "Lesson"}" in "${data.course_title || "your course"}" has ended. Attendance has been finalized.`;
     case "CHILD_LESSON_STARTED":
-      return `Your child ${data.child_name || "has"} started their lesson: "${data.lesson_title || "Lesson"}"`;
-    case "LESSON_CANCELED":
-      return `The lesson scheduled for "${data.scheduled_at || "scheduled time"}" has been canceled.`;
+      return `Your child ${data.child_name || ""} started their lesson: "${data.lesson_title || "Lesson"}"`;
     case "CHILD_LESSON_ENDED":
-      return `Your child ${data.child_name || "has"} finished their lesson: "${data.lesson_title || "Lesson"}"`;
-    case "CHILD_ATTENDANCE_RECORDED":
-      return `Your child ${data.child_name || "has"} is now marked as ${data.status || "PRESENT"} for "${data.lesson_title || "Lesson"}"`;
+      return `Your child ${data.child_name || ""} finished their lesson: "${data.lesson_title || "Lesson"}"`;
+    case "LESSON_CANCELED":
+      return `The lesson "${data.lesson_title || "Lesson"}" has been canceled.`;
+    case "ATTENDANCE_RECORDED": {
+      const statusMap: Record<string, string> = { PRESENT: "Present", LATE: "Late", ABSENT: "Absent", EXCUSED: "Excused" };
+      const statusLabel = statusMap[data.status] || data.status || "recorded";
+      return `You were marked ${statusLabel} for "${data.lesson_title || "Lesson"}" in "${data.course_title || "your course"}".`;
+    }
+    case "CHILD_ATTENDANCE_RECORDED": {
+      const statusMap: Record<string, string> = { PRESENT: "Present", LATE: "Late", ABSENT: "Absent", EXCUSED: "Excused" };
+      const statusLabel = statusMap[data.status] || data.status || "recorded";
+      return `${data.child_name || "Your child"} was marked ${statusLabel} for "${data.lesson_title || "Lesson"}" in "${data.course_title || "a course"}".`;
+    }
+    case "ABSENCE_REQUEST_TEACHER":
+      return data.body || `A student submitted an absence excuse for "${data.lesson_title || "a lesson"}". Tap to review and respond.`;
+    case "ABSENCE_REQUEST_PARENT":
+      return data.body || `An absence excuse for "${data.lesson_title || "a lesson"}" has been submitted for your child.`;
+    case "ATTENDANCE_STATUS_UPDATE":
+      return data.body || `Your attendance status has been updated for "${data.lesson_title || "a lesson"}".`;
+    case "ATTENDANCE_FRAUD_TEACHER":
+      return data.body || `A potential attendance fraud attempt was detected in "${data.course_title || "your course"}".`;
+    case "ATTENDANCE_FRAUD_PARENT":
+      return data.body || `An attendance issue was detected for your child in "${data.course_title || "a course"}".`;
+    case "VIDEO_READY":
+      return data.body || `The video for "${data.lesson_title || "your lesson"}" has been processed and is ready for students.`;
+    case "VIDEO_FAILED":
+      return data.body || `Video processing failed for "${data.lesson_title || "your lesson"}". Please re-upload.`;
+    case "PROGRESS_UPDATED":
+      return data.body || `Your progress has been updated. Overall progress: ${data.overall_progress ? Math.round(data.overall_progress) + "%" : "updated"}.`;
     case "LESSON_RESCHEDULED":
-      return `The lesson has been moved to ${data.new_scheduled_at || "a new time"}.`;
+      return `The lesson "${data.lesson_title || "Lesson"}" has been moved to ${data.new_scheduled_at || "a new time"}.`;
     case "LESSON_REMINDER":
-      return `Lesson "${data.lesson_title || "Lesson"}" starts in ${data.minutes_before || "a few"} minutes!`;
+      return `"${data.lesson_title || "Lesson"}" starts in ${data.minutes_before || "a few"} minutes!`;
     case "CHILD_LESSON_REMINDER":
-      return `Your child ${data.child_name || "has a lesson"} starting in ${data.minutes_before || "a few"} minutes: "${data.lesson_title || "Lesson"}"`;
+      return `${data.child_name || "Your child"} has a lesson "${data.lesson_title || ""}" starting in ${data.minutes_before || "a few"} minutes.`;
 
     case "SUBSCRIPTION_RENEWAL_SOON":
       return `Your subscription for "${data.course_name || "your course"}" is renewing in ${data.days_left || 3} days (${data.amount} ${data.currency}).`;
     case "CHILD_SUBSCRIPTION_RENEWAL_SOON":
-      return `Your child ${data.child_name || "has"} a subscription for "${data.course_name || "a course"}" renewing in ${data.days_left || 3} days (${data.amount} ${data.currency}).`;
+      return `${data.child_name || "Your child"} has a subscription for "${data.course_name || "a course"}" renewing in ${data.days_left || 3} days (${data.amount} ${data.currency}).`;
     case "SUBSCRIPTION_PAYMENT_FAILED":
       return `We couldn't process your payment for "${data.course_name || "your course"}". Please check your payment method.`;
     case "COURSE_REVIEW":
-      return `${data.student_name || "A student"} left a ${data.rating}-star review on "${data.course_name || "Course"}": "${data.review_text || ""}"`;
+      return `${data.student_name || "A student"} left a ${data.rating}-star review on "${data.course_name || data.course_title || "your course"}": "${data.review_text || ""}"`;
     default:
-      return "You have a new notification";
+      return data.body || "You have a new notification";
   }
 }
 
@@ -755,10 +791,35 @@ function getNotificationAction(
     case "CHILD_LESSON_STARTED":
     case "CHILD_LESSON_ENDED":
     case "CHILD_ATTENDANCE_RECORDED":
+    case "ATTENDANCE_STATUS_UPDATE":
       return {
         type: "navigate",
         target: "/student-progress",
         params: { childId: data.child_id, courseId: data.course_id },
+      };
+    case "ATTENDANCE_RECORDED":
+      return {
+        type: "navigate",
+        target: "/course-details",
+        params: { id: data.course_id },
+      };
+    case "LESSON_ENDED":
+      return {
+        type: "navigate",
+        target: "/course-details",
+        params: { id: data.course_id },
+      };
+    case "ABSENCE_REQUEST_TEACHER":
+      return {
+        type: "navigate",
+        target: "/absence-appeals",
+        params: { lessonId: data.lesson_id, courseId: data.course_id },
+      };
+    case "ABSENCE_REQUEST_PARENT":
+      return {
+        type: "navigate",
+        target: "/absence-history",
+        params: {},
       };
     default:
       return null;

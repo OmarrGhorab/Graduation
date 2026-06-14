@@ -30,10 +30,12 @@ type ScanAttendanceRequest struct {
 }
 
 type ScanAttendanceResponse struct {
-	Status    string    `json:"status"`
-	ScannedAt time.Time `json:"scannedAt"`
-	Distance  *float64  `json:"distance,omitempty"`
-	Message   string    `json:"message"`
+	Status       string    `json:"status"`
+	ScannedAt    time.Time `json:"scannedAt"`
+	Distance     *float64  `json:"distance,omitempty"`
+	Message      string    `json:"message"`
+	LessonTitle  string    `json:"lessonTitle,omitempty"`
+	LocationName string    `json:"locationName,omitempty"`
 }
 
 // ========== Attendance Record DTOs ==========

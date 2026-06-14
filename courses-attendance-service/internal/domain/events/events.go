@@ -93,9 +93,14 @@ type AbsenceRequestedPayload struct {
 }
 
 type AbsenceReviewedPayload struct {
-	RequestID  uuid.UUID `json:"request_id"`
-	Status     string    `json:"status"`
-	ReviewerID uuid.UUID `json:"reviewer_id"`
+	RequestID    uuid.UUID `json:"request_id"`
+	Status       string    `json:"status"`
+	ReviewerID   uuid.UUID `json:"reviewer_id"`
+	StudentID    uuid.UUID `json:"student_id"`
+	LessonID     uuid.UUID `json:"lesson_id"`
+	CourseID     uuid.UUID `json:"course_id"`
+	LessonTitle  string    `json:"lesson_title"`
+	ResponseNote string    `json:"response_note"`
 }
 
 type ProgressUpdatedPayload struct {

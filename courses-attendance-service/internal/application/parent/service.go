@@ -45,8 +45,8 @@ type CourseProgress struct {
 
 type ParentAttendanceRecord struct {
 	attendanceDomain.AttendanceRecord
-	LessonTitle string
-	CourseTitle string
+	LessonTitle string `json:"lessonTitle"`
+	CourseTitle string `json:"courseTitle"`
 }
 
 type Service struct {

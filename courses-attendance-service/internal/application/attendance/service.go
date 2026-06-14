@@ -316,10 +316,12 @@ type ScanInput struct {
 
 // ScanResult represents the result of a scan
 type ScanResult struct {
-	Status    attendanceDomain.AttendanceStatus
-	ScannedAt time.Time
-	Distance  *float64
-	Message   string
+	Status       attendanceDomain.AttendanceStatus
+	ScannedAt    time.Time
+	Distance     *float64
+	Message      string
+	LessonTitle  string
+	LocationName string
 }
 
 // ScanAttendance processes a QR code scan for attendance
@@ -548,10 +550,12 @@ func (s *Service) ScanAttendance(ctx context.Context, input ScanInput) (*ScanRes
 	}
 
 	return &ScanResult{
-		Status:    status,
-		ScannedAt: serverTime,
-		Distance:  distance,
-		Message:   s.getStatusMessage(status),
+		Status:       status,
+		ScannedAt:    serverTime,
+		Distance:     distance,
+		Message:      s.getStatusMessage(status),
+		LessonTitle:  lesson.Title,
+		LocationName: lesson.LocationName,
 	}, nil
 }
 

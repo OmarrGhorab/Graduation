@@ -89,9 +89,53 @@ export const setupAttendanceHandlers = () => {
         }
     });
 
-    // Absence Reviewed — notify student of the outcome
-    registerHandler('courses.absence.reviewed.v1', async (_envelope: EventEnvelope<any>) => {
-        // TODO: notify student when payload includes student_id and outcome
+    // Absence Reviewed — notify student of the outcome, and CC parents
+    registerHandler('courses.absence.reviewed.v1', async (envelope: EventEnvelope<any>) => {
+        const {
+            request_id, student_id, lesson_id, course_id,
+            lesson_title, status, response_note
+        } = envelope.payload;
+
+        if (!student_id) {
+            console.warn('[AttendanceHandler] courses.absence.reviewed.v1 missing student_id — skipping');
+            return;
+        }
+
+        const isApproved = (status as string).toUpperCase() === 'APPROVED';
+        const statusLabel = isApproved ? 'approved' : 'rejected';
+        const lessonLabel = lesson_title || 'a lesson';
+
+        const studentTitle = isApproved
+            ? 'Absence Excuse Approved ✅'
+            : 'Absence Excuse Rejected';
+        const studentBody = isApproved
+            ? `Your absence excuse for "${lessonLabel}" has been approved. Your attendance has been updated to Excused.`
+            : `Your absence excuse for "${lessonLabel}" was not approved.${response_note ? ` Note: ${response_note}` : ''}`;
+
+        // 1. Notify the student
+        await publishNotification(student_id, {
+            type: 'ATTENDANCE_STATUS_UPDATE',
+            title: studentTitle,
+            body: studentBody,
+            data: { request_id, lesson_id, course_id, status },
+        });
+
+        // 2. Notify parents
+        const parents = await getParentsOfStudent(student_id);
+        const parentBody = isApproved
+            ? `Your child's absence excuse for "${lessonLabel}" has been approved.`
+            : `Your child's absence excuse for "${lessonLabel}" was not approved.${response_note ? ` Note: ${response_note}` : ''}`;
+
+        for (const parent of parents) {
+            await publishNotification(parent.id, {
+                type: 'ABSENCE_REQUEST_PARENT',
+                title: `Child Absence Excuse ${isApproved ? 'Approved' : 'Rejected'}`,
+                body: parentBody,
+                data: { request_id, lesson_id, course_id, status, child_id: student_id },
+            });
+        }
+
+        console.log(`[AttendanceHandler] Absence ${statusLabel} notification sent to student ${student_id} and ${parents.length} parent(s)`);
     });
 
     // Attendance Fraud Detected

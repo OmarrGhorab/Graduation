@@ -78,3 +78,15 @@ func (r *AbsenceRequestRepository) GetByStudentIDs(ctx context.Context, studentI
 		Find(&requests).Error
 	return requests, err
 }
+
+func (r *AbsenceRequestRepository) GetPendingByLessonIDs(ctx context.Context, lessonIDs []uuid.UUID) ([]absence.AbsenceRequest, error) {
+	if len(lessonIDs) == 0 {
+		return []absence.AbsenceRequest{}, nil
+	}
+	var requests []absence.AbsenceRequest
+	err := r.db.WithContext(ctx).
+		Where("lesson_id IN ? AND status = 'PENDING'", lessonIDs).
+		Order("created_at DESC").
+		Find(&requests).Error
+	return requests, err
+}
