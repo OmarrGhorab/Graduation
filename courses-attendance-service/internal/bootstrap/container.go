@@ -222,6 +222,7 @@ func (c *Container) initServices() {
 		c.AuthClient,
 		c.EventDispatcher,
 		c.Clock,
+		c.ProgressService,
 	)
 
 	c.CalendarService = calendarApp.NewService(

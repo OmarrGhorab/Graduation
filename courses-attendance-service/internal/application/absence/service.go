@@ -11,6 +11,7 @@ import (
 	"github.com/OmarrGhorab/courses-attendance-service/internal/infrastructure/clock"
 	"github.com/OmarrGhorab/courses-attendance-service/internal/infrastructure/notificationevents"
 	"github.com/OmarrGhorab/courses-attendance-service/internal/infrastructure/persistence/postgres"
+	progressApp "github.com/OmarrGhorab/courses-attendance-service/internal/application/progress"
 	"github.com/google/uuid"
 )
 
@@ -26,13 +27,14 @@ var (
 
 // Service handles absence request logic
 type Service struct {
-	absenceRepo *postgres.AbsenceRequestRepository
-	recordRepo  *postgres.AttendanceRecordRepository
-	lessonRepo  *postgres.LessonRepository
-	courseRepo  *postgres.CourseRepository
-	authClient  *authclient.Client
-	events      *notificationevents.EventDispatcher
-	clock       clock.Clock
+	absenceRepo     *postgres.AbsenceRequestRepository
+	recordRepo      *postgres.AttendanceRecordRepository
+	lessonRepo      *postgres.LessonRepository
+	courseRepo      *postgres.CourseRepository
+	authClient      *authclient.Client
+	events          *notificationevents.EventDispatcher
+	clock           clock.Clock
+	progressService *progressApp.Service
 }
 
 type EnrichedAbsenceRequest struct {
@@ -95,15 +97,17 @@ func NewService(
 	authClient *authclient.Client,
 	events *notificationevents.EventDispatcher,
 	clk clock.Clock,
+	progressService *progressApp.Service,
 ) *Service {
 	return &Service{
-		absenceRepo: absenceRepo,
-		recordRepo:  recordRepo,
-		lessonRepo:  lessonRepo,
-		courseRepo:  courseRepo,
-		authClient:  authClient,
-		events:      events,
-		clock:       clk,
+		absenceRepo:     absenceRepo,
+		recordRepo:      recordRepo,
+		lessonRepo:      lessonRepo,
+		courseRepo:      courseRepo,
+		authClient:      authClient,
+		events:          events,
+		clock:           clk,
+		progressService: progressService,
 	}
 }
 
@@ -288,7 +292,7 @@ func (s *Service) RespondToRequest(ctx context.Context, input RespondRequestInpu
 		ResponseNote: input.ResponseNote,
 	})
 
-	// If approved, update the attendance record to EXCUSED
+	// If approved, update the attendance record to EXCUSED and recompute progress
 	if status == absenceDomain.AbsenceStatusApproved {
 		record, err := s.recordRepo.GetByLessonAndStudent(ctx, req.LessonID, req.StudentID)
 		if err == nil && record != nil {
@@ -306,6 +310,11 @@ func (s *Service) RespondToRequest(ctx context.Context, input RespondRequestInpu
 				UpdatedAt: now,
 			}
 			s.recordRepo.Upsert(ctx, newRecord)
+		}
+
+		// Recompute and persist the progress snapshot immediately
+		if s.progressService != nil && courseID != uuid.Nil {
+			go s.progressService.RecomputeProgress(context.Background(), courseID, req.StudentID)
 		}
 	}
 

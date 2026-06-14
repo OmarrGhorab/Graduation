@@ -125,12 +125,8 @@ func (s *Service) GetChildDetailedProgress(ctx context.Context, parentID, studen
 			continue
 		}
 
-		// Get progress snapshot
-		snapshot, err := s.progressService.GetStudentProgress(ctx, course.ID, studentID)
-		if err != nil || snapshot == nil {
-			// If no snapshot, try to recompute once or just use zeros
-			snapshot, _ = s.progressService.RecomputeProgress(ctx, course.ID, studentID)
-		}
+		// Always recompute from live attendance records so numbers are never stale
+		snapshot, _ := s.progressService.RecomputeProgress(ctx, course.ID, studentID)
 
 		cp := CourseProgress{
 			CourseID:    course.ID,
